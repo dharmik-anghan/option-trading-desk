@@ -16,6 +16,22 @@ Filled in as each concept is implemented.
 - **Max profit / max loss / breakeven** — computed in
   `analytics/payoff.analyze()` from each leg's intrinsic value at expiry,
   since no broker computes this for a multi-leg combination. Unbounded
-  outcomes (e.g. a naked short strangle's max loss) are represented as
-  `+/-math.inf` rather than a large number, so callers can't mistake an
-  unbounded risk for a capped one.
+  outcomes are represented as `+/-math.inf` rather than a large number, so
+  callers can't mistake an unbounded risk for a capped one. Note: a naked
+  short *call* has genuinely unbounded max loss (no ceiling on the
+  underlying); a naked short *put*'s max loss is large but finite, bounded
+  at the underlying price hitting 0 — don't conflate the two.
+- **Required margin** — **known gap**: Fyers' Python SDK (`fyers-apiv3`)
+  exposes account funds (`Broker.get_funds`) but no pre-trade SPAN/exposure
+  margin calculator. `risk/margin.check_sufficient_margin` takes
+  `required_margin` as a caller-supplied number, not something computed from
+  a real margin API. Needs either a manual estimate, Fyers' margin
+  calculator via a different (undocumented-in-SDK) endpoint, or a
+  multi-broker margin API before Phase 5's confirm screen can show a real
+  figure — currently a placeholder (see `scripts/pre_trade_check.py`).
+- **Portfolio Delta/Gamma/Theta/Vega** — aggregated in
+  `risk/portfolio_greeks.aggregate_portfolio_greeks()` across a strategy's
+  legs. A bought leg contributes its own Greeks x quantity; a sold leg
+  contributes the negative (you're short that exposure — e.g. a sold
+  option's theta becomes a *positive* contribution, since time decay works
+  in your favor when short).

@@ -14,6 +14,7 @@ import pytest
 from broker.fyers import (
     FyersApiError,
     parse_candles,
+    parse_funds,
     parse_option_chain,
     parse_quotes,
 )
@@ -75,3 +76,18 @@ def test_parse_candles_returns_chronological_candles() -> None:
     assert candles[0].open == pytest.approx(23576.15)
     timestamps = [c.timestamp for c in candles]
     assert timestamps == sorted(timestamps)
+
+
+def test_parse_funds_extracts_balances_by_title() -> None:
+    raw = load_fixture("fyers_funds.json")
+
+    funds = parse_funds(raw)
+
+    assert funds.total_balance == pytest.approx(160273.03)
+    assert funds.utilized_margin == pytest.approx(84049.94)
+    assert funds.available_balance == pytest.approx(76223.09)
+
+
+def test_parse_funds_raises_on_error_response() -> None:
+    with pytest.raises(FyersApiError):
+        parse_funds({"s": "error", "code": -1, "message": "boom"})

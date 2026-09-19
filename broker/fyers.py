@@ -14,7 +14,7 @@ from typing import Any
 from fyers_apiv3 import fyersModel
 
 from broker.base import Broker
-from broker.models import Candle, Greeks, OptionChain, OptionChainRow, Quote
+from broker.models import Candle, Funds, Greeks, OptionChain, OptionChainRow, Quote
 
 
 class FyersApiError(RuntimeError):
@@ -91,6 +91,26 @@ def parse_candles(raw: dict[str, Any]) -> list[Candle]:
     ]
 
 
+_FUND_TITLES = {
+    "Total Balance": "total_balance",
+    "Utilized Amount": "utilized_margin",
+    "Available Balance": "available_balance",
+}
+
+
+def parse_funds(raw: dict[str, Any]) -> Funds:
+    _check_ok(raw)
+    values: dict[str, float] = {}
+    for entry in raw["fund_limit"]:
+        field = _FUND_TITLES.get(entry["title"])
+        if field is not None:
+            values[field] = entry["equityAmount"]
+    missing = _FUND_TITLES.values() - values.keys()
+    if missing:
+        raise FyersApiError(f"Funds response missing expected fields: {missing}")
+    return Funds(**values)
+
+
 class FyersBroker(Broker):
     def __init__(self, client_id: str, access_token: str) -> None:
         self._client = fyersModel.FyersModel(
@@ -126,6 +146,10 @@ class FyersBroker(Broker):
             }
         )
         return parse_candles(raw)
+
+    def get_funds(self) -> Funds:
+        raw = self._client.funds()
+        return parse_funds(raw)
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:
         raise NotImplementedError("WebSocket tick streaming lands later in Phase 1")

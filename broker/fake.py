@@ -11,12 +11,22 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
 from broker.base import Broker
-from broker.models import Candle, Greeks, OptionChain, OptionChainRow, Quote
+from broker.models import Candle, Funds, Greeks, OptionChain, OptionChainRow, Quote
 
 
 class FakeBroker(Broker):
-    def __init__(self, underlying_ltp: float = 23350.0) -> None:
+    def __init__(
+        self, underlying_ltp: float = 23350.0, available_balance: float = 100000.0
+    ) -> None:
         self.underlying_ltp = underlying_ltp
+        self.available_balance = available_balance
+
+    def get_funds(self) -> Funds:
+        return Funds(
+            total_balance=self.available_balance,
+            utilized_margin=0.0,
+            available_balance=self.available_balance,
+        )
 
     def get_quote(self, symbols: list[str]) -> dict[str, Quote]:
         now = datetime.now(UTC)

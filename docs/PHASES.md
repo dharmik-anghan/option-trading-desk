@@ -60,8 +60,26 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     three strategies from a real live Nifty option chain and printed
     correct legs/max-profit/max-loss/breakevens (short strangle correctly
     showed `-inf` max loss; the other two showed finite bounded numbers)
-- [ ] **Phase 4 — Risk management**
-  - Margin checks, position sizing, max loss, portfolio Greeks, kill-switch
+- [x] **Phase 4 — Risk management** — done
+  - Known gap: Fyers' SDK has no pre-trade SPAN/exposure margin calculator,
+    only account funds. `required_margin` is caller-supplied throughout,
+    not computed from a real margin API. See `docs/GLOSSARY.md`.
+  - [x] `Broker.get_funds()` added (real account balances) + `FyersBroker`/
+    `FakeBroker` implementations, tested against a real recorded funds
+    fixture (`tests/broker/fixtures/fyers_funds.json`)
+  - [x] `risk/margin.py` — `check_sufficient_margin`
+  - [x] `risk/sizing.py` — `max_quantity_for_risk`; correctly returns 0 for
+    unbounded (`math.inf`) risk rather than a misleading finite number
+  - [x] `risk/limits.py` — `check_max_loss_limit` (per-trade),
+    `check_daily_kill_switch` (takes today's P&L as input; Phase 6 computes
+    that number for real)
+  - [x] `risk/portfolio_greeks.py` — `aggregate_portfolio_greeks`: bought
+    legs contribute their own Greeks, sold legs the negative (short theta
+    becomes a positive portfolio contribution)
+  - [x] `risk/pre_trade_check.py` — `run_pre_trade_checks` ties margin +
+    max-loss + sizing into the one gate Phase 5's confirm screen will call
+  - [x] Checkpoint: `uv run python scripts/pre_trade_check.py` ran the full
+    gate against a real live option chain and real account funds
 - [ ] **Phase 5 — Semi-auto execution**
   - Scanner + CLI confirm-then-place flow via `ExecutionManager`
   - Checkpoint: one real small-lot order placed and reconciled

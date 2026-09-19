@@ -56,6 +56,12 @@ class OptionChain(BaseModel):
     rows: list[OptionChainRow]
 
 
+class Funds(BaseModel):
+    total_balance: float
+    utilized_margin: float
+    available_balance: float
+
+
 class Candle(BaseModel):
     timestamp: datetime
     open: float

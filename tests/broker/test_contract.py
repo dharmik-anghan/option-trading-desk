@@ -13,7 +13,7 @@ import pytest
 
 from broker.base import Broker
 from broker.fake import FakeBroker
-from broker.models import Candle, OptionChain, Quote
+from broker.models import Candle, Funds, OptionChain, Quote
 
 
 @pytest.fixture(params=[FakeBroker])
@@ -26,6 +26,13 @@ def test_get_quote_returns_quote_per_symbol(broker_under_test: Broker) -> None:
 
     assert set(result.keys()) == {"NSE:NIFTY50-INDEX"}
     assert isinstance(result["NSE:NIFTY50-INDEX"], Quote)
+
+
+def test_get_funds_returns_funds(broker_under_test: Broker) -> None:
+    funds = broker_under_test.get_funds()
+
+    assert isinstance(funds, Funds)
+    assert funds.available_balance >= 0
 
 
 def test_get_option_chain_returns_rows_for_both_option_types(

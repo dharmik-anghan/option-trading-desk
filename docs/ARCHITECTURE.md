@@ -62,6 +62,32 @@ same behavior Fyers is, before it's ever wired into strategies.
 `NotImplementedError` for it — deferred until a real consumer needs live
 ticks (see `docs/PHASES.md`).
 
+## What's built (Phase 2 & 3)
+
+- `analytics/black_scholes.py` — dependency-free Black-Scholes pricer/Greeks,
+  a fallback for brokers that don't supply Greeks (Fyers does)
+- `analytics/payoff.py` — `Leg`/`analyze()`: max profit/loss/breakevens for
+  any multi-leg combination, from first principles (no broker computes this)
+- `strategies/base.py` — `Strategy` ABC: `build_legs(chain) -> list[Leg]`,
+  deliberately scoped to strike selection only (see `docs/PHASES.md` for why
+  entry conditions and exit/adjustment rules are deferred)
+- `strategies/selection.py`, `short_strangle.py`, `iron_condor.py`,
+  `credit_spread.py` — concrete strike selection + strategy definitions
+
+## What's built (Phase 4)
+
+- `broker/base.py` gained `get_funds() -> Funds` (real account balances) —
+  scope grows only as a phase needs it, not speculatively
+- `risk/result.py` — `RiskCheckResult`, the shared pass/fail + reason shape
+  every check in `risk/` returns
+- `risk/margin.py`, `risk/limits.py`, `risk/sizing.py`,
+  `risk/portfolio_greeks.py` — individually testable risk checks
+- `risk/pre_trade_check.py` — `run_pre_trade_checks()` composes the above
+  into the one gate Phase 5's confirm-before-order flow will call
+- **Known gap** (see `docs/GLOSSARY.md`): Fyers' SDK has no pre-trade margin
+  calculator, so `required_margin` is caller-supplied, not computed from a
+  real API, until that's resolved
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.
