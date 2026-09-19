@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import BaseModel
 
 OptionType = Literal["CE", "PE"]
+Side = Literal["BUY", "SELL"]
+OrderType = Literal["MARKET", "LIMIT"]
 
 
 class Greeks(BaseModel):
@@ -69,3 +71,26 @@ class Candle(BaseModel):
     low: float
     close: float
     volume: int
+
+
+class OrderRequest(BaseModel):
+    symbol: str
+    quantity: int
+    side: Side
+    order_type: OrderType = "MARKET"
+    limit_price: float = 0.0
+    product_type: str = "MARGIN"
+
+
+class OrderResult(BaseModel):
+    order_id: str
+    message: str
+
+
+class Position(BaseModel):
+    symbol: str
+    net_quantity: int
+    average_price: float
+    ltp: float
+    unrealized_pnl: float
+    product_type: str

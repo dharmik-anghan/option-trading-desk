@@ -6,9 +6,8 @@ second broker later a matter of writing one new adapter file, not touching
 anything above it.
 
 Scope grows only as a phase actually needs it: market data (Phase 1),
-account funds for margin checks (Phase 4). Order placement and positions
-are added in Phase 5 when execution actually needs them, not speculatively
-now.
+account funds for margin checks (Phase 4), order placement and positions
+for execution (Phase 5).
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Protocol
 
-from broker.models import Candle, Funds, OptionChain, Quote
+from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
 
 
 class Broker(Protocol):
@@ -41,4 +40,12 @@ class Broker(Protocol):
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:
         """Stream live quotes for `symbols`, calling `on_tick` for each update."""
+        ...
+
+    def place_order(self, order: OrderRequest) -> OrderResult:
+        """Place a real order. Irreversible - callers must confirm before calling this."""
+        ...
+
+    def get_positions(self) -> list[Position]:
+        """Fetch currently open (non-zero net quantity) positions."""
         ...

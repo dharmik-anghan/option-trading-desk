@@ -30,6 +30,7 @@ class ShortStrangle(Strategy):
                 premium=call_row.ltp,
                 quantity=self.quantity,
                 side="SELL",
+                symbol=call_row.symbol,
             ),
             Leg(
                 option_type="PE",
@@ -37,5 +38,6 @@ class ShortStrangle(Strategy):
                 premium=put_row.ltp,
                 quantity=self.quantity,
                 side="SELL",
+                symbol=put_row.symbol,
             ),
         ]

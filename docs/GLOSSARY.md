@@ -35,3 +35,10 @@ Filled in as each concept is implemented.
   contributes the negative (you're short that exposure — e.g. a sold
   option's theta becomes a *positive* contribution, since time decay works
   in your favor when short).
+- **Order type** — `execution/manager.ExecutionManager` always places
+  `MARKET` orders (immediate execution at the best available price), not
+  `LIMIT`. Simplest choice for the Phase 5 checkpoint; means each leg of a
+  multi-leg strategy can fill at a slightly different price than the
+  chain snapshot showed (slippage), and legs aren't filled atomically as a
+  single combo order. Revisit if slippage across legs turns out to matter
+  in practice.

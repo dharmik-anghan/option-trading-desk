@@ -14,7 +14,17 @@ from typing import Any
 from fyers_apiv3 import fyersModel
 
 from broker.base import Broker
-from broker.models import Candle, Funds, Greeks, OptionChain, OptionChainRow, Quote
+from broker.models import (
+    Candle,
+    Funds,
+    Greeks,
+    OptionChain,
+    OptionChainRow,
+    OrderRequest,
+    OrderResult,
+    Position,
+    Quote,
+)
 
 
 class FyersApiError(RuntimeError):
@@ -111,6 +121,40 @@ def parse_funds(raw: dict[str, Any]) -> Funds:
     return Funds(**values)
 
 
+def _check_order_ok(raw: dict[str, Any]) -> None:
+    """Order-related endpoints signal success via `s == "ok"` with a
+    response-specific `code` (e.g. 1101), not the `code == 200` convention
+    the data endpoints use - so this can't reuse `_check_ok`.
+    """
+    if raw.get("s") != "ok":
+        raise FyersApiError(f"Fyers API error: {raw.get('message') or raw}")
+
+
+def parse_place_order(raw: dict[str, Any]) -> OrderResult:
+    _check_order_ok(raw)
+    return OrderResult(order_id=str(raw["id"]), message=raw.get("message", ""))
+
+
+def parse_positions(raw: dict[str, Any]) -> list[Position]:
+    _check_ok(raw)
+    return [
+        Position(
+            symbol=p["symbol"],
+            net_quantity=p["netQty"],
+            average_price=p["netAvg"],
+            ltp=p["ltp"],
+            unrealized_pnl=p["unrealized_profit"],
+            product_type=p["productType"],
+        )
+        for p in raw["netPositions"]
+        if p["netQty"] != 0
+    ]
+
+
+_ORDER_SIDE = {"BUY": 1, "SELL": -1}
+_ORDER_TYPE = {"MARKET": 2, "LIMIT": 1}
+
+
 class FyersBroker(Broker):
     def __init__(self, client_id: str, access_token: str) -> None:
         self._client = fyersModel.FyersModel(
@@ -150,6 +194,27 @@ class FyersBroker(Broker):
     def get_funds(self) -> Funds:
         raw = self._client.funds()
         return parse_funds(raw)
+
+    def place_order(self, order: OrderRequest) -> OrderResult:
+        raw = self._client.place_order(
+            data={
+                "symbol": order.symbol,
+                "qty": order.quantity,
+                "type": _ORDER_TYPE[order.order_type],
+                "side": _ORDER_SIDE[order.side],
+                "productType": order.product_type,
+                "limitPrice": order.limit_price,
+                "stopPrice": 0,
+                "validity": "DAY",
+                "disclosedQty": 0,
+                "offlineOrder": False,
+            }
+        )
+        return parse_place_order(raw)
+
+    def get_positions(self) -> list[Position]:
+        raw = self._client.positions()
+        return parse_positions(raw)
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:
         raise NotImplementedError("WebSocket tick streaming lands later in Phase 1")

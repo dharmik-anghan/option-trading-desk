@@ -1,8 +1,14 @@
 """Contract tests every `Broker` implementation must satisfy.
 
-Run against `FakeBroker` here. When a second real broker adapter is added
-later, it gets parametrized into `broker_under_test` too — proving Liskov
+Run against `FakeBroker` here. When a second broker adapter is added later,
+it gets parametrized into `broker_under_test` too — proving Liskov
 substitution rather than just asserting it in a docstring.
+
+CAUTION: `test_place_order_returns_order_result` calls `place_order` for
+real on whatever's in `broker_under_test`. Never add `FyersBroker` (or any
+other broker hitting a real, non-sandboxed account) to that fixture's
+`params` without first excluding this test or pointing it at a paper/sandbox
+account - otherwise running the suite places a real order.
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ import pytest
 
 from broker.base import Broker
 from broker.fake import FakeBroker
-from broker.models import Candle, Funds, OptionChain, Quote
+from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
 
 
 @pytest.fixture(params=[FakeBroker])
@@ -66,3 +72,18 @@ def test_subscribe_ticks_invokes_callback(broker_under_test: Broker) -> None:
 
     assert len(received) >= 1
     assert received[0].symbol == "NSE:NIFTY50-INDEX"
+
+
+def test_get_positions_returns_positions(broker_under_test: Broker) -> None:
+    positions = broker_under_test.get_positions()
+
+    assert all(isinstance(p, Position) for p in positions)
+
+
+def test_place_order_returns_order_result(broker_under_test: Broker) -> None:
+    order = OrderRequest(symbol="NSE:NIFTY50-INDEX", quantity=1, side="BUY")
+
+    result = broker_under_test.place_order(order)
+
+    assert isinstance(result, OrderResult)
+    assert result.order_id

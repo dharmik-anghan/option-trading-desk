@@ -12,11 +12,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
 
-from broker.models import OptionType
-
-Side = Literal["BUY", "SELL"]
+from broker.models import OptionType, Side
 
 
 @dataclass(frozen=True)
@@ -26,6 +23,10 @@ class Leg:
     premium: float
     quantity: int
     side: Side
+    # The broker-tradable symbol (e.g. from OptionChainRow.symbol). Optional
+    # because payoff math doesn't need it - only execution/ does, to place a
+    # real order. Kept optional so pure payoff tests don't need a real chain.
+    symbol: str | None = None
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,8 @@ def test_short_strangle_sells_both_sides_at_target_delta(sample_chain: OptionCha
     assert put_leg.strike == 80
     assert put_leg.side == "SELL"
     assert put_leg.quantity == 2
+    assert call_leg.symbol == "TEST-120-CE"
+    assert put_leg.symbol == "TEST-80-PE"
 
 
 def test_short_strangle_default_quantity_is_one(sample_chain: OptionChain) -> None:

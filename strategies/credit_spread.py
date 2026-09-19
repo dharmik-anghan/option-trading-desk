@@ -37,6 +37,7 @@ class CreditSpread(Strategy):
                 premium=short_row.ltp,
                 quantity=self.quantity,
                 side="SELL",
+                symbol=short_row.symbol,
             ),
             Leg(
                 option_type=option_type,
@@ -44,5 +45,6 @@ class CreditSpread(Strategy):
                 premium=long_row.ltp,
                 quantity=self.quantity,
                 side="BUY",
+                symbol=long_row.symbol,
             ),
         ]

@@ -88,6 +88,24 @@ ticks (see `docs/PHASES.md`).
   calculator, so `required_margin` is caller-supplied, not computed from a
   real API, until that's resolved
 
+## What's built (Phase 5)
+
+- `analytics/payoff.Leg` gained an optional `symbol` field, populated by
+  strategies from the chain row - payoff math itself doesn't need it, only
+  `execution/` does, to place a real order
+- `broker/base.py` gained `place_order()`/`get_positions()`
+- `execution/manager.py` — `ExecutionManager`: the *only* code allowed to
+  call `Broker.place_order`, converting `Leg`s to `OrderRequest`s
+- `execution/confirm.py` — `confirm_and_place`: the human-in-the-loop gate.
+  Requires the exact string `CONFIRM`; never even prompts if Phase 4's
+  pre-trade checks failed. The `confirm` callable is injected so this whole
+  flow is unit-testable without a real terminal
+- `scripts/place_strategy_order.py` — the end-to-end CLI: fetch chain, build
+  strategy, run pre-trade checks, confirm, place, reconcile against
+  `get_positions()`
+- Scope note: no multi-strategy "scanner" yet — one strategy/symbol per run.
+  See `docs/PHASES.md` for why.
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

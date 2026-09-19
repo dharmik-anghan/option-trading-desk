@@ -80,9 +80,37 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     max-loss + sizing into the one gate Phase 5's confirm screen will call
   - [x] Checkpoint: `uv run python scripts/pre_trade_check.py` ran the full
     gate against a real live option chain and real account funds
-- [ ] **Phase 5 — Semi-auto execution**
-  - Scanner + CLI confirm-then-place flow via `ExecutionManager`
-  - Checkpoint: one real small-lot order placed and reconciled
+- [~] **Phase 5 — Semi-auto execution** — code done, live checkpoint pending
+  - Scope note: no separate multi-strategy "scanner" was built. The CLI
+    script takes one strategy + symbol at a time rather than scanning many
+    strategies for candidate signals automatically - that's a real feature
+    gap vs. the original plan, not yet needed since nothing today generates
+    multiple candidates to rank. Revisit once there's an actual need to
+    compare several strategies/symbols at once.
+  - Leg gained an optional `symbol` field (populated by strategies from the
+    chain row) so `execution/` can actually place an order for it - payoff
+    math itself still doesn't need it, kept optional for that reason.
+  - `Broker` gained `place_order()`/`get_positions()`, tested against a
+    real-schema-based fixture for positions and a fixture built from Fyers'
+    publicly documented place-order response (not a live capture - that
+    would mean placing a real order just to record a fixture).
+  - [x] `execution/manager.py` — `ExecutionManager`: the only code allowed
+    to call `Broker.place_order`; converts `Leg`s to `OrderRequest`s
+  - [x] `execution/confirm.py` — `confirm_and_place`: the human-in-the-loop
+    gate. Never places an order without the exact string `CONFIRM`, and
+    never even prompts if the Phase 4 pre-trade checks failed. The
+    `confirm` callable is injected so this is fully unit-testable without a
+    real terminal - see `tests/execution/test_confirm.py`, including a test
+    that asserts the confirm function is *never called* when checks fail.
+  - [x] `scripts/place_strategy_order.py` — ties chain fetch, strategy,
+    pre-trade checks, confirm, and post-order position reconciliation
+    together. Dry-run verified against real Fyers data (real funds, real
+    option chain, real risk checks) with a deliberate non-CONFIRM answer -
+    correctly aborted with zero orders placed.
+  - [ ] Checkpoint: **you** run `scripts/place_strategy_order.py`
+    interactively and type `CONFIRM` yourself to place one real small-lot
+    order, since that's your money and your call to make - not something
+    to automate away. See docs/SETUP.md for guidance.
 - [ ] **Phase 6 — Position/P&L tracking + minimal dashboard**
 
 **Deferred:** multi-broker adapters, backtesting engine, full automation.

@@ -33,6 +33,7 @@ class IronCondor(Strategy):
                 premium=short_call.ltp,
                 quantity=self.quantity,
                 side="SELL",
+                symbol=short_call.symbol,
             ),
             Leg(
                 option_type="CE",
@@ -40,6 +41,7 @@ class IronCondor(Strategy):
                 premium=long_call.ltp,
                 quantity=self.quantity,
                 side="BUY",
+                symbol=long_call.symbol,
             ),
             Leg(
                 option_type="PE",
@@ -47,6 +49,7 @@ class IronCondor(Strategy):
                 premium=short_put.ltp,
                 quantity=self.quantity,
                 side="SELL",
+                symbol=short_put.symbol,
             ),
             Leg(
                 option_type="PE",
@@ -54,5 +57,6 @@ class IronCondor(Strategy):
                 premium=long_put.ltp,
                 quantity=self.quantity,
                 side="BUY",
+                symbol=long_put.symbol,
             ),
         ]

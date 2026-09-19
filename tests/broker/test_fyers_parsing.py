@@ -16,6 +16,8 @@ from broker.fyers import (
     parse_candles,
     parse_funds,
     parse_option_chain,
+    parse_place_order,
+    parse_positions,
     parse_quotes,
 )
 
@@ -91,3 +93,41 @@ def test_parse_funds_extracts_balances_by_title() -> None:
 def test_parse_funds_raises_on_error_response() -> None:
     with pytest.raises(FyersApiError):
         parse_funds({"s": "error", "code": -1, "message": "boom"})
+
+
+def test_parse_place_order_extracts_order_id() -> None:
+    # Built from Fyers' publicly documented place-order response format
+    # (not a live capture - that would mean placing a real order just to
+    # record a fixture).
+    raw = load_fixture("fyers_place_order_response.json")
+
+    result = parse_place_order(raw)
+
+    assert result.order_id == "24101300025444"
+    assert "submitted" in result.message.lower()
+
+
+def test_parse_place_order_raises_on_error_response() -> None:
+    with pytest.raises(FyersApiError):
+        parse_place_order({"s": "error", "code": -1, "message": "boom"})
+
+
+def test_parse_positions_returns_only_open_positions() -> None:
+    # Synthetic fixture matching the real Fyers positions schema (not the
+    # account's actual real positions, to avoid checking in real financial
+    # data - see the schema captured live during development).
+    raw = load_fixture("fyers_positions.json")
+
+    positions = parse_positions(raw)
+
+    assert len(positions) == 1  # the netQty=0 (flat) entry is filtered out
+    position = positions[0]
+    assert position.symbol == "NSE:NIFTY2692223500CE"
+    assert position.net_quantity == -50
+    assert position.average_price == pytest.approx(40.5)
+    assert position.unrealized_pnl == pytest.approx(125.0)
+
+
+def test_parse_positions_raises_on_error_response() -> None:
+    with pytest.raises(FyersApiError):
+        parse_positions({"s": "error", "code": -1, "message": "boom"})

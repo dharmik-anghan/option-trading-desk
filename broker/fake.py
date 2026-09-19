@@ -11,15 +11,31 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
 from broker.base import Broker
-from broker.models import Candle, Funds, Greeks, OptionChain, OptionChainRow, Quote
+from broker.models import (
+    Candle,
+    Funds,
+    Greeks,
+    OptionChain,
+    OptionChainRow,
+    OrderRequest,
+    OrderResult,
+    Position,
+    Quote,
+)
 
 
 class FakeBroker(Broker):
     def __init__(
-        self, underlying_ltp: float = 23350.0, available_balance: float = 100000.0
+        self,
+        underlying_ltp: float = 23350.0,
+        available_balance: float = 100000.0,
+        positions: list[Position] | None = None,
     ) -> None:
         self.underlying_ltp = underlying_ltp
         self.available_balance = available_balance
+        self.positions = positions or []
+        self.placed_orders: list[OrderRequest] = []
+        self._next_order_id = 1
 
     def get_funds(self) -> Funds:
         return Funds(
@@ -27,6 +43,15 @@ class FakeBroker(Broker):
             utilized_margin=0.0,
             available_balance=self.available_balance,
         )
+
+    def place_order(self, order: OrderRequest) -> OrderResult:
+        self.placed_orders.append(order)
+        order_id = str(self._next_order_id)
+        self._next_order_id += 1
+        return OrderResult(order_id=order_id, message="Order submitted successfully (fake)")
+
+    def get_positions(self) -> list[Position]:
+        return self.positions
 
     def get_quote(self, symbols: list[str]) -> dict[str, Quote]:
         now = datetime.now(UTC)
