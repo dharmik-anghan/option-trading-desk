@@ -19,9 +19,13 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import set_key
 from fyers_apiv3 import fyersModel
 
-from settings import load_settings
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+from settings import load_settings  # noqa: E402
+
+ENV_PATH = REPO_ROOT / ".env"
 
 
 def extract_auth_code(raw: str) -> str:

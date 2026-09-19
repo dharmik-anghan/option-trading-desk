@@ -7,10 +7,15 @@ result — a real network round trip against the live API, not a mock.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from fyers_apiv3 import fyersModel
 
-from settings import load_settings
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from settings import load_settings  # noqa: E402
 
 
 def main() -> int:
