@@ -24,17 +24,24 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     that first needs live ticks (likely Phase 5/6) implements it for real.
   - [x] Checkpoint: `uv run python scripts/fetch_option_chain.py` fetched a
     real Nifty option chain (42 strikes) and stored it to SQLite
-- [ ] **Phase 2 — Options analytics**
+- [x] **Phase 2 — Options analytics** — done
   - Note: Fyers' option chain already returns Delta/Gamma/Theta/Vega/IV per
     strike (`greeks=1` param, see `broker/fyers.py`), so `FyersBroker` doesn't
-    need us to compute them. A self-contained Black-Scholes/Greeks
-    implementation is still worth building for: (a) brokers that don't
-    supply Greeks once multi-broker support lands, and (b) payoff/max-loss/
-    breakeven calculations for multi-leg strategies, which no broker computes
-    for you. Prefer broker-supplied Greeks/IV when present; fall back to
-    self-computed ones otherwise.
-  - Black-Scholes pricer, Greeks, payoff/max-loss/breakeven calculator
-  - Checkpoint: Greeks match published reference values
+    need us to compute them. The self-contained Black-Scholes/Greeks
+    implementation below exists as: (a) a fallback for brokers that don't
+    supply Greeks once multi-broker support lands, and (b) the basis for
+    payoff/max-loss/breakeven math, which no broker computes for you. Prefer
+    broker-supplied Greeks/IV when present; fall back to self-computed ones
+    otherwise.
+  - [x] `analytics/black_scholes.py` — `price()`/`greeks()`, dependency-free
+    (plain `math`, no numpy/scipy — matches the lightweight stack decision).
+    Checkpoint: tested against Hull's textbook reference example (S=42,
+    K=40, r=10%, sigma=20%, T=0.5y) in `tests/analytics/test_black_scholes.py`,
+    not re-derived against itself
+  - [x] `analytics/payoff.py` — multi-leg `Leg`/`analyze()`: max profit, max
+    loss (including unbounded cases as `+/-math.inf`), and breakevens, tested
+    against hand-computed textbook strategies (long call, short put, bull
+    call spread, long straddle, iron condor) in `tests/analytics/test_payoff.py`
 - [ ] **Phase 3 — Strategy framework**
   - `Strategy` base class; short strangle, iron condor, credit spread
 - [ ] **Phase 4 — Risk management**
