@@ -1,0 +1,47 @@
+[project]
+name = "option-strategy"
+version = "0.1.0"
+description = "Personal semi-automated options trading desk (Fyers, multi-broker later)"
+requires-python = ">=3.12"
+dependencies = [
+    "fyers-apiv3>=3.1.7",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.11",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["broker", "analytics", "risk", "strategies", "storage", "execution", "scripts"]
+
+[[tool.mypy.overrides]]
+module = "fyers_apiv3.*"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["broker", "analytics", "risk", "strategies", "storage", "execution"]
