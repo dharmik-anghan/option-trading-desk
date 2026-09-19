@@ -42,8 +42,24 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     loss (including unbounded cases as `+/-math.inf`), and breakevens, tested
     against hand-computed textbook strategies (long call, short put, bull
     call spread, long straddle, iron condor) in `tests/analytics/test_payoff.py`
-- [ ] **Phase 3 — Strategy framework**
-  - `Strategy` base class; short strangle, iron condor, credit spread
+- [x] **Phase 3 — Strategy framework** — done
+  - Scope: "given a chain, which legs does this strategy trade" only.
+    Entry-condition evaluation (e.g. IV-percentile-based entries) needs
+    historical query logic not built yet; exit/adjustment rules need live
+    position state. Both deferred to Phase 4/5 rather than built as unused
+    hooks now.
+  - [x] `strategies/base.py` — `Strategy` ABC (`build_legs(chain) -> list[Leg]`)
+  - [x] `strategies/selection.py` — `select_by_delta`, `select_atm`, tested
+    against a fixed synthetic chain fixture (`tests/strategies/conftest.py`)
+  - [x] `strategies/short_strangle.py`, `iron_condor.py`, `credit_spread.py`
+    (bullish=bull put spread, bearish=bear call spread)
+  - [x] `tests/strategies/test_payoff_integration.py` — ties Phase 2 + 3
+    together: confirms the naked short strangle has unbounded max loss while
+    iron condor/credit spread are fully capped, using real `analyze()`
+  - [x] Checkpoint: `uv run python scripts/analyze_strategy.py` built all
+    three strategies from a real live Nifty option chain and printed
+    correct legs/max-profit/max-loss/breakevens (short strangle correctly
+    showed `-inf` max loss; the other two showed finite bounded numbers)
 - [ ] **Phase 4 — Risk management**
   - Margin checks, position sizing, max loss, portfolio Greeks, kill-switch
 - [ ] **Phase 5 — Semi-auto execution**

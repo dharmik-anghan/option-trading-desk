@@ -11,6 +11,8 @@ connectivity is proven before any broker/market-data code is written.
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import sys
 from pathlib import Path
@@ -42,6 +44,26 @@ def extract_auth_code(raw: str) -> str:
     return raw
 
 
+def jwt_subject(token: str) -> str | None:
+    """Best-effort peek at a Fyers JWT's `sub` claim, without verifying it.
+
+    Fyers issues JWTs at two stages: the auth_code (sub="auth_code") and the
+    real access_token (sub="access_token"). Used here only to catch, with a
+    clear error, the case where the exchange step didn't actually happen and
+    we're about to save the unexchanged auth_code as if it were the token.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    subject = payload.get("sub")
+    return subject if isinstance(subject, str) else None
+
+
 def main() -> int:
     settings = load_settings()
 
@@ -69,9 +91,22 @@ def main() -> int:
     session.set_token(auth_code)
     response = session.generate_token()
 
+    if response.get("s") != "ok":
+        print(f"Login failed. Fyers response: {response}", file=sys.stderr)
+        return 1
+
     access_token = response.get("access_token")
     if not access_token:
-        print(f"Login failed. Fyers response: {response}", file=sys.stderr)
+        print(f"Login failed - no access_token in response: {response}", file=sys.stderr)
+        return 1
+
+    subject = jwt_subject(access_token)
+    if subject != "access_token":
+        print(
+            "Login appeared to succeed but the returned token doesn't look like a real "
+            f"access token (sub={subject!r}). Not saving it. Full response: {response}",
+            file=sys.stderr,
+        )
         return 1
 
     set_key(str(ENV_PATH), "FYERS_ACCESS_TOKEN", access_token)
