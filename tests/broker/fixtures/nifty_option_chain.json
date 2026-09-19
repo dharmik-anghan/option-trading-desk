@@ -1,0 +1,364 @@
+{
+  "code": 200,
+  "data": {
+    "callOi": 159645070,
+    "expiryData": [
+      {
+        "date": "22-09-2026",
+        "expiry": "1790071800",
+        "expiry_flag": "W"
+      },
+      {
+        "date": "29-09-2026",
+        "expiry": "1790676600",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "06-10-2026",
+        "expiry": "1791281400",
+        "expiry_flag": "W"
+      },
+      {
+        "date": "13-10-2026",
+        "expiry": "1791886200",
+        "expiry_flag": "W"
+      },
+      {
+        "date": "19-10-2026",
+        "expiry": "1792404600",
+        "expiry_flag": "W"
+      },
+      {
+        "date": "27-10-2026",
+        "expiry": "1793095800",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "23-11-2026",
+        "expiry": "1795428600",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "29-12-2026",
+        "expiry": "1798539000",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "30-03-2027",
+        "expiry": "1806401400",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "29-06-2027",
+        "expiry": "1814263800",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "28-12-2027",
+        "expiry": "1829988600",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "27-06-2028",
+        "expiry": "1845713400",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "26-12-2028",
+        "expiry": "1861438200",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "26-06-2029",
+        "expiry": "1877163000",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "24-12-2029",
+        "expiry": "1892801400",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "25-06-2030",
+        "expiry": "1908612600",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "31-12-2030",
+        "expiry": "1924942200",
+        "expiry_flag": "M"
+      },
+      {
+        "date": "24-06-2031",
+        "expiry": "1940062200",
+        "expiry_flag": "M"
+      }
+    ],
+    "indiavixData": {
+      "ask": 0,
+      "bid": 0,
+      "description": "INDIAVIX-INDEX",
+      "ex_symbol": "INDIAVIX",
+      "exchange": "NSE",
+      "fyToken": "101000000026017",
+      "ltp": 11.39,
+      "ltpch": -0.9,
+      "ltpchp": -7.32,
+      "option_type": "",
+      "strike_price": -1,
+      "symbol": "NSE:INDIAVIX-INDEX"
+    },
+    "optionsChain": [
+      {
+        "ask": 0,
+        "bid": 0,
+        "description": "NIFTY50-INDEX",
+        "ex_symbol": "NIFTY",
+        "exchange": "NSE",
+        "fp": 23380,
+        "fpch": 46.6,
+        "fpchp": 0.2,
+        "fyToken": "101000000026000",
+        "ltp": 23346.4,
+        "ltpch": 75.8,
+        "ltpchp": 0.33,
+        "option_type": "",
+        "strike_price": -1,
+        "symbol": "NSE:NIFTY50-INDEX"
+      },
+      {
+        "ask": 48.85,
+        "bid": 48.5,
+        "fyToken": "101126092256984",
+        "ltp": 49.05,
+        "ltpch": -40.75,
+        "ltpchp": -45.38,
+        "oi": 6491680,
+        "oich": 1824480,
+        "oichp": 39.09,
+        "option_type": "PE",
+        "prev_oi": 4667200,
+        "strike_price": 23250,
+        "symbol": "NSE:NIFTY2692223250PE",
+        "volume": 184740075,
+        "greeks": {
+          "delta": -0.32,
+          "gamma": 0.0016,
+          "theta": -10.33,
+          "vega": 8.8,
+          "iv": 9.41
+        }
+      },
+      {
+        "ask": 152.5,
+        "bid": 151.6,
+        "fyToken": "101126092256983",
+        "ltp": 151.7,
+        "ltpch": 1.9,
+        "ltpchp": 1.27,
+        "oi": 1826890,
+        "oich": -1257490,
+        "oichp": -40.77,
+        "option_type": "CE",
+        "prev_oi": 3084380,
+        "strike_price": 23250,
+        "symbol": "NSE:NIFTY2692223250CE",
+        "volume": 95133155,
+        "greeks": {
+          "delta": 0.68,
+          "gamma": 0.0016,
+          "theta": -10.33,
+          "vega": 8.8,
+          "iv": 9.41
+        }
+      },
+      {
+        "ask": 64.35,
+        "bid": 64.1,
+        "fyToken": "101126092256994",
+        "ltp": 64.45,
+        "ltpch": -45.1,
+        "ltpchp": -41.17,
+        "oi": 12689820,
+        "oich": 5896800,
+        "oichp": 86.81,
+        "option_type": "PE",
+        "prev_oi": 6793020,
+        "strike_price": 23300,
+        "symbol": "NSE:NIFTY2692223300PE",
+        "volume": 460814445,
+        "greeks": {
+          "delta": -0.4,
+          "gamma": 0.0017,
+          "theta": -10.74,
+          "vega": 9.47,
+          "iv": 9.09
+        }
+      },
+      {
+        "ask": 117.95,
+        "bid": 117.65,
+        "fyToken": "101126092256985",
+        "ltp": 117.5,
+        "ltpch": -3.05,
+        "ltpchp": -2.53,
+        "oi": 7430215,
+        "oich": 825695,
+        "oichp": 12.5,
+        "option_type": "CE",
+        "prev_oi": 6604520,
+        "strike_price": 23300,
+        "symbol": "NSE:NIFTY2692223300CE",
+        "volume": 365840215,
+        "greeks": {
+          "delta": 0.6,
+          "gamma": 0.0017,
+          "theta": -10.74,
+          "vega": 9.47,
+          "iv": 9.09
+        }
+      },
+      {
+        "ask": 84.6,
+        "bid": 84.3,
+        "fyToken": "101126092256996",
+        "ltp": 84.65,
+        "ltpch": -48.45,
+        "ltpchp": -36.4,
+        "oi": 5145985,
+        "oich": 3560305,
+        "oichp": 224.53,
+        "option_type": "PE",
+        "prev_oi": 1585680,
+        "strike_price": 23350,
+        "symbol": "NSE:NIFTY2692223350PE",
+        "volume": 262208635,
+        "greeks": {
+          "delta": -0.49,
+          "gamma": 0.0018,
+          "theta": -10.77,
+          "vega": 9.76,
+          "iv": 8.85
+        }
+      },
+      {
+        "ask": 88.55,
+        "bid": 88.05,
+        "fyToken": "101126092256995",
+        "ltp": 88.05,
+        "ltpch": -6.55,
+        "ltpchp": -6.92,
+        "oi": 4964960,
+        "oich": 1483240,
+        "oichp": 42.6,
+        "option_type": "CE",
+        "prev_oi": 3481720,
+        "strike_price": 23350,
+        "symbol": "NSE:NIFTY2692223350CE",
+        "volume": 344365710,
+        "greeks": {
+          "delta": 0.51,
+          "gamma": 0.0018,
+          "theta": -10.77,
+          "vega": 9.76,
+          "iv": 8.85
+        }
+      },
+      {
+        "ask": 110.3,
+        "bid": 109.6,
+        "fyToken": "101126092257002",
+        "ltp": 110.3,
+        "ltpch": -50.5,
+        "ltpchp": -31.41,
+        "oi": 4787315,
+        "oich": 1807455,
+        "oichp": 60.66,
+        "option_type": "PE",
+        "prev_oi": 2979860,
+        "strike_price": 23400,
+        "symbol": "NSE:NIFTY2692223400PE",
+        "volume": 171277210,
+        "greeks": {
+          "delta": -0.58,
+          "gamma": 0.0018,
+          "theta": -10.39,
+          "vega": 9.54,
+          "iv": 8.73
+        }
+      },
+      {
+        "ask": 64.35,
+        "bid": 64,
+        "fyToken": "101126092256999",
+        "ltp": 64,
+        "ltpch": -8.4,
+        "ltpchp": -11.6,
+        "oi": 8797750,
+        "oich": 2274610,
+        "oichp": 34.87,
+        "option_type": "CE",
+        "prev_oi": 6523140,
+        "strike_price": 23400,
+        "symbol": "NSE:NIFTY2692223400CE",
+        "volume": 317461235,
+        "greeks": {
+          "delta": 0.42,
+          "gamma": 0.0018,
+          "theta": -10.39,
+          "vega": 9.54,
+          "iv": 8.73
+        }
+      },
+      {
+        "ask": 140.9,
+        "bid": 140.05,
+        "fyToken": "101126092257006",
+        "ltp": 140.3,
+        "ltpch": -52.35,
+        "ltpchp": -27.17,
+        "oi": 696605,
+        "oich": 83200,
+        "oichp": 13.56,
+        "option_type": "PE",
+        "prev_oi": 613405,
+        "strike_price": 23450,
+        "symbol": "NSE:NIFTY2692223450PE",
+        "volume": 43415775,
+        "greeks": {
+          "delta": -0.67,
+          "gamma": 0.0017,
+          "theta": -9.47,
+          "vega": 8.81,
+          "iv": 8.62
+        }
+      },
+      {
+        "ask": 44.95,
+        "bid": 44.6,
+        "fyToken": "101126092257003",
+        "ltp": 44.65,
+        "ltpch": -8.6,
+        "ltpchp": -16.15,
+        "oi": 3901820,
+        "oich": 424580,
+        "oichp": 12.21,
+        "option_type": "CE",
+        "prev_oi": 3477240,
+        "strike_price": 23450,
+        "symbol": "NSE:NIFTY2692223450CE",
+        "volume": 174010590,
+        "greeks": {
+          "delta": 0.33,
+          "gamma": 0.0017,
+          "theta": -9.47,
+          "vega": 8.81,
+          "iv": 8.62
+        }
+      }
+    ],
+    "putOi": 179648105
+  },
+  "message": "",
+  "s": "ok"
+}

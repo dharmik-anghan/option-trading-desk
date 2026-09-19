@@ -9,4 +9,7 @@ __pycache__/
 *.db
 *.sqlite3
 fyers_tokens/
+fyersApi.log
+fyersRequests.log
+data/
 .DS_Store

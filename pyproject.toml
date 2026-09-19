@@ -26,7 +26,17 @@ pythonpath = ["."]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["broker", "analytics", "risk", "strategies", "storage", "execution", "scripts"]
+files = [
+    "broker",
+    "analytics",
+    "risk",
+    "strategies",
+    "storage",
+    "execution",
+    "scripts",
+    "tests",
+    "settings.py",
+]
 
 [[tool.mypy.overrides]]
 module = "fyers_apiv3.*"

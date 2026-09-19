@@ -42,6 +42,26 @@ same behavior Fyers is, before it's ever wired into strategies.
 - **Dependency inversion**: the direction of dependency always points at the
   abstract interface, not the concrete broker.
 
+## What's built (Phase 1)
+
+- `broker/models.py` — broker-agnostic pydantic models (`Quote`, `OptionChain`,
+  `OptionChainRow`, `Greeks`, `Candle`)
+- `broker/base.py` — the `Broker` `Protocol`, scoped to what's needed so far
+  (quotes, option chain, history, tick subscription signature)
+- `broker/fake.py` — `FakeBroker`, an in-memory implementation used by
+  contract tests and by anything above `broker/` that wants to test without
+  network calls
+- `broker/fyers.py` — `FyersBroker`; parsing logic (`parse_quotes`,
+  `parse_option_chain`, `parse_candles`) is factored out as pure functions
+  tested against real recorded API responses in `tests/broker/fixtures/`
+- `storage/db.py` + `storage/option_chain_repo.py` — SQLite persistence for
+  timestamped option-chain snapshots, the basis for later historical
+  premium/IV comparisons
+
+`Broker.subscribe_ticks` is defined but `FyersBroker` raises
+`NotImplementedError` for it — deferred until a real consumer needs live
+ticks (see `docs/PHASES.md`).
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

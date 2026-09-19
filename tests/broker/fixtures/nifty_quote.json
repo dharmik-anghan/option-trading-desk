@@ -1,0 +1,36 @@
+{
+  "message": "",
+  "code": 200,
+  "d": [
+    {
+      "n": "NSE:NIFTY50-INDEX",
+      "v": {
+        "ask": 0,
+        "bid": 0,
+        "chp": 0.33,
+        "ch": 75.8,
+        "description": "NSE:NIFTY50-INDEX",
+        "exchange": "NSE",
+        "fyToken": "101000000026000",
+        "high_price": 23389.15,
+        "low_price": 23286.6,
+        "lp": 23346.4,
+        "open_price": 23334.7,
+        "original_name": "NSE:NIFTY50-INDEX",
+        "prev_close_price": 23270.6,
+        "short_name": "NIFTY50-INDEX",
+        "spread": 0,
+        "symbol": "NSE:NIFTY50-INDEX",
+        "tt": "1789776000",
+        "volume": 0,
+        "atp": 0,
+        "imbalance": 0,
+        "mkt_imbalance": 0,
+        "reference_price": 0,
+        "indicative_price": 0
+      },
+      "s": "ok"
+    }
+  ],
+  "s": "ok"
+}
