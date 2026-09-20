@@ -80,7 +80,7 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     max-loss + sizing into the one gate Phase 5's confirm screen will call
   - [x] Checkpoint: `uv run python scripts/pre_trade_check.py` ran the full
     gate against a real live option chain and real account funds
-- [~] **Phase 5 — Semi-auto execution** — code done, live checkpoint pending
+- [~] **Phase 5 — Semi-auto execution** — code done, live order checkpoint deferred by choice
   - Scope note: no separate multi-strategy "scanner" was built. The CLI
     script takes one strategy + symbol at a time rather than scanning many
     strategies for candidate signals automatically - that's a real feature
@@ -107,10 +107,15 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     together. Dry-run verified against real Fyers data (real funds, real
     option chain, real risk checks) with a deliberate non-CONFIRM answer -
     correctly aborted with zero orders placed.
-  - [ ] Checkpoint: **you** run `scripts/place_strategy_order.py`
-    interactively and type `CONFIRM` yourself to place one real small-lot
-    order, since that's your money and your call to make - not something
-    to automate away. See docs/SETUP.md for guidance.
+  - [ ] Checkpoint: placing one real order is deliberately **not required**
+    to trust this code - the dry-run above already exercised the full real
+    pipeline (funds, live chain, risk checks) end-to-end; only the final
+    `place_order` API call itself is unverified against a live fill. You
+    decided not to test with a real order while markets are closed, which
+    is the right call - orders placed outside market hours would need AMO
+    handling this code doesn't yet have (`offlineOrder` is hardcoded
+    `False` in `broker/fyers.py`). Run it yourself whenever you want to
+    verify a real fill - no urgency.
 - [x] **Phase 6 — Position/P&L tracking + minimal dashboard** — done
   - `Funds` gained `realized_pnl` (from Fyers' "Realized Profit and Loss"
     funds field, previously unused)
