@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { getStrategySignal, placeOrder, type StrategySignalResponse } from "../api";
+import {
+  getStrategySignal,
+  placeOrder,
+  type StrategySignalResponse,
+} from "../api";
+import { PayoffChart } from "./PayoffChart";
 
 const STRATEGIES = [
   "short_strangle",
@@ -75,8 +80,8 @@ export function StrategyPanel() {
       {signal && (
         <div>
           <p className="signal-heading">
-            {signal.strategy} on <span className="sym">{signal.symbol}</span> — spot{" "}
-            <span className="sym">{signal.underlying_ltp}</span>
+            {signal.strategy} on <span className="sym">{signal.symbol}</span> —
+            spot <span className="sym">{signal.underlying_ltp}</span>
           </p>
           <table>
             <thead>
@@ -100,6 +105,11 @@ export function StrategyPanel() {
               ))}
             </tbody>
           </table>
+          <PayoffChart
+            points={signal.payoff_curve}
+            breakevens={signal.breakevens}
+            currentSpot={signal.underlying_ltp}
+          />
           <div className="pnl-strip">
             <div>
               <span className="stat-label">Max profit</span>
@@ -121,7 +131,10 @@ export function StrategyPanel() {
 
           <ul className="risk-checks">
             {signal.pre_trade_checks.map((check, i) => (
-              <li key={i} className={check.passed ? "check-pass" : "check-fail"}>
+              <li
+                key={i}
+                className={check.passed ? "check-pass" : "check-fail"}
+              >
                 {check.passed ? "PASS" : "FAIL"} — {check.reason}
               </li>
             ))}
@@ -142,7 +155,9 @@ export function StrategyPanel() {
             )}
           </div>
 
-          {placeError && <p className="error">Order placement failed: {placeError}</p>}
+          {placeError && (
+            <p className="error">Order placement failed: {placeError}</p>
+          )}
           {placed && (
             <p className="place-success">
               Placed {placed.length} order(s): {placed.join(", ")}

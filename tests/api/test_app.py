@@ -83,6 +83,8 @@ def test_strategy_endpoint_returns_signal(client: TestClient) -> None:
     assert data["strategy"] == "iron_condor"
     assert len(data["legs"]) == 4
     assert isinstance(data["max_loss"], float)
+    assert len(data["payoff_curve"]) > 0
+    assert all("spot" in p and "payoff" in p for p in data["payoff_curve"])
 
 
 def test_strategy_endpoint_serializes_unbounded_risk_as_json_null(client: TestClient) -> None:
@@ -256,6 +258,7 @@ def test_create_basket_endpoint(client: TestClient) -> None:
     assert data["name"] == "Manual basket"
     assert len(data["legs"]) == 2
     assert math.isfinite(data["max_profit"])
+    assert len(data["payoff_curve"]) > 0
 
 
 def test_list_baskets_endpoint(client: TestClient) -> None:
@@ -288,3 +291,30 @@ def test_close_leg_endpoint_updates_basket_payoff(client: TestClient) -> None:
     closed_leg = next(leg for leg in data["legs"] if leg["id"] == leg_to_close["id"])
     assert closed_leg["is_open"] is False
     assert closed_leg["exit_price"] == pytest.approx(0.5)
+
+
+def test_close_leg_endpoint_empty_curve_when_fully_closed(client: TestClient) -> None:
+    payload = {
+        "name": "Single leg",
+        "strategy": "iron_condor",
+        "underlying_symbol": "NSE:NIFTY50-INDEX",
+        "legs": [
+            {
+                "symbol": "X-90-PE",
+                "option_type": "PE",
+                "strike": 90,
+                "side": "SELL",
+                "quantity": 1,
+                "entry_price": 3.0,
+            }
+        ],
+    }
+    created = client.post("/api/baskets", json=payload).json()
+    leg = created["legs"][0]
+
+    response = client.post(
+        f"/api/baskets/{created['id']}/legs/{leg['id']}/close", json={"exit_price": 1.0}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["payoff_curve"] == []

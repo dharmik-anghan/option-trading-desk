@@ -22,7 +22,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from analytics.payoff import Leg, PayoffResult, analyze
+from analytics.payoff import Leg, PayoffResult, analyze, payoff_curve_points
 from api.dependencies import get_broker, get_db_path
 from api.schemas import (
     BasketLegResponse,
@@ -31,6 +31,7 @@ from api.schemas import (
     CreateBasketRequest,
     LegResponse,
     OrderResultResponse,
+    PayoffPoint,
     PlaceOrderRequest,
     PlaceOrderResponse,
     PortfolioHistoryPoint,
@@ -146,6 +147,9 @@ def _basket_to_response(basket: Basket) -> BasketResponse:
         max_profit=None if math.isinf(payoff.max_profit) else payoff.max_profit,
         max_loss=None if math.isinf(payoff.max_loss) else payoff.max_loss,
         breakevens=payoff.breakevens,
+        payoff_curve=[
+            PayoffPoint(spot=spot, payoff=value) for spot, value in payoff_curve_points(payoff)
+        ],
     )
 
 
@@ -187,6 +191,9 @@ def strategy_signal(
         max_profit=None if math.isinf(result.max_profit) else result.max_profit,
         max_loss=None if math.isinf(result.max_loss) else result.max_loss,
         breakevens=result.breakevens,
+        payoff_curve=[
+            PayoffPoint(spot=spot, payoff=value) for spot, value in payoff_curve_points(result)
+        ],
         pre_trade_checks=[
             RiskCheckResponse(passed=c.passed, reason=c.reason) for c in pre_trade.checks
         ],

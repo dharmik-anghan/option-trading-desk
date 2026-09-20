@@ -19,7 +19,7 @@ export function Header() {
         <span className="topbar-name">Option Desk</span>
       </div>
       <div className="topbar-meta">
-        <span>Read-only — orders are placed via the CLI</span>
+        <span>Orders placed here are real — review before clicking</span>
         <span className="topbar-clock">{formatClock(now)}</span>
       </div>
     </header>

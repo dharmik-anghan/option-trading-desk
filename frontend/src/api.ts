@@ -30,6 +30,11 @@ export interface RiskCheck {
   reason: string;
 }
 
+export interface PayoffPoint {
+  spot: number;
+  payoff: number;
+}
+
 export interface StrategySignalResponse {
   strategy: string;
   symbol: string;
@@ -39,6 +44,7 @@ export interface StrategySignalResponse {
   max_profit: number | null;
   max_loss: number | null;
   breakevens: number[];
+  payoff_curve: PayoffPoint[];
   pre_trade_checks: RiskCheck[];
   can_place: boolean;
 }
@@ -78,6 +84,7 @@ export interface Basket {
   max_profit: number | null;
   max_loss: number | null;
   breakevens: number[];
+  payoff_curve: PayoffPoint[];
 }
 
 export interface PortfolioHistoryPoint {

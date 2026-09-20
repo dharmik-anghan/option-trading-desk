@@ -289,12 +289,43 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     already-known unrealized P&L exactly (932.75), and that the remaining
     3 legs correctly became unbounded upside (no short call left to cap
     it) - `max_profit` flipped to `null`.
-  - [ ] Not yet built: frontend basket list/detail UI, "create basket from
-    current positions" flow, "close leg" UI action. Also still pending
-    from the same conversation: pinned+searchable underlyings (via a
-    downloaded Fyers symbol master file), strategy preset pills, the
-    enhanced strategy-builder view (risk profile, net credit/debit,
-    strategy-level SL), India VIX display, OI distribution + PCR, and the
+  - [x] `frontend/src/components/BasketsPanel.tsx` — lists tracked
+    strategies with combined max profit/loss, expandable to show every leg
+    (open + closed, with exit price/status), a "Close" action per open leg,
+    and "+ Create basket from current positions" (parses strike/option_type
+    from the Fyers symbol format client-side to retroactively group
+    positions that predate this system). New baskets appear automatically
+    after placing an order via the existing `portfolio:refresh` event.
+    Uses the existing Phase 9 visual language rather than a full reskin to
+    the Stitch reference design - that stays a separate, larger follow-up.
+  - [x] **Payoff graph** (the user noticed it was missing from both the
+    strategy preview and basket views - numbers only, no chart).
+    `analytics/payoff.payoff_curve_points()` returns the exact vertices
+    needed to draw a piecewise-linear payoff chart (each strike, each
+    breakeven, and padded domain edges) - computed once server-side as the
+    single source of truth rather than duplicating the payoff formula in
+    JS. Wired into both `GET /api/strategies/{name}` and the basket
+    endpoints as `payoff_curve`. `frontend/src/components/PayoffChart.tsx`
+    renders it as an SVG line with green/red area fills (segments never
+    change sign mid-segment, by construction, so shading needs no
+    clipPath), breakeven markers, and a current-spot marker on the
+    strategy preview.
+  - Two bugs the user caught and I fixed: (1) the header still said
+    "Read-only — orders are placed via the CLI", stale copy from before
+    Phase 9 moved order placement into the dashboard; (2) a leg I closed
+    myself while testing the close-leg endpoint against real data was left
+    closed instead of reverted, misleadingly showing a real position as
+    closed in the tracker when the actual broker position was untouched -
+    reverted directly in `data/trading.db`.
+  - Checkpoint: both the strategy-preview and basket payoff curves verified
+    against real live data - exact vertex values matched the
+    already-verified max profit/loss/breakevens (e.g. iron condor curve's
+    zero-crossings landed at 23077.9/23572.1, matching the breakevens
+    exactly, with floating-point noise ~1e-12).
+  - [ ] Still not built: pinned+searchable underlyings (via a downloaded
+    Fyers symbol master file), strategy preset pills, the enhanced
+    strategy-builder view (risk profile, net credit/debit, strategy-level
+    SL), India VIX display, OI distribution + PCR, and the
     straddle-by-tenor matrix.
 
 **Deferred:** multi-broker adapters, backtesting engine, full automation

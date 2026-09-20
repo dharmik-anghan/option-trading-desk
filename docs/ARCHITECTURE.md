@@ -211,6 +211,24 @@ of through this dashboard, the basket won't know until you tell it (via the
 close-leg action) - there's no reconciliation against live broker state
 (yet).
 
+Frontend: `frontend/src/components/BasketsPanel.tsx` lists baskets,
+expandable to legs + payoff chart; "+ Create basket from current positions"
+parses strike/option_type from the Fyers symbol format client-side to
+retroactively group positions from before this system existed.
+
+## Payoff chart
+
+`analytics/payoff.payoff_curve_points(result)` returns the exact vertices
+needed to draw a piecewise-linear payoff chart: each leg's strike, each
+breakeven, and padded domain edges beyond the outermost one. Breakevens are
+included as vertices specifically so a renderer never needs to guess where
+a segment's sign changes - each segment between consecutive points is
+guaranteed single-sign, which is what lets
+`frontend/src/components/PayoffChart.tsx` fill profit/loss areas per
+segment without a clipPath. Both `GET /api/strategies/{name}` and the
+basket endpoints expose this as `payoff_curve`; the underlying math is
+computed once, server-side - the frontend never re-derives payoff numbers.
+
 ## TOTP auto-login
 
 `broker/fyers_auth.py` replicates Fyers' manual login flow (OTP -> TOTP

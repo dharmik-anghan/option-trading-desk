@@ -89,6 +89,32 @@ def _find_breakevens(points: list[float], values: list[float], slope_above: floa
     return sorted(roots)
 
 
+def payoff_curve_points(result: PayoffResult) -> list[tuple[float, float]]:
+    """Vertices sufficient to draw an exact payoff chart.
+
+    The payoff is piecewise linear with kinks only at strikes, so a chart
+    only needs: each strike, each breakeven (so a renderer can split the
+    line into never-mixed-sign segments for area shading without
+    guessing), and padded domain edges beyond the outermost strike/
+    breakeven so the sloped or flat tails are visible.
+
+    Returns `[]` for a `PayoffResult` with no legs (a fully-closed basket
+    has nothing left to plot a curve for - just a flat realized total).
+    """
+    if not result.legs:
+        return []
+
+    strikes = [leg.strike for leg in result.legs]
+    interesting = [*strikes, *result.breakevens]
+    lo, hi = min(interesting), max(interesting)
+    pad = max((hi - lo) * 0.15, 1.0)
+    x_min = max(0.0, lo - pad)
+    x_max = hi + pad
+
+    xs = sorted({x_min, x_max, *strikes, *result.breakevens})
+    return [(x, result.payoff_at(x)) for x in xs]
+
+
 def analyze(legs: list[Leg], realized_offset: float = 0.0) -> PayoffResult:
     if not legs:
         raise ValueError("At least one leg is required")

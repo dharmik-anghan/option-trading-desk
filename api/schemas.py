@@ -36,6 +36,11 @@ class RiskCheckResponse(BaseModel):
     reason: str
 
 
+class PayoffPoint(BaseModel):
+    spot: float
+    payoff: float
+
+
 class StrategySignalResponse(BaseModel):
     strategy: str
     symbol: str
@@ -47,6 +52,7 @@ class StrategySignalResponse(BaseModel):
     max_profit: float | None
     max_loss: float | None
     breakevens: list[float]
+    payoff_curve: list[PayoffPoint]
     pre_trade_checks: list[RiskCheckResponse]
     can_place: bool
 
@@ -117,6 +123,7 @@ class BasketResponse(BaseModel):
     max_profit: float | None
     max_loss: float | None
     breakevens: list[float]
+    payoff_curve: list[PayoffPoint]
 
 
 class CloseLegRequest(BaseModel):

@@ -9,8 +9,11 @@ import {
   type Position,
 } from "../api";
 import { formatPnl } from "../format";
+import { PayoffChart } from "./PayoffChart";
 
-function parseOptionSymbol(symbol: string): { option_type: "CE" | "PE"; strike: number } | null {
+function parseOptionSymbol(
+  symbol: string,
+): { option_type: "CE" | "PE"; strike: number } | null {
   const match = symbol.match(/(\d+)(CE|PE)$/);
   if (!match) return null;
   return { strike: Number(match[1]), option_type: match[2] as "CE" | "PE" };
@@ -68,7 +71,12 @@ function CreateBasketForm({ onCreated }: { onCreated: () => void }) {
     }
     setSubmitting(true);
     setError(null);
-    createBasket(name || `${strategy} basket`, strategy, "NSE:NIFTY50-INDEX", legs)
+    createBasket(
+      name || `${strategy} basket`,
+      strategy,
+      "NSE:NIFTY50-INDEX",
+      legs,
+    )
       .then(() => {
         onCreated();
         setOpen(false);
@@ -140,7 +148,13 @@ function CreateBasketForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function BasketRow({ basket, onChanged }: { basket: Basket; onChanged: () => void }) {
+function BasketRow({
+  basket,
+  onChanged,
+}: {
+  basket: Basket;
+  onChanged: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [closingLegId, setClosingLegId] = useState<number | null>(null);
   const [exitPrice, setExitPrice] = useState("");
@@ -178,65 +192,92 @@ function BasketRow({ basket, onChanged }: { basket: Basket; onChanged: () => voi
         <div className="pnl-strip" style={{ margin: 0 }}>
           <div>
             <span className="stat-label">Max profit</span>
-            <span className={basket.max_profit === null || basket.max_profit >= 0 ? "pnl-pos" : "pnl-neg"}>
-              {basket.max_profit === null ? "Unbounded" : formatPnl(basket.max_profit)}
+            <span
+              className={
+                basket.max_profit === null || basket.max_profit >= 0
+                  ? "pnl-pos"
+                  : "pnl-neg"
+              }
+            >
+              {basket.max_profit === null
+                ? "Unbounded"
+                : formatPnl(basket.max_profit)}
             </span>
           </div>
           <div>
             <span className="stat-label">Max loss</span>
-            <span className={basket.max_loss === null || basket.max_loss >= 0 ? "pnl-pos" : "pnl-neg"}>
-              {basket.max_loss === null ? "Unbounded" : formatPnl(basket.max_loss)}
+            <span
+              className={
+                basket.max_loss === null || basket.max_loss >= 0
+                  ? "pnl-pos"
+                  : "pnl-neg"
+              }
+            >
+              {basket.max_loss === null
+                ? "Unbounded"
+                : formatPnl(basket.max_loss)}
             </span>
           </div>
         </div>
       </div>
 
       {expanded && (
-        <table>
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Side</th>
-              <th>Qty</th>
-              <th>Entry</th>
-              <th>Exit</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {basket.legs.map((leg) => (
-              <tr key={leg.id}>
-                <td>{leg.symbol}</td>
-                <td>{leg.side}</td>
-                <td>{leg.quantity}</td>
-                <td>{leg.entry_price}</td>
-                <td>{leg.exit_price ?? "—"}</td>
-                <td className={leg.is_open ? "" : "pnl-pos"}>
-                  {leg.is_open ? "Open" : "Closed"}
-                </td>
-                <td>
-                  {leg.is_open &&
-                    (closingLegId === leg.id ? (
-                      <span className="controls" style={{ margin: 0 }}>
-                        <input
-                          type="number"
-                          placeholder="exit price"
-                          value={exitPrice}
-                          onChange={(e) => setExitPrice(e.target.value)}
-                        />
-                        <button onClick={() => handleClose(leg.id)}>Confirm</button>
-                      </span>
-                    ) : (
-                      <button className="ghost-btn" onClick={() => setClosingLegId(leg.id)}>
-                        Close
-                      </button>
-                    ))}
-                </td>
+        <>
+          <PayoffChart
+            points={basket.payoff_curve}
+            breakevens={basket.breakevens}
+          />
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Status</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {basket.legs.map((leg) => (
+                <tr key={leg.id}>
+                  <td>{leg.symbol}</td>
+                  <td>{leg.side}</td>
+                  <td>{leg.quantity}</td>
+                  <td>{leg.entry_price}</td>
+                  <td>{leg.exit_price ?? "—"}</td>
+                  <td className={leg.is_open ? "" : "pnl-pos"}>
+                    {leg.is_open ? "Open" : "Closed"}
+                  </td>
+                  <td>
+                    {leg.is_open &&
+                      (closingLegId === leg.id ? (
+                        <span className="controls" style={{ margin: 0 }}>
+                          <input
+                            type="number"
+                            placeholder="exit price"
+                            value={exitPrice}
+                            onChange={(e) => setExitPrice(e.target.value)}
+                          />
+                          <button onClick={() => handleClose(leg.id)}>
+                            Confirm
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          className="ghost-btn"
+                          onClick={() => setClosingLegId(leg.id)}
+                        >
+                          Close
+                        </button>
+                      ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
       {error && <p className="error">{error}</p>}
     </div>
@@ -265,9 +306,9 @@ export function BasketsPanel() {
         <h2>Strategies</h2>
       </div>
       <p className="panel-note">
-        Grouped strategies tracked by us (not the broker) — keeps every leg ever part of a
-        strategy, including closed ones, so the payoff reflects P&amp;L already banked from
-        legs you've exited.
+        Grouped strategies tracked by us (not the broker) — keeps every leg ever
+        part of a strategy, including closed ones, so the payoff reflects
+        P&amp;L already banked from legs you've exited.
       </p>
 
       <CreateBasketForm onCreated={load} />

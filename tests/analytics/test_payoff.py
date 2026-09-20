@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from analytics.payoff import Leg, analyze
+from analytics.payoff import Leg, analyze, payoff_curve_points
 
 
 def test_long_call_has_unbounded_profit_and_capped_loss() -> None:
@@ -123,3 +123,53 @@ def test_payoff_at_includes_realized_offset() -> None:
     result = analyze(legs, realized_offset=50)
 
     assert result.payoff_at(120) == pytest.approx((20 - 5) + 50)
+
+
+def test_payoff_curve_points_are_exact_on_the_polyline() -> None:
+    # Bull call spread: exact everywhere since payoff is piecewise linear,
+    # so every returned (spot, payoff) pair must equal payoff_at(spot).
+    legs = [
+        Leg(option_type="CE", strike=100, premium=8, quantity=1, side="BUY"),
+        Leg(option_type="CE", strike=110, premium=3, quantity=1, side="SELL"),
+    ]
+    result = analyze(legs)
+
+    points = payoff_curve_points(result)
+
+    assert len(points) >= 4  # strikes + breakeven + padded domain edges
+    for spot, payoff in points:
+        assert payoff == pytest.approx(result.payoff_at(spot))
+
+
+def test_payoff_curve_points_include_strikes_and_breakevens() -> None:
+    legs = [
+        Leg(option_type="CE", strike=100, premium=8, quantity=1, side="BUY"),
+        Leg(option_type="CE", strike=110, premium=3, quantity=1, side="SELL"),
+    ]
+    result = analyze(legs)
+
+    xs = [spot for spot, _ in payoff_curve_points(result)]
+
+    assert 100 in xs
+    assert 110 in xs
+    assert any(x == pytest.approx(105) for x in xs)
+
+
+def test_payoff_curve_points_span_beyond_the_strikes() -> None:
+    legs = [Leg(option_type="CE", strike=100, premium=5, quantity=1, side="BUY")]
+    result = analyze(legs)
+
+    xs = sorted(spot for spot, _ in payoff_curve_points(result))
+
+    assert xs[0] < 100
+    assert xs[-1] > 105  # beyond the breakeven too
+
+
+def test_payoff_curve_points_empty_for_fully_closed_basket() -> None:
+    # A PayoffResult with no legs (e.g. a fully-closed basket) has no curve
+    # to draw - just a flat realized total, which the caller shows as text.
+    from analytics.payoff import PayoffResult
+
+    result = PayoffResult(legs=[], max_profit=10, max_loss=10, breakevens=[], realized_offset=10)
+
+    assert payoff_curve_points(result) == []
