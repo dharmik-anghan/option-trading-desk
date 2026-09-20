@@ -85,3 +85,41 @@ def test_quantity_scales_payoff() -> None:
 
     assert result.max_loss == pytest.approx(-15)
     assert result.payoff_at(120) == pytest.approx((20 - 5) * 3)
+
+
+def test_realized_offset_shifts_max_profit_and_loss() -> None:
+    # A basket where some legs already closed for +200 realized, and the
+    # remaining open bull call spread has its own -5/+5 range.
+    legs = [
+        Leg(option_type="CE", strike=100, premium=8, quantity=1, side="BUY"),
+        Leg(option_type="CE", strike=110, premium=3, quantity=1, side="SELL"),
+    ]
+
+    result = analyze(legs, realized_offset=200)
+
+    assert result.max_loss == pytest.approx(-5 + 200)
+    assert result.max_profit == pytest.approx(5 + 200)
+
+
+def test_realized_offset_shifts_breakevens() -> None:
+    legs = [Leg(option_type="CE", strike=100, premium=5, quantity=1, side="BUY")]
+
+    # Without the offset breakeven is 105. A +3 realized offset means the
+    # combined position turns profitable 3 points earlier, at 102.
+    result = analyze(legs, realized_offset=3)
+
+    assert result.breakevens == pytest.approx([102])
+
+
+def test_realized_offset_defaults_to_zero_and_matches_prior_behavior() -> None:
+    legs = [Leg(option_type="CE", strike=100, premium=5, quantity=1, side="BUY")]
+
+    assert analyze(legs) == analyze(legs, realized_offset=0)
+
+
+def test_payoff_at_includes_realized_offset() -> None:
+    legs = [Leg(option_type="CE", strike=100, premium=5, quantity=1, side="BUY")]
+
+    result = analyze(legs, realized_offset=50)
+
+    assert result.payoff_at(120) == pytest.approx((20 - 5) + 50)

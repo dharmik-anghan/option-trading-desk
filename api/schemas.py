@@ -62,6 +62,7 @@ class PlaceOrderRequest(BaseModel):
     strategy: str
     symbol: str
     quantity: int = 1
+    basket_name: str | None = None
 
 
 class OrderResultResponse(BaseModel):
@@ -71,3 +72,52 @@ class OrderResultResponse(BaseModel):
 
 class PlaceOrderResponse(BaseModel):
     orders: list[OrderResultResponse]
+    basket_id: int
+
+
+class NewBasketLegRequest(BaseModel):
+    symbol: str
+    option_type: OptionType
+    strike: float
+    side: Side
+    quantity: int
+    entry_price: float
+
+
+class CreateBasketRequest(BaseModel):
+    name: str
+    strategy: str
+    underlying_symbol: str
+    legs: list[NewBasketLegRequest]
+    stop_loss: float | None = None
+
+
+class BasketLegResponse(BaseModel):
+    id: int
+    symbol: str
+    option_type: OptionType
+    strike: float
+    side: Side
+    quantity: int
+    entry_price: float
+    entry_at: str
+    exit_price: float | None
+    exit_at: str | None
+    is_open: bool
+
+
+class BasketResponse(BaseModel):
+    id: int
+    name: str
+    strategy: str
+    underlying_symbol: str
+    created_at: str
+    stop_loss: float | None
+    legs: list[BasketLegResponse]
+    max_profit: float | None
+    max_loss: float | None
+    breakevens: list[float]
+
+
+class CloseLegRequest(BaseModel):
+    exit_price: float

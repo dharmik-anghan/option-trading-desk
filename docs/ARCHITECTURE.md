@@ -178,6 +178,39 @@ errors.
 placement (`POST`) endpoints so they can never drift apart on what counts
 as passing.
 
+## Baskets: strategy tracking (Phase 10)
+
+A basket is how "this group of legs is one strategy" gets represented -
+tracked in our own storage, not inferred from live broker positions
+(auto-grouping by underlying+expiry breaks for a calendar spread, whose two
+legs sit at *different* expiries by definition).
+
+```
+storage/basket_repo.py    (Basket, BasketLeg, NewBasketLeg - persistence only,
+                            depends only on broker.models like every storage/ module)
+     |
+execution/basket_status.py  (get_basket_payoff: open legs -> analyze(),
+                              closed legs -> summed realized P&L as the offset)
+     |
+api/app.py  (POST /api/orders/place creates one automatically;
+             POST /api/baskets creates one manually;
+             GET /api/baskets, GET /api/baskets/{id},
+             POST /api/baskets/{id}/legs/{leg_id}/close)
+```
+
+A basket keeps every leg ever part of it, including closed ones, so its
+payoff is: current open legs' theoretical curve **plus** P&L already banked
+from legs you've since exited. `analytics.payoff.analyze()` gained a
+`realized_offset` parameter (default `0.0`, backward compatible) for
+exactly this - it shifts max profit/max loss/breakevens by a constant
+without needing a second, parallel payoff calculation.
+
+Closing a leg (`close_leg`) only updates our own record - it does not touch
+the broker. If you close a position in your broker's app directly instead
+of through this dashboard, the basket won't know until you tell it (via the
+close-leg action) - there's no reconciliation against live broker state
+(yet).
+
 ## TOTP auto-login
 
 `broker/fyers_auth.py` replicates Fyers' manual login flow (OTP -> TOTP

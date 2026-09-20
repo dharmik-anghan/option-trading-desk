@@ -240,7 +240,66 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     order is the user's click to make, not something to trigger via curl
     on their behalf.
 
-**Deferred:** multi-broker adapters, backtesting engine, full automation,
-order placement from the dashboard (deliberately read-only for now).
-Phase 5's live order-placement checkpoint is still pending - that's the
-user's call to make when ready, not something to do proactively.
+- [x] **Phase 10 — Basket/strategy tracking (in progress)**
+  - Motivation: the user has a real live "45 DTE" multi-leg strategy and
+    wants the dashboard to show it as one grouped thing (combined payoff,
+    combined Greeks) rather than a flat position list - the "grouping of
+    my strategy" ask, inspired by a Stitch-generated institutional-terminal
+    concept design the user shared (screens + `DESIGN.md` design tokens
+    checked into `stitch_options_trading_desk_analytics/` for reference).
+  - Rejected approach: auto-grouping live broker positions by
+    underlying+expiry. The user caught the flaw themselves - a calendar
+    spread has legs at *different* expiries, so an expiry-matching
+    heuristic would split its two legs into separate groups.
+  - Adopted approach instead: a **basket** is a first-class thing *we*
+    track in our own storage (`storage/basket_repo.py`), not inferred from
+    live broker state. It holds every leg ever part of it - including ones
+    since closed - with each leg's entry (price, time) and, once closed,
+    its exit (price, time). This is the point: a strategy's payoff should
+    reflect P&L already banked from a leg you've exited (e.g. an early
+    adjustment), not just a fresh `analyze()` over whatever's still open.
+  - [x] `analytics/payoff.analyze()` gained an optional `realized_offset`
+    parameter (default `0.0`, so all prior behavior is unchanged) - shifts
+    max profit/loss/breakevens by a constant, letting a basket's payoff
+    equal its open legs' curve plus closed legs' banked P&L. `payoff_at()`
+    applies the same shift. Tested including a deliberately-chosen edge
+    case (an exact-cancellation coincidental double-root at the S=0
+    boundary) that the first draft of the test got wrong before the math
+    was double-checked by hand.
+  - [x] `storage/basket_repo.py` — `Basket`/`BasketLeg`/`NewBasketLeg` +
+    `create_basket`/`get_basket`/`list_baskets`/`close_leg`. Depends only
+    on `broker.models` (like every other `storage/` module) to stay at the
+    bottom of the dependency direction.
+  - [x] `execution/basket_status.py` — `get_basket_payoff()`: converts a
+    basket's open legs to `analytics.payoff.Leg`s, sums closed legs'
+    realized P&L (`leg_realized_pnl`) as the `realized_offset`, and calls
+    `analyze()`. A fully-closed basket (no open legs) can't call `analyze()`
+    (it requires at least one leg) so is special-cased to report the flat
+    realized total.
+  - [x] API: `POST /api/orders/place` now also creates a basket from the
+    legs it just placed (real entry prices, real order); `POST
+    /api/baskets` creates one manually (for retroactively grouping
+    positions that predate this system); `GET /api/baskets`,
+    `GET /api/baskets/{id}`, `POST /api/baskets/{id}/legs/{leg_id}/close`.
+  - [x] Checkpoint: created a basket from the user's real 4 open October
+    positions via `POST /api/baskets` (combined payoff: max profit
+    11,927.50, max loss -14,072.50, breakevens 22,716.5/23,983.5 - all
+    correct for that 4-leg structure), then closed one real leg via
+    `POST .../close` and confirmed the realized P&L matched that leg's
+    already-known unrealized P&L exactly (932.75), and that the remaining
+    3 legs correctly became unbounded upside (no short call left to cap
+    it) - `max_profit` flipped to `null`.
+  - [ ] Not yet built: frontend basket list/detail UI, "create basket from
+    current positions" flow, "close leg" UI action. Also still pending
+    from the same conversation: pinned+searchable underlyings (via a
+    downloaded Fyers symbol master file), strategy preset pills, the
+    enhanced strategy-builder view (risk profile, net credit/debit,
+    strategy-level SL), India VIX display, OI distribution + PCR, and the
+    straddle-by-tenor matrix.
+
+**Deferred:** multi-broker adapters, backtesting engine, full automation
+beyond the single-click dashboard confirm, and (per the Stitch design
+discussion) anything requiring data we don't have - GEX with dealer
+positioning, Vanna/Charm/Volga, automated hedge execution, FIX/smart order
+routing. Phase 5's original CLI live-order checkpoint is moot now that
+order placement moved to the dashboard (Phase 9).

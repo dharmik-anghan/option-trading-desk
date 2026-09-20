@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -139,6 +140,29 @@ def test_place_order_succeeds_and_reaches_the_broker(
     data = response.json()
     assert len(data["orders"]) == 4
     assert len(fake_broker.placed_orders) == 4
+    assert isinstance(data["basket_id"], int)
+
+
+def test_place_order_creates_a_basket_with_the_placed_legs(client: TestClient) -> None:
+    place_response = client.post(
+        "/api/orders/place",
+        json={
+            "strategy": "iron_condor",
+            "symbol": "NSE:NIFTY50-INDEX",
+            "quantity": 1,
+            "basket_name": "My 45 DTE IC",
+        },
+    )
+    basket_id = place_response.json()["basket_id"]
+
+    basket_response = client.get(f"/api/baskets/{basket_id}")
+
+    assert basket_response.status_code == 200
+    basket = basket_response.json()
+    assert basket["name"] == "My 45 DTE IC"
+    assert basket["strategy"] == "iron_condor"
+    assert len(basket["legs"]) == 4
+    assert all(leg["is_open"] for leg in basket["legs"])
 
 
 def test_place_order_blocked_when_pre_trade_checks_fail() -> None:
@@ -196,3 +220,71 @@ def test_portfolio_history_endpoint_creates_db_if_missing(
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def _create_basket_payload() -> dict[str, object]:
+    return {
+        "name": "Manual basket",
+        "strategy": "iron_condor",
+        "underlying_symbol": "NSE:NIFTY50-INDEX",
+        "legs": [
+            {
+                "symbol": "X-90-PE",
+                "option_type": "PE",
+                "strike": 90,
+                "side": "BUY",
+                "quantity": 1,
+                "entry_price": 1.0,
+            },
+            {
+                "symbol": "X-95-PE",
+                "option_type": "PE",
+                "strike": 95,
+                "side": "SELL",
+                "quantity": 1,
+                "entry_price": 3.0,
+            },
+        ],
+    }
+
+
+def test_create_basket_endpoint(client: TestClient) -> None:
+    response = client.post("/api/baskets", json=_create_basket_payload())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Manual basket"
+    assert len(data["legs"]) == 2
+    assert math.isfinite(data["max_profit"])
+
+
+def test_list_baskets_endpoint(client: TestClient) -> None:
+    client.post("/api/baskets", json=_create_basket_payload())
+
+    response = client.get("/api/baskets")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
+def test_get_basket_endpoint_404_for_unknown(client: TestClient) -> None:
+    response = client.get("/api/baskets/999")
+
+    assert response.status_code == 404
+
+
+def test_close_leg_endpoint_updates_basket_payoff(client: TestClient) -> None:
+    created = client.post("/api/baskets", json=_create_basket_payload()).json()
+    leg_to_close = created["legs"][0]
+    basket_id = created["id"]
+
+    response = client.post(
+        f"/api/baskets/{basket_id}/legs/{leg_to_close['id']}/close",
+        json={"exit_price": 0.5},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    closed_leg = next(leg for leg in data["legs"] if leg["id"] == leg_to_close["id"])
+    assert closed_leg["is_open"] is False
+    assert closed_leg["exit_price"] == pytest.approx(0.5)

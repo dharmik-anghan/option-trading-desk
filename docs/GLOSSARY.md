@@ -21,6 +21,15 @@ Filled in as each concept is implemented.
   short *call* has genuinely unbounded max loss (no ceiling on the
   underlying); a naked short *put*'s max loss is large but finite, bounded
   at the underlying price hitting 0 — don't conflate the two.
+- **Basket** — our own tracked record of "these legs are one strategy"
+  (`storage/basket_repo.py`), not inferred from live broker positions.
+  Keeps every leg ever part of it, including closed ones.
+- **Realized offset** — a constant shift applied to a payoff curve's max
+  profit/loss/breakevens (`analytics/payoff.analyze(legs, realized_offset=...)`).
+  Used by `execution/basket_status.get_basket_payoff()` to fold a basket's
+  already-banked P&L from closed legs into its combined payoff, so a
+  strategy's economics don't silently drop the outcome of a leg you've
+  since exited.
 - **Required margin** — **known gap**: Fyers' Python SDK (`fyers-apiv3`)
   exposes account funds (`Broker.get_funds`) but no pre-trade SPAN/exposure
   margin calculator. `risk/margin.check_sufficient_margin` takes

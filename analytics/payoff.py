@@ -35,9 +35,13 @@ class PayoffResult:
     max_profit: float
     max_loss: float
     breakevens: list[float]
+    # P&L already realized from legs no longer part of this payoff (e.g. a
+    # basket's closed legs) - folded into max_profit/max_loss/breakevens
+    # already, kept here only so payoff_at() can apply the same shift.
+    realized_offset: float = 0.0
 
     def payoff_at(self, spot: float) -> float:
-        return _net_payoff(self.legs, spot)
+        return _net_payoff(self.legs, spot) + self.realized_offset
 
 
 def _leg_payoff(leg: Leg, spot: float) -> float:
@@ -85,16 +89,22 @@ def _find_breakevens(points: list[float], values: list[float], slope_above: floa
     return sorted(roots)
 
 
-def analyze(legs: list[Leg]) -> PayoffResult:
+def analyze(legs: list[Leg], realized_offset: float = 0.0) -> PayoffResult:
     if not legs:
         raise ValueError("At least one leg is required")
 
     points = sorted({0.0, *(leg.strike for leg in legs)})
-    values = [_net_payoff(legs, p) for p in points]
+    values = [_net_payoff(legs, p) + realized_offset for p in points]
     slope_above = _slope_above_max_strike(legs)
 
     max_profit = math.inf if slope_above > 1e-9 else max(values)
     max_loss = -math.inf if slope_above < -1e-9 else min(values)
     breakevens = _find_breakevens(points, values, slope_above)
 
-    return PayoffResult(legs=legs, max_profit=max_profit, max_loss=max_loss, breakevens=breakevens)
+    return PayoffResult(
+        legs=legs,
+        max_profit=max_profit,
+        max_loss=max_loss,
+        breakevens=breakevens,
+        realized_offset=realized_offset,
+    )

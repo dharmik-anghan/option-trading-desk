@@ -59,6 +59,31 @@ CREATE TABLE IF NOT EXISTS portfolio_position (
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_snapshot_time
     ON portfolio_snapshot(fetched_at);
+
+CREATE TABLE IF NOT EXISTS basket (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    underlying_symbol TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    stop_loss REAL
+);
+
+CREATE TABLE IF NOT EXISTS basket_leg (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    basket_id INTEGER NOT NULL REFERENCES basket(id),
+    symbol TEXT NOT NULL,
+    option_type TEXT NOT NULL,
+    strike REAL NOT NULL,
+    side TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    entry_price REAL NOT NULL,
+    entry_at TEXT NOT NULL,
+    exit_price REAL,
+    exit_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_basket_leg_basket ON basket_leg(basket_id);
 """
 
 
