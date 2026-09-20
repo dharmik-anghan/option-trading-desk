@@ -1,11 +1,52 @@
 :root {
-  color-scheme: light;
+  /* Amber phosphor-terminal palette: charcoal-navy base, amber chrome,
+     status green/red reserved strictly for P&L polarity. */
+  --bg: #0d0f12;
+  --surface: #15181d;
+  --surface-raised: #1a1e24;
+  --border: #262b33;
+  --border-strong: #363c46;
+
+  --text: #e7e4dc;
+  --text-muted: #8a8f98;
+  --text-faint: #565c66;
+
+  --accent: #e8a33d;
+  --accent-dim: #8a6323;
+
+  --profit: #0ca30c;
+  --loss: #d03b3b;
+
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
 }
 
 #root {
   min-height: 100svh;
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

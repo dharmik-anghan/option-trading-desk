@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getPortfolioHistory, type PortfolioHistoryPoint } from "../api";
 import { formatNumber } from "../format";
+import { PnlChart } from "./PnlChart";
 
 export function HistoryPanel() {
   const [history, setHistory] = useState<PortfolioHistoryPoint[] | null>(null);
@@ -13,23 +14,38 @@ export function HistoryPanel() {
   }, []);
 
   if (error) {
-    return <p className="error">Failed to load history: {error}</p>;
+    return (
+      <section className="panel">
+        <p className="error">Failed to load history: {error}</p>
+      </section>
+    );
   }
   if (!history) {
-    return <p>Loading history...</p>;
+    return (
+      <section className="panel">
+        <p className="empty-note">Loading history…</p>
+      </section>
+    );
   }
   if (history.length === 0) {
     return (
-      <section>
-        <h2>P&amp;L history (last 7 days)</h2>
-        <p>No snapshots yet — run scripts/portfolio_status.py to record one.</p>
+      <section className="panel">
+        <div className="panel-header">
+          <h2>P&amp;L history — last 7 days</h2>
+        </div>
+        <p className="empty-note">
+          No snapshots yet — run <code>scripts/portfolio_status.py</code> to record one.
+        </p>
       </section>
     );
   }
 
   return (
-    <section>
-      <h2>P&amp;L history (last 7 days)</h2>
+    <section className="panel">
+      <div className="panel-header">
+        <h2>P&amp;L history — last 7 days</h2>
+      </div>
+      <PnlChart points={history} />
       <table>
         <thead>
           <tr>

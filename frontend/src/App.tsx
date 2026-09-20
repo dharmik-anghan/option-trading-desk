@@ -1,4 +1,5 @@
 import "./App.css";
+import { Header } from "./components/Header";
 import { PortfolioPanel } from "./components/PortfolioPanel";
 import { StrategyPanel } from "./components/StrategyPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -6,10 +7,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 function App() {
   return (
     <div className="dashboard">
-      <header>
-        <h1>Option Strategy Dashboard</h1>
-        <p className="hint">Read-only view. Orders are placed via the CLI, never here.</p>
-      </header>
+      <Header />
       <PortfolioPanel />
       <StrategyPanel />
       <HistoryPanel />

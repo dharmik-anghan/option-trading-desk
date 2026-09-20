@@ -22,7 +22,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from analytics.payoff import analyze  # noqa: E402
 from broker.fyers import FyersBroker  # noqa: E402
-from risk.pre_trade_check import run_pre_trade_checks  # noqa: E402
+from risk.pre_trade_check import (  # noqa: E402
+    DEFAULT_MAX_LOSS_LIMIT,
+    DEFAULT_MAX_RISK_PCT,
+    DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
+    run_pre_trade_checks,
+)
 from settings import load_settings  # noqa: E402
 from strategies.base import Strategy  # noqa: E402
 from strategies.credit_spread import CreditSpread  # noqa: E402
@@ -35,10 +40,6 @@ STRATEGIES: dict[str, Strategy] = {
     "credit_spread_bullish": CreditSpread(direction="bullish"),
     "credit_spread_bearish": CreditSpread(direction="bearish"),
 }
-
-PLACEHOLDER_REQUIRED_MARGIN = 50000.0
-MAX_RISK_PCT = 2.0
-MAX_LOSS_LIMIT = 5000.0
 
 
 def main() -> int:
@@ -66,17 +67,19 @@ def main() -> int:
     result = run_pre_trade_checks(
         payoff=payoff,
         available_funds=funds.available_balance,
-        required_margin=PLACEHOLDER_REQUIRED_MARGIN,
+        required_margin=DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
         capital=funds.total_balance,
-        max_risk_pct=MAX_RISK_PCT,
-        max_loss_limit=MAX_LOSS_LIMIT,
+        max_risk_pct=DEFAULT_MAX_RISK_PCT,
+        max_loss_limit=DEFAULT_MAX_LOSS_LIMIT,
     )
 
     print("\nPre-trade checks (required_margin is a placeholder, see docstring):")
     for check in result.checks:
         status = "PASS" if check.passed else "FAIL"
         print(f"  [{status}] {check.reason}")
-    print(f"Max sizeable quantity within {MAX_RISK_PCT}% risk budget: {result.max_quantity}")
+    print(
+        f"Max sizeable quantity within {DEFAULT_MAX_RISK_PCT}% risk budget: {result.max_quantity}"
+    )
     print(f"Overall: {'PASS' if result.passed else 'FAIL'}")
     return 0
 

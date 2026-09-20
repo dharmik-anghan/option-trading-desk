@@ -139,7 +139,8 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     the real account - 4 real open positions, correct realized/unrealized/
     total P&L, kill-switch check passed, snapshot persisted to SQLite
 
-- [x] **Phase 7 — Web dashboard** — done, read-only
+- [x] **Phase 7 — Web dashboard** — done, read-only at first (superseded by
+  Phase 9, which moved order placement into the dashboard)
   - Decided: React + Vite + TypeScript frontend, FastAPI backend,
     read-only to start (order placement stays in the CLI's `CONFIRM` flow)
   - [x] `api/app.py` — FastAPI app exposing `/api/portfolio`,
@@ -197,6 +198,47 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
   - Checkpoint: pending — the user needs to add their own
     `FYERS_USERNAME`/`FYERS_TOTP_KEY`/`FYERS_PIN` to `.env` (never shared
     in chat) before this can be verified against a real login
+
+- [x] **Phase 9 — Dashboard redesign + order placement moves off the CLI**
+  — done
+  - **Visual redesign**: dark charcoal-navy "terminal ledger" design
+    (amber accent, tabular monospace figures for every price/quantity/P&L,
+    hairline-separated panels instead of rounded SaaS cards) — grounded in
+    real trading-terminal visual history (Bloomberg/Reuters amber-phosphor
+    lineage) rather than generic dashboard defaults. Palette validated:
+    profit/loss colors are the `dataviz` skill's fixed status green/red
+    (not reinvented), amber accent at 8.9:1 contrast against the
+    background. Added `HistoryPanel`'s P&L bar chart (rounded data-ends,
+    square baseline, direct labels in neutral text, position-relative-to-
+    zero as the non-color polarity cue) following the skill's mark specs.
+  - **Order placement moved into the dashboard**, replacing the CLI's
+    confirm-and-place flow entirely per explicit decision:
+    `scripts/place_strategy_order.py` and `execution/confirm.py` (and its
+    tests) were deleted rather than kept as unused/parallel code.
+  - The CLI's typed-`CONFIRM` gate doesn't translate to a browser one-to-
+    one; per explicit choice, the browser flow is a single-click "Place
+    order" button after a review screen, not a re-typed confirmation
+    phrase. To keep this safe despite the lower client-side friction, the
+    **server is the actual gate, not the button**: `POST
+    /api/orders/place` re-evaluates the strategy and re-runs
+    `run_pre_trade_checks` itself and refuses (400) if they fail,
+    regardless of what the client sends — a disabled button alone would be
+    trivially bypassable. `GET /api/strategies/{name}` returns the same
+    `pre_trade_checks`/`can_place` fields so the button reflects reality
+    rather than guessing.
+  - Test `test_place_order_blocked_when_pre_trade_checks_fail` is the
+    load-bearing safety test: asserts zero orders reach the broker when
+    checks fail, not just that the HTTP call returns an error.
+  - Centralized the placeholder margin/risk-limit constants (previously
+    duplicated in `scripts/pre_trade_check.py`) into
+    `risk/pre_trade_check.py` as `DEFAULT_*` constants, shared by the CLI
+    script and the API.
+  - Checkpoint: backend verified against real live Fyers data (`GET
+    /api/strategies/iron_condor` returned correct legs/checks/`can_place`).
+    The `POST /api/orders/place` route was confirmed registered but
+    deliberately **not** invoked against the real account — placing a real
+    order is the user's click to make, not something to trigger via curl
+    on their behalf.
 
 **Deferred:** multi-broker adapters, backtesting engine, full automation,
 order placement from the dashboard (deliberately read-only for now).

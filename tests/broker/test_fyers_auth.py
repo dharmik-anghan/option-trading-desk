@@ -5,8 +5,9 @@ verify_pin, token) in sequence. There's no way to capture a real fixture
 without actually logging in (which would burn the day's real login and
 require checking in real credentials), so instead these tests inject a fake
 HTTP session and assert the request sequence and shape is correct - the
-same dependency-injection approach used for `confirm_and_place`'s `confirm`
-callable.
+same dependency-injection approach used elsewhere in this codebase for
+untestable I/O boundaries (e.g. `execution.manager.ExecutionManager` takes
+a `Broker`, tested here against a fake).
 """
 
 from __future__ import annotations

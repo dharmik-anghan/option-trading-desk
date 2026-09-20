@@ -99,10 +99,12 @@ ticks (see `docs/PHASES.md`).
 - `execution/confirm.py` — `confirm_and_place`: the human-in-the-loop gate.
   Requires the exact string `CONFIRM`; never even prompts if Phase 4's
   pre-trade checks failed. The `confirm` callable is injected so this whole
-  flow is unit-testable without a real terminal
+  flow is unit-testable without a real terminal.
+  **Removed in Phase 9** along with `scripts/place_strategy_order.py` below,
+  once order placement moved into the dashboard — see that section.
 - `scripts/place_strategy_order.py` — the end-to-end CLI: fetch chain, build
   strategy, run pre-trade checks, confirm, place, reconcile against
-  `get_positions()`
+  `get_positions()`. **Removed in Phase 9.**
 - Scope note: no multi-strategy "scanner" yet — one strategy/symbol per run.
   See `docs/PHASES.md` for why.
 
@@ -125,17 +127,18 @@ ticks (see `docs/PHASES.md`).
 
 ## Web dashboard
 
-Decided: React + Vite + TypeScript frontend, FastAPI backend, **read-only**
-to start (order placement stays in the CLI's `CONFIRM` flow — see
-`execution/confirm.py` for why that gate matters).
+React + Vite + TypeScript frontend, FastAPI backend. Originally read-only
+(order placement in the CLI's `CONFIRM` flow); per explicit later decision
+(Phase 9), order placement moved into the dashboard and the CLI
+confirm-and-place flow (`scripts/place_strategy_order.py`,
+`execution/confirm.py`) was deleted rather than kept as parallel dead code.
 
 ```
-frontend/  (React + Vite + TS - fetches from the API below)
+frontend/  (React + Vite + TS - fetches from / posts to the API below)
      |
-api/app.py  (FastAPI - read-only: get_positions, get_funds, get_option_chain;
-             never place_order)
+api/app.py  (FastAPI - GET for data, POST /api/orders/place to place orders)
      |
-(same broker/analytics/risk/strategies/storage stack as everything else)
+(same broker/analytics/risk/strategies/storage/execution stack as everything else)
 ```
 
 - `api/dependencies.py` — `get_broker()`/`get_db_path()` as FastAPI
@@ -154,6 +157,26 @@ api/app.py  (FastAPI - read-only: get_positions, get_funds, get_option_chain;
   the raw response text never contains the string `Infinity`
 - CORS is open to any `localhost`/`127.0.0.1` port for local dev (Vite picks
   a free port, which varies) — tighten before exposing beyond localhost
+
+### Order placement safety model (Phase 9)
+
+The CLI's typed-`CONFIRM` gate doesn't translate one-to-one to a browser;
+the dashboard uses a single-click "Place order" button on a review screen
+instead (explicit choice — less friction than the CLI). Because a
+disabled-button-only gate is trivially bypassable (anyone can call the API
+directly), **the server is the real gate**: `POST /api/orders/place`
+re-evaluates the strategy and re-runs `risk.pre_trade_check.run_pre_trade_checks`
+itself, and refuses with `400` if any check fails, regardless of what the
+client sends. `GET /api/strategies/{name}` returns the same
+`pre_trade_checks`/`can_place` fields so the button reflects what the
+server will actually enforce, not a guess. The load-bearing test is
+`test_place_order_blocked_when_pre_trade_checks_fail`, which asserts zero
+orders reach the broker when checks fail — not just that the HTTP call
+errors.
+
+`_evaluate()` in `api/app.py` is shared between the preview (`GET`) and
+placement (`POST`) endpoints so they can never drift apart on what counts
+as passing.
 
 ## TOTP auto-login
 

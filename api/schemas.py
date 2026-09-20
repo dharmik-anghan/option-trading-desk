@@ -31,6 +31,11 @@ class LegResponse(BaseModel):
     symbol: str | None
 
 
+class RiskCheckResponse(BaseModel):
+    passed: bool
+    reason: str
+
+
 class StrategySignalResponse(BaseModel):
     strategy: str
     symbol: str
@@ -42,6 +47,8 @@ class StrategySignalResponse(BaseModel):
     max_profit: float | None
     max_loss: float | None
     breakevens: list[float]
+    pre_trade_checks: list[RiskCheckResponse]
+    can_place: bool
 
 
 class PortfolioHistoryPoint(BaseModel):
@@ -49,3 +56,18 @@ class PortfolioHistoryPoint(BaseModel):
     realized_pnl: float
     unrealized_pnl: float
     total_pnl: float
+
+
+class PlaceOrderRequest(BaseModel):
+    strategy: str
+    symbol: str
+    quantity: int = 1
+
+
+class OrderResultResponse(BaseModel):
+    order_id: str
+    message: str
+
+
+class PlaceOrderResponse(BaseModel):
+    orders: list[OrderResultResponse]

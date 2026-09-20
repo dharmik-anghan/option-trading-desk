@@ -103,6 +103,68 @@ def test_strategy_endpoint_rejects_unknown_strategy(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_strategy_endpoint_includes_pre_trade_checks(client: TestClient) -> None:
+    response = client.get("/api/strategies/iron_condor?symbol=NSE:NIFTY50-INDEX")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["can_place"] is True
+    assert len(data["pre_trade_checks"]) >= 1
+    assert all("passed" in c and "reason" in c for c in data["pre_trade_checks"])
+
+
+def test_strategy_endpoint_cannot_place_when_funds_insufficient() -> None:
+    broker = FakeBroker(underlying_ltp=100.0, available_balance=1.0)
+    app.dependency_overrides[get_broker] = lambda: broker
+    try:
+        response = TestClient(app).get(
+            "/api/strategies/iron_condor?symbol=NSE:NIFTY50-INDEX"
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["can_place"] is False
+
+
+def test_place_order_succeeds_and_reaches_the_broker(
+    client: TestClient, fake_broker: FakeBroker
+) -> None:
+    response = client.post(
+        "/api/orders/place",
+        json={"strategy": "iron_condor", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["orders"]) == 4
+    assert len(fake_broker.placed_orders) == 4
+
+
+def test_place_order_blocked_when_pre_trade_checks_fail() -> None:
+    broker = FakeBroker(underlying_ltp=100.0, available_balance=1.0)
+    app.dependency_overrides[get_broker] = lambda: broker
+    try:
+        response = TestClient(app).post(
+            "/api/orders/place",
+            json={"strategy": "iron_condor", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert len(broker.placed_orders) == 0
+
+
+def test_place_order_rejects_unknown_strategy(client: TestClient) -> None:
+    response = client.post(
+        "/api/orders/place",
+        json={"strategy": "not_real", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
+    )
+
+    assert response.status_code == 404
+
+
 def test_portfolio_history_endpoint_returns_saved_snapshots(
     client: TestClient, db_path: Path
 ) -> None:

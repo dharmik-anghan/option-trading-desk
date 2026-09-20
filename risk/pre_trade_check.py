@@ -14,6 +14,13 @@ from risk.margin import check_sufficient_margin
 from risk.result import RiskCheckResult
 from risk.sizing import max_quantity_for_risk
 
+# Shared defaults for callers (CLI scripts, the dashboard API) that don't
+# have a real per-order margin figure yet - see docs/GLOSSARY.md's
+# "Required margin" entry for the known gap this placeholder covers.
+DEFAULT_REQUIRED_MARGIN_PLACEHOLDER = 50000.0
+DEFAULT_MAX_RISK_PCT = 2.0
+DEFAULT_MAX_LOSS_LIMIT = 5000.0
+
 
 @dataclass(frozen=True)
 class PreTradeCheckResult:

@@ -74,9 +74,15 @@ uv run ruff check . # lint
 
 ## Running the web dashboard
 
-Read-only (positions, P&L, strategy preview, P&L history) — order placement
-stays in the CLI scripts. Requires Node.js/npm in addition to the Python
-setup above.
+Positions, P&L, strategy preview, P&L history, **and order placement** —
+the dashboard is now the primary way to place orders (the old CLI
+confirm-and-place script was removed). Requires Node.js/npm in addition to
+the Python setup above.
+
+Placing an order in the dashboard: preview a strategy, review the legs and
+the pre-trade risk checks shown below them, then click "Place order" — it's
+disabled if any risk check fails. This is a real order with real money the
+moment you click it; there's no second confirmation step.
 
 ```bash
 # Terminal 1: backend API

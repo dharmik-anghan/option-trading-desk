@@ -1,10 +1,14 @@
-"""Read-only dashboard API.
+"""Dashboard API.
 
-Deliberately read-only: order placement stays in
-`scripts/place_strategy_order.py`'s CLI confirm flow (see
-docs/PHASES.md/ARCHITECTURE.md for why) - this API only ever calls
-broker methods that can't move money (`get_positions`, `get_funds`,
-`get_option_chain`) or reads local history, never `place_order`.
+Order placement lives here now (`POST /api/orders/place`) - this used to be
+CLI-only via scripts/place_strategy_order.py, which is removed. The CLI's
+`CONFIRM`-typed safety gate doesn't translate directly to a browser; the
+replacement is: the review step (`GET /api/strategies/{name}`) always
+returns the same pre-trade check results the placement endpoint will
+enforce, and placement itself is refused server-side (400) if those checks
+fail - never just hidden behind a disabled button, since a client-side-only
+gate is trivially bypassable. The deliberate-click part of the safety
+model now lives in the frontend's review screen, not in this API.
 """
 
 from __future__ import annotations
@@ -17,17 +21,29 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from analytics.payoff import analyze
+from analytics.payoff import Leg, PayoffResult, analyze
 from api.dependencies import get_broker, get_db_path
 from api.schemas import (
     LegResponse,
+    OrderResultResponse,
+    PlaceOrderRequest,
+    PlaceOrderResponse,
     PortfolioHistoryPoint,
     PortfolioResponse,
+    RiskCheckResponse,
     StrategySignalResponse,
 )
 from broker.base import Broker
 from broker.models import OptionChain
+from execution.manager import ExecutionManager
 from execution.portfolio_status import get_portfolio_status
+from risk.pre_trade_check import (
+    DEFAULT_MAX_LOSS_LIMIT,
+    DEFAULT_MAX_RISK_PCT,
+    DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
+    PreTradeCheckResult,
+    run_pre_trade_checks,
+)
 from storage.db import connect, init_schema
 from storage.portfolio_repo import snapshots_since
 from strategies.base import Strategy
@@ -43,7 +59,7 @@ app = FastAPI(title="Option Strategy Dashboard API")
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -60,6 +76,30 @@ def _strategies() -> dict[str, Strategy]:
         "credit_spread_bullish": CreditSpread(direction="bullish"),
         "credit_spread_bearish": CreditSpread(direction="bearish"),
     }
+
+
+def _evaluate(
+    name: str, symbol: str, quantity: int, broker: Broker
+) -> tuple[OptionChain, list[Leg], PayoffResult, PreTradeCheckResult]:
+    strategy = _strategies().get(name)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy '{name}'")
+    strategy.quantity = quantity  # type: ignore[attr-defined]
+
+    chain = broker.get_option_chain(symbol, strike_count=15)
+    legs = strategy.build_legs(chain)
+    payoff = analyze(legs)
+
+    funds = broker.get_funds()
+    pre_trade = run_pre_trade_checks(
+        payoff=payoff,
+        available_funds=funds.available_balance,
+        required_margin=DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
+        capital=funds.total_balance,
+        max_risk_pct=DEFAULT_MAX_RISK_PCT,
+        max_loss_limit=DEFAULT_MAX_LOSS_LIMIT,
+    )
+    return chain, legs, payoff, pre_trade
 
 
 @app.get("/api/health")
@@ -90,14 +130,7 @@ def strategy_signal(
     broker: BrokerDep,
     quantity: int = 1,
 ) -> StrategySignalResponse:
-    strategy = _strategies().get(name)
-    if strategy is None:
-        raise HTTPException(status_code=404, detail=f"Unknown strategy '{name}'")
-    strategy.quantity = quantity  # type: ignore[attr-defined]
-
-    chain = broker.get_option_chain(symbol, strike_count=15)
-    legs = strategy.build_legs(chain)
-    result = analyze(legs)
+    chain, legs, result, pre_trade = _evaluate(name, symbol, quantity, broker)
 
     return StrategySignalResponse(
         strategy=name,
@@ -107,6 +140,32 @@ def strategy_signal(
         max_profit=None if math.isinf(result.max_profit) else result.max_profit,
         max_loss=None if math.isinf(result.max_loss) else result.max_loss,
         breakevens=result.breakevens,
+        pre_trade_checks=[
+            RiskCheckResponse(passed=c.passed, reason=c.reason) for c in pre_trade.checks
+        ],
+        can_place=pre_trade.passed,
+    )
+
+
+@app.post("/api/orders/place", response_model=PlaceOrderResponse)
+def place_order(request: PlaceOrderRequest, broker: BrokerDep) -> PlaceOrderResponse:
+    _chain, legs, _payoff, pre_trade = _evaluate(
+        request.strategy, request.symbol, request.quantity, broker
+    )
+
+    if not pre_trade.passed:
+        failed_reasons = [c.reason for c in pre_trade.checks if not c.passed]
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Pre-trade checks failed", "reasons": failed_reasons},
+        )
+
+    manager = ExecutionManager(broker)
+    orders = manager.build_orders(legs)
+    results = manager.place_all(orders)
+
+    return PlaceOrderResponse(
+        orders=[OrderResultResponse(order_id=r.order_id, message=r.message) for r in results]
     )
 
 

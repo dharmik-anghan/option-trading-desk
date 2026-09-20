@@ -7,44 +7,63 @@ export function PortfolioPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getPortfolio()
-      .then(setPortfolio)
-      .catch((err: Error) => setError(err.message));
+    function load() {
+      getPortfolio()
+        .then(setPortfolio)
+        .catch((err: Error) => setError(err.message));
+    }
+    load();
+    // Real positions/P&L change after an order is placed elsewhere on the
+    // page (StrategyPanel); refetch rather than going stale until reload.
+    window.addEventListener("portfolio:refresh", load);
+    return () => window.removeEventListener("portfolio:refresh", load);
   }, []);
 
   if (error) {
-    return <p className="error">Failed to load portfolio: {error}</p>;
+    return (
+      <section className="panel">
+        <p className="error">Failed to load portfolio: {error}</p>
+      </section>
+    );
   }
   if (!portfolio) {
-    return <p>Loading portfolio...</p>;
+    return (
+      <section className="panel">
+        <p className="empty-note">Loading portfolio…</p>
+      </section>
+    );
   }
 
+  const totalClass = portfolio.total_pnl >= 0 ? "pnl-pos" : "pnl-neg";
+
   return (
-    <section>
-      <h2>Portfolio</h2>
-      <div className="pnl-summary">
+    <section className="panel">
+      <div className="panel-header">
+        <h2>Portfolio</h2>
+        <span className={`hero-pnl ${totalClass}`}>{formatPnl(portfolio.total_pnl)}</span>
+      </div>
+
+      <div className="pnl-strip">
         <div>
-          <span className="label">Realized</span>
+          <span className="stat-label">Realized</span>
           <span className={portfolio.realized_pnl >= 0 ? "pnl-pos" : "pnl-neg"}>
             {formatPnl(portfolio.realized_pnl)}
           </span>
         </div>
         <div>
-          <span className="label">Unrealized</span>
+          <span className="stat-label">Unrealized</span>
           <span className={portfolio.unrealized_pnl >= 0 ? "pnl-pos" : "pnl-neg"}>
             {formatPnl(portfolio.unrealized_pnl)}
           </span>
         </div>
         <div>
-          <span className="label">Total</span>
-          <span className={portfolio.total_pnl >= 0 ? "pnl-pos" : "pnl-neg"}>
-            {formatPnl(portfolio.total_pnl)}
-          </span>
+          <span className="stat-label">Open positions</span>
+          <span>{portfolio.positions.length}</span>
         </div>
       </div>
 
       {portfolio.positions.length === 0 ? (
-        <p>No open positions.</p>
+        <p className="empty-note">No open positions.</p>
       ) : (
         <table>
           <thead>
@@ -53,7 +72,7 @@ export function PortfolioPanel() {
               <th>Net qty</th>
               <th>Avg price</th>
               <th>LTP</th>
-              <th>Unrealized P&L</th>
+              <th>Unrealized P&amp;L</th>
             </tr>
           </thead>
           <tbody>

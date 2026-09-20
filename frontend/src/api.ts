@@ -25,6 +25,11 @@ export interface Leg {
   symbol: string | null;
 }
 
+export interface RiskCheck {
+  passed: boolean;
+  reason: string;
+}
+
 export interface StrategySignalResponse {
   strategy: string;
   symbol: string;
@@ -34,6 +39,17 @@ export interface StrategySignalResponse {
   max_profit: number | null;
   max_loss: number | null;
   breakevens: number[];
+  pre_trade_checks: RiskCheck[];
+  can_place: boolean;
+}
+
+export interface OrderResult {
+  order_id: string;
+  message: string;
+}
+
+export interface PlaceOrderResponse {
+  orders: OrderResult[];
 }
 
 export interface PortfolioHistoryPoint {
@@ -51,6 +67,34 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function extractErrorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const body = JSON.parse(text);
+    if (body?.detail?.reasons) {
+      return (body.detail.reasons as string[]).join("; ");
+    }
+    if (typeof body?.detail === "string") {
+      return body.detail;
+    }
+  } catch {
+    // not JSON - fall through to raw text below
+  }
+  return `${response.status} ${text}`;
+}
+
+async function postJson<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  return (await response.json()) as TResponse;
+}
+
 export function getPortfolio(): Promise<PortfolioResponse> {
   return getJson<PortfolioResponse>("/api/portfolio");
 }
@@ -66,4 +110,15 @@ export function getStrategySignal(
 
 export function getPortfolioHistory(days = 7): Promise<PortfolioHistoryPoint[]> {
   return getJson<PortfolioHistoryPoint[]>(`/api/portfolio/history?days=${days}`);
+}
+
+export function placeOrder(
+  strategy: string,
+  symbol: string,
+  quantity: number,
+): Promise<PlaceOrderResponse> {
+  return postJson<{ strategy: string; symbol: string; quantity: number }, PlaceOrderResponse>(
+    "/api/orders/place",
+    { strategy, symbol, quantity },
+  );
 }
