@@ -30,10 +30,12 @@ class FakeBroker(Broker):
         underlying_ltp: float = 23350.0,
         available_balance: float = 100000.0,
         positions: list[Position] | None = None,
+        realized_pnl: float = 0.0,
     ) -> None:
         self.underlying_ltp = underlying_ltp
         self.available_balance = available_balance
         self.positions = positions or []
+        self.realized_pnl = realized_pnl
         self.placed_orders: list[OrderRequest] = []
         self._next_order_id = 1
 
@@ -42,6 +44,7 @@ class FakeBroker(Broker):
             total_balance=self.available_balance,
             utilized_margin=0.0,
             available_balance=self.available_balance,
+            realized_pnl=self.realized_pnl,
         )
 
     def place_order(self, order: OrderRequest) -> OrderResult:

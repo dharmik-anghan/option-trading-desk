@@ -105,6 +105,7 @@ _FUND_TITLES = {
     "Total Balance": "total_balance",
     "Utilized Amount": "utilized_margin",
     "Available Balance": "available_balance",
+    "Realized Profit and Loss": "realized_pnl",
 }
 
 

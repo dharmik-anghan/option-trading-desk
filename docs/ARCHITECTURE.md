@@ -106,6 +106,23 @@ ticks (see `docs/PHASES.md`).
 - Scope note: no multi-strategy "scanner" yet — one strategy/symbol per run.
   See `docs/PHASES.md` for why.
 
+## What's built (Phase 6)
+
+- `broker/models.Funds` gained `realized_pnl` (Fyers' "Realized Profit and
+  Loss" funds field)
+- `execution/portfolio_status.py` — `get_portfolio_status()`: combines real
+  per-position unrealized P&L with real realized P&L into one
+  `PortfolioStatus.total_pnl`, which `risk.limits.check_daily_kill_switch`
+  (Phase 4) acts on
+- `storage/portfolio_repo.py` — historical P&L snapshots. Depends only on
+  `broker.models.Position`, not on `execution.PortfolioStatus` — a layering
+  violation (storage importing from execution, inverting the dependency
+  direction below) was caught and fixed during development rather than
+  left in
+- `scripts/portfolio_status.py` — the "minimal dashboard": a CLI status
+  view, not a web UI. A real dashboard stays a deliberate, undecided choice
+  until there's a felt need for one beyond the CLI
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

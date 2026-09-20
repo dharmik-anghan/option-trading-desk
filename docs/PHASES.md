@@ -111,6 +111,30 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     interactively and type `CONFIRM` yourself to place one real small-lot
     order, since that's your money and your call to make - not something
     to automate away. See docs/SETUP.md for guidance.
-- [ ] **Phase 6 — Position/P&L tracking + minimal dashboard**
+- [x] **Phase 6 — Position/P&L tracking + minimal dashboard** — done
+  - `Funds` gained `realized_pnl` (from Fyers' "Realized Profit and Loss"
+    funds field, previously unused)
+  - [x] `execution/portfolio_status.py` — `get_portfolio_status`: combines
+    real per-position unrealized P&L (`Broker.get_positions`) with real
+    realized P&L (`Broker.get_funds`) into one `PortfolioStatus.total_pnl`
+  - [x] `tests/execution/test_kill_switch_integration.py` — ties Phase 4's
+    pure `check_daily_kill_switch` to Phase 6's real portfolio P&L
+  - [x] `storage/portfolio_repo.py` — historical P&L snapshots, same
+    pattern as `storage/option_chain_repo.py`. Deliberately depends only on
+    `broker.models.Position` (not `execution.PortfolioStatus`) to keep
+    `storage/` at the bottom of the dependency direction - caught and fixed
+    a layering violation during development where it briefly imported
+    `execution/` directly.
+  - [x] `scripts/portfolio_status.py` — the "minimal dashboard": CLI view of
+    open positions, realized/unrealized/total P&L, the kill-switch check,
+    and persists a snapshot. A real web dashboard remains a deliberate,
+    undecided-until-needed choice (see docs/ARCHITECTURE.md and the earlier
+    frontend-integration discussion) - this stays CLI-first for now.
+  - [x] Checkpoint: `uv run python scripts/portfolio_status.py` ran against
+    the real account - 4 real open positions, correct realized/unrealized/
+    total P&L, kill-switch check passed, snapshot persisted to SQLite
 
-**Deferred:** multi-broker adapters, backtesting engine, full automation.
+**Deferred:** multi-broker adapters, backtesting engine, full automation,
+web dashboard (CLI-first until there's a felt need otherwise). Phase 5's
+live order-placement checkpoint is still pending - that's the user's call
+to make when ready, not something to do proactively.

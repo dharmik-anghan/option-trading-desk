@@ -88,6 +88,7 @@ def test_parse_funds_extracts_balances_by_title() -> None:
     assert funds.total_balance == pytest.approx(160273.03)
     assert funds.utilized_margin == pytest.approx(84049.94)
     assert funds.available_balance == pytest.approx(76223.09)
+    assert funds.realized_pnl == pytest.approx(0.0)
 
 
 def test_parse_funds_raises_on_error_response() -> None:

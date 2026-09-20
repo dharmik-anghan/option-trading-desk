@@ -35,6 +35,12 @@ Filled in as each concept is implemented.
   contributes the negative (you're short that exposure — e.g. a sold
   option's theta becomes a *positive* contribution, since time decay works
   in your favor when short).
+- **Realized / Unrealized / Total P&L** — `execution/portfolio_status.get_portfolio_status()`.
+  Realized comes from Fyers' funds response ("Realized Profit and Loss" —
+  `Funds.realized_pnl`); unrealized is the sum of `unrealized_pnl` across
+  all open positions from `Broker.get_positions()`. Total is the sum of the
+  two, and is what `risk.limits.check_daily_kill_switch` acts on. History
+  is persisted via `storage/portfolio_repo.py`.
 - **Order type** — `execution/manager.ExecutionManager` always places
   `MARKET` orders (immediate execution at the best available price), not
   `LIMIT`. Simplest choice for the Phase 5 checkpoint; means each leg of a

@@ -38,6 +38,27 @@ CREATE TABLE IF NOT EXISTS option_chain_row (
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_symbol_time
     ON option_chain_snapshot(underlying_symbol, fetched_at);
+
+CREATE TABLE IF NOT EXISTS portfolio_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fetched_at TEXT NOT NULL,
+    realized_pnl REAL NOT NULL,
+    unrealized_pnl REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_position (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshot(id),
+    symbol TEXT NOT NULL,
+    net_quantity INTEGER NOT NULL,
+    average_price REAL NOT NULL,
+    ltp REAL NOT NULL,
+    unrealized_pnl REAL NOT NULL,
+    product_type TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_snapshot_time
+    ON portfolio_snapshot(fetched_at);
 """
 
 

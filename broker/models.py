@@ -62,6 +62,7 @@ class Funds(BaseModel):
     total_balance: float
     utilized_margin: float
     available_balance: float
+    realized_pnl: float
 
 
 class Candle(BaseModel):
