@@ -301,6 +301,71 @@ tbody tr:hover td {
   margin-top: 12px;
 }
 
+/* ---- Baskets (strategy tracking) ---- */
+
+.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.create-basket {
+  margin-bottom: 20px;
+}
+
+.create-basket-body {
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.basket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.basket-row {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 12px 14px;
+}
+
+.basket-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+
+.basket-name {
+  font-weight: 600;
+  margin-right: 10px;
+}
+
+.basket-meta {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.basket-row table {
+  margin-top: 14px;
+}
+
 /* ---- Misc ---- */
 
 .error {

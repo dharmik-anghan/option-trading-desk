@@ -50,6 +50,34 @@ export interface OrderResult {
 
 export interface PlaceOrderResponse {
   orders: OrderResult[];
+  basket_id: number;
+}
+
+export interface BasketLeg {
+  id: number;
+  symbol: string;
+  option_type: "CE" | "PE";
+  strike: number;
+  side: "BUY" | "SELL";
+  quantity: number;
+  entry_price: number;
+  entry_at: string;
+  exit_price: number | null;
+  exit_at: string | null;
+  is_open: boolean;
+}
+
+export interface Basket {
+  id: number;
+  name: string;
+  strategy: string;
+  underlying_symbol: string;
+  created_at: string;
+  stop_loss: number | null;
+  legs: BasketLeg[];
+  max_profit: number | null;
+  max_loss: number | null;
+  breakevens: number[];
 }
 
 export interface PortfolioHistoryPoint {
@@ -120,5 +148,41 @@ export function placeOrder(
   return postJson<{ strategy: string; symbol: string; quantity: number }, PlaceOrderResponse>(
     "/api/orders/place",
     { strategy, symbol, quantity },
+  );
+}
+
+export function getBaskets(): Promise<Basket[]> {
+  return getJson<Basket[]>("/api/baskets");
+}
+
+export function getBasket(id: number): Promise<Basket> {
+  return getJson<Basket>(`/api/baskets/${id}`);
+}
+
+export interface NewBasketLegInput {
+  symbol: string;
+  option_type: "CE" | "PE";
+  strike: number;
+  side: "BUY" | "SELL";
+  quantity: number;
+  entry_price: number;
+}
+
+export function createBasket(
+  name: string,
+  strategy: string,
+  underlyingSymbol: string,
+  legs: NewBasketLegInput[],
+): Promise<Basket> {
+  return postJson<
+    { name: string; strategy: string; underlying_symbol: string; legs: NewBasketLegInput[] },
+    Basket
+  >("/api/baskets", { name, strategy, underlying_symbol: underlyingSymbol, legs });
+}
+
+export function closeBasketLeg(basketId: number, legId: number, exitPrice: number): Promise<Basket> {
+  return postJson<{ exit_price: number }, Basket>(
+    `/api/baskets/${basketId}/legs/${legId}/close`,
+    { exit_price: exitPrice },
   );
 }
