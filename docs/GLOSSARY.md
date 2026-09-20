@@ -48,3 +48,19 @@ Filled in as each concept is implemented.
   chain snapshot showed (slippage), and legs aren't filled atomically as a
   single combo order. Revisit if slippage across legs turns out to matter
   in practice.
+- **Unbounded values over JSON** — `math.inf`/`-math.inf` (from
+  `analytics.payoff.analyze()`) cannot round-trip through standard JSON.
+  Python's `json.dumps` emits the literal token `Infinity`, which is not
+  valid JSON syntax; a browser's `JSON.parse` throws on it. The API
+  (`api/app.py`) converts these to `null` before serializing; the frontend
+  (`frontend/src/components/StrategyPanel.tsx`) checks for `null` and
+  displays "Unbounded". If any future consumer serializes payoff results
+  to JSON, it needs the same conversion — don't send raw `math.inf`.
+- **Floating-point P&L display noise** — Fyers' `unrealized_profit` (and
+  sums of it) frequently come back as e.g. `942.5000000000017` rather than
+  `942.5` — ordinary float arithmetic artifacts, not real sub-paise
+  precision. The backend keeps full precision (it's just float math, no
+  need to round internally); the frontend rounds for display in
+  `frontend/src/format.ts` (`formatPnl`/`formatNumber`). Any new UI
+  component showing a P&L number should use those helpers rather than
+  printing the raw value.

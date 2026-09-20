@@ -139,7 +139,36 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     the real account - 4 real open positions, correct realized/unrealized/
     total P&L, kill-switch check passed, snapshot persisted to SQLite
 
+- [x] **Phase 7 — Web dashboard** — done, read-only
+  - Decided: React + Vite + TypeScript frontend, FastAPI backend,
+    read-only to start (order placement stays in the CLI's `CONFIRM` flow)
+  - [x] `api/app.py` — FastAPI app exposing `/api/portfolio`,
+    `/api/option-chain/{symbol}`, `/api/strategies/{name}`,
+    `/api/portfolio/history`. Only calls broker methods that can't move
+    money; `place_order` is never reachable from this API
+  - [x] `api/dependencies.py` — `get_broker()`/`get_db_path()` as FastAPI
+    dependencies, overridden in tests with `FakeBroker`/a temp DB path
+  - [x] `api/schemas.py` — API wire types kept separate from internal
+    domain dataclasses (`Leg`, `PortfolioStatus`)
+  - **Bug caught and fixed during development**: `analyze()`'s unbounded
+    max profit/loss (`math.inf`) isn't valid JSON - `json.dumps` emits the
+    literal token `Infinity`, which a browser's `JSON.parse` rejects
+    outright. Fixed by serializing unbounded values as `null`; regression
+    test `test_strategy_endpoint_serializes_unbounded_risk_as_json_null`
+    asserts the raw response text never contains `Infinity`.
+  - [x] `frontend/` — Vite React-TS app: `PortfolioPanel` (positions +
+    P&L), `StrategyPanel` (read-only strategy preview), `HistoryPanel`
+    (P&L over time). TypeScript compiles clean, `oxlint` clean, production
+    build succeeds.
+  - [x] Checkpoint: backend verified against real live Fyers data (all 4
+    endpoints, correct CORS headers). Frontend rendering was verified by
+    the user in their own browser (the agent's browser-automation tool
+    wasn't connected in this environment) - user confirmed positions/P&L
+    render correctly, and caught a real display bug (unrounded
+    floating-point P&L, e.g. `942.5000000000017`) which was fixed in
+    `frontend/src/format.ts`.
+
 **Deferred:** multi-broker adapters, backtesting engine, full automation,
-web dashboard (CLI-first until there's a felt need otherwise). Phase 5's
-live order-placement checkpoint is still pending - that's the user's call
-to make when ready, not something to do proactively.
+order placement from the dashboard (deliberately read-only for now).
+Phase 5's live order-placement checkpoint is still pending - that's the
+user's call to make when ready, not something to do proactively.

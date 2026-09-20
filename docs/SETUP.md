@@ -56,5 +56,24 @@ uv run mypy .       # strict type checking
 uv run ruff check . # lint
 ```
 
+## Running the web dashboard
+
+Read-only (positions, P&L, strategy preview, P&L history) — order placement
+stays in the CLI scripts. Requires Node.js/npm in addition to the Python
+setup above.
+
+```bash
+# Terminal 1: backend API
+uv run uvicorn api.app:app --port 8000
+
+# Terminal 2: frontend (first time only: cd frontend && npm install)
+cd frontend
+npm run dev
+```
+
+Open the URL Vite prints (usually http://localhost:5173, but it'll pick a
+different port if that one's busy). The backend's CORS is configured to
+allow any `localhost`/`127.0.0.1` port for local dev — see `api/app.py`.
+
 See `docs/ARCHITECTURE.md` for how the codebase is laid out and
 `docs/PHASES.md` for what's built so far and what's next.

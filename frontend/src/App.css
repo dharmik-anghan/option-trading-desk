@@ -1,0 +1,99 @@
+.dashboard {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1a1a1a;
+}
+
+header h1 {
+  margin-bottom: 4px;
+}
+
+.hint {
+  color: #666;
+  font-size: 0.9em;
+}
+
+section {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.9em;
+}
+
+th {
+  color: #666;
+  font-weight: 600;
+}
+
+.pnl-summary {
+  display: flex;
+  gap: 32px;
+  margin: 12px 0;
+}
+
+.pnl-summary .label {
+  display: block;
+  font-size: 0.8em;
+  color: #666;
+}
+
+.pnl-summary > div > span:last-child {
+  font-size: 1.3em;
+  font-weight: 600;
+}
+
+.pnl-pos {
+  color: #1a7f37;
+}
+
+.pnl-neg {
+  color: #c0392b;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.controls input[type="text"],
+.controls input:not([type]),
+.controls select {
+  padding: 6px 8px;
+}
+
+.controls input[type="number"] {
+  width: 60px;
+  padding: 6px 8px;
+}
+
+button {
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.error {
+  color: #c0392b;
+}
+
+code {
+  background: #f4f4f4;
+  padding: 2px 5px;
+  border-radius: 3px;
+}

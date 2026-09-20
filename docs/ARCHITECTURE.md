@@ -123,6 +123,38 @@ ticks (see `docs/PHASES.md`).
   view, not a web UI. A real dashboard stays a deliberate, undecided choice
   until there's a felt need for one beyond the CLI
 
+## Web dashboard
+
+Decided: React + Vite + TypeScript frontend, FastAPI backend, **read-only**
+to start (order placement stays in the CLI's `CONFIRM` flow — see
+`execution/confirm.py` for why that gate matters).
+
+```
+frontend/  (React + Vite + TS - fetches from the API below)
+     |
+api/app.py  (FastAPI - read-only: get_positions, get_funds, get_option_chain;
+             never place_order)
+     |
+(same broker/analytics/risk/strategies/storage stack as everything else)
+```
+
+- `api/dependencies.py` — `get_broker()`/`get_db_path()` as FastAPI
+  dependencies, overridden in tests with `FakeBroker`/a temp DB path so
+  the test suite never touches real credentials or the real `data/trading.db`
+- `api/schemas.py` — API wire types, separate from internal domain types
+  (`Leg`, `PortfolioStatus` are dataclasses; the API boundary gets its own
+  pydantic schemas) for the same reason `broker/models.py` translates
+  Fyers' wire format rather than exposing it directly
+- **Bug caught and fixed during development**: `analyze()`'s unbounded
+  max profit/loss (`math.inf`/`-math.inf`) can't be serialized as JSON —
+  Python's `json.dumps` emits the literal token `Infinity`, which is not
+  valid JSON and a browser's `JSON.parse` rejects outright. The API
+  represents these as `null` instead; a regression test
+  (`test_strategy_endpoint_serializes_unbounded_risk_as_json_null`) asserts
+  the raw response text never contains the string `Infinity`
+- CORS is open to any `localhost`/`127.0.0.1` port for local dev (Vite picks
+  a free port, which varies) — tighten before exposing beyond localhost
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

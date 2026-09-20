@@ -1,0 +1,51 @@
+"""API response shapes.
+
+Kept separate from the internal domain types (`analytics.payoff.Leg` is a
+dataclass, `execution.portfolio_status.PortfolioStatus` too) so the wire
+format is explicit and doesn't silently change if an internal dataclass's
+fields change - the same reasoning as `broker/models.py` translating
+Fyers' wire format rather than exposing it directly, just at the other end
+of the stack.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+from broker.models import OptionType, Position, Side
+
+
+class PortfolioResponse(BaseModel):
+    positions: list[Position]
+    realized_pnl: float
+    unrealized_pnl: float
+    total_pnl: float
+
+
+class LegResponse(BaseModel):
+    option_type: OptionType
+    strike: float
+    premium: float
+    quantity: int
+    side: Side
+    symbol: str | None
+
+
+class StrategySignalResponse(BaseModel):
+    strategy: str
+    symbol: str
+    underlying_ltp: float
+    legs: list[LegResponse]
+    # None represents unbounded risk/reward (Python's math.inf/-math.inf).
+    # json.dumps would otherwise emit the literal token `Infinity`, which
+    # is not valid JSON and a browser's JSON.parse rejects outright.
+    max_profit: float | None
+    max_loss: float | None
+    breakevens: list[float]
+
+
+class PortfolioHistoryPoint(BaseModel):
+    fetched_at: str
+    realized_pnl: float
+    unrealized_pnl: float
+    total_pnl: float
