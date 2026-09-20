@@ -41,6 +41,12 @@ whether `FYERS_ACCESS_TOKEN` is set and still valid by running
 re-run `uv run python scripts/fyers_login.py` (tokens expire daily) — do not
 attempt to complete the interactive login flow yourself.
 
+That script auto-detects TOTP auto-login (see `broker/fyers_auth.py`) if
+`FYERS_USERNAME`/`FYERS_TOTP_KEY`/`FYERS_PIN` are all set in `.env`, and
+falls back to the manual browser flow otherwise — **never ask the user to
+paste their TOTP secret or PIN into chat**; they add those to `.env`
+themselves if they want auto-login.
+
 ## Reference
 
 - `docs/SETUP.md` — full manual setup walkthrough

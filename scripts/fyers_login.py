@@ -1,11 +1,19 @@
-"""One-time-per-day interactive Fyers login.
+"""Daily Fyers login: TOTP auto-login when configured, manual browser flow
+otherwise.
 
-Fyers uses an OAuth-style flow: we send you to a login URL, you authenticate
-in the browser, Fyers redirects to `FYERS_REDIRECT_URI` with an `auth_code`
-query param, you paste that code (or the whole redirected URL) back here, and
-we exchange it for an access token that gets written to `.env`.
+Manual flow: Fyers uses an OAuth-style flow: we send you to a login URL, you
+authenticate in the browser, Fyers redirects to `FYERS_REDIRECT_URI` with an
+`auth_code` query param, you paste that code (or the whole redirected URL)
+back here, and we exchange it for an access token that gets written to
+`.env`.
 
-This is the Phase 0 checkpoint: if this script succeeds, real Fyers
+Auto-login: if FYERS_USERNAME, FYERS_TOTP_KEY, and FYERS_PIN are all set in
+`.env`, this replicates the same login steps without a browser (see
+broker/fyers_auth.py for why, and the risk tradeoff of storing those two
+extra secrets). Falls back to the manual flow if auto-login fails, since
+these are undocumented endpoints Fyers could change at any time.
+
+This is also the Phase 0 checkpoint: if this script succeeds, real Fyers
 connectivity is proven before any broker/market-data code is written.
 """
 
@@ -25,7 +33,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from settings import load_settings  # noqa: E402
+from broker.fyers_auth import AutoLoginError, auto_login  # noqa: E402
+from settings import Settings, load_settings  # noqa: E402
 
 ENV_PATH = REPO_ROOT / ".env"
 
@@ -64,9 +73,27 @@ def jwt_subject(token: str) -> str | None:
     return subject if isinstance(subject, str) else None
 
 
-def main() -> int:
-    settings = load_settings()
+def try_auto_login(settings: Settings) -> str | None:
+    if not settings.has_auto_login_credentials:
+        return None
+    print("FYERS_USERNAME/TOTP_KEY/PIN found - attempting TOTP auto-login...")
+    try:
+        token = auto_login(
+            client_id=settings.fyers_client_id,
+            secret_key=settings.fyers_secret_key,
+            redirect_uri=settings.fyers_redirect_uri,
+            fy_id=settings.fyers_username,
+            totp_key=settings.fyers_totp_key,
+            pin=settings.fyers_pin,
+        )
+        print("Auto-login succeeded.")
+        return token
+    except AutoLoginError as exc:
+        print(f"Auto-login failed ({exc}); falling back to manual login.", file=sys.stderr)
+        return None
 
+
+def manual_login(settings: Settings) -> str | None:
     session = fyersModel.SessionModel(
         client_id=settings.fyers_client_id,
         secret_key=settings.fyers_secret_key,
@@ -86,25 +113,34 @@ def main() -> int:
         auth_code = extract_auth_code(pasted)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return None
 
     session.set_token(auth_code)
     response = session.generate_token()
 
     if response.get("s") != "ok":
         print(f"Login failed. Fyers response: {response}", file=sys.stderr)
-        return 1
+        return None
 
     access_token = response.get("access_token")
     if not access_token:
         print(f"Login failed - no access_token in response: {response}", file=sys.stderr)
+        return None
+    return str(access_token)
+
+
+def main() -> int:
+    settings = load_settings()
+
+    access_token = try_auto_login(settings) or manual_login(settings)
+    if not access_token:
         return 1
 
     subject = jwt_subject(access_token)
     if subject != "access_token":
         print(
             "Login appeared to succeed but the returned token doesn't look like a real "
-            f"access token (sub={subject!r}). Not saving it. Full response: {response}",
+            f"access token (sub={subject!r}). Not saving it.",
             file=sys.stderr,
         )
         return 1

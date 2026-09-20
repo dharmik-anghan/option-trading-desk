@@ -168,6 +168,36 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
     floating-point P&L, e.g. `942.5000000000017`) which was fixed in
     `frontend/src/format.ts`.
 
+- [x] **Phase 8 — TOTP auto-login** — done
+  - Problem: the manual browser+paste login (Phase 0) had to be repeated
+    every trading day, since Fyers access tokens expire daily.
+  - Considered installing the `multi-broker-sdk` PyPI package (does exactly
+    this), but it's anonymous (no listed author/repo) at v0.1.1 and would
+    need the TOTP secret + PIN - too sensitive to hand to an unaudited,
+    unmaintained dependency whose future updates can't be verified.
+  - Instead: fully read and audited its ~460-line Fyers implementation
+    (confirmed it only talks to Fyers' own domains, computes TOTP locally,
+    no telemetry), then **ported the technique** into our own code rather
+    than taking the dependency - same benefit, no supply-chain exposure,
+    and it's now something we can maintain if Fyers changes these
+    undocumented endpoints.
+  - [x] `broker/fyers_auth.py` — `auto_login()`: replicates the manual
+    login steps (OTP -> TOTP verify -> PIN verify -> get auth code ->
+    exchange for token) against Fyers' undocumented login endpoints. Uses
+    `pyotp` for TOTP (standard RFC 6238, same algorithm the reference
+    package's hand-rolled version used). HTTP session and the final token
+    exchange are both injectable, so tests never hit real Fyers servers or
+    need real credentials (`tests/broker/test_fyers_auth.py`).
+  - [x] `settings.py` gained optional `fyers_username`/`fyers_totp_key`/
+    `fyers_pin` + `has_auto_login_credentials` - all-or-nothing, missing
+    any of the three keeps you on the manual flow
+  - [x] `scripts/fyers_login.py` tries auto-login first when configured,
+    falls back to the manual browser flow on any `AutoLoginError` (these
+    are undocumented endpoints Fyers could change without notice)
+  - Checkpoint: pending — the user needs to add their own
+    `FYERS_USERNAME`/`FYERS_TOTP_KEY`/`FYERS_PIN` to `.env` (never shared
+    in chat) before this can be verified against a real login
+
 **Deferred:** multi-broker adapters, backtesting engine, full automation,
 order placement from the dashboard (deliberately read-only for now).
 Phase 5's live order-placement checkpoint is still pending - that's the

@@ -155,6 +155,22 @@ api/app.py  (FastAPI - read-only: get_positions, get_funds, get_option_chain;
 - CORS is open to any `localhost`/`127.0.0.1` port for local dev (Vite picks
   a free port, which varies) — tighten before exposing beyond localhost
 
+## TOTP auto-login
+
+`broker/fyers_auth.py` replicates Fyers' manual login flow (OTP -> TOTP
+verify -> PIN verify -> auth code -> token exchange) against undocumented
+endpoints, so the daily token refresh doesn't need a browser. Ported and
+re-audited from the `multi-broker-sdk` PyPI package rather than taken on as
+a dependency (see `docs/PHASES.md` Phase 8 for the reasoning) — same
+technique, but as code we own and can read, for a flow that handles a TOTP
+secret and PIN.
+
+`scripts/fyers_login.py` tries this first when
+`FYERS_USERNAME`/`FYERS_TOTP_KEY`/`FYERS_PIN` are all set, and falls back to
+the manual OAuth flow (`fyersModel.SessionModel`) on any `AutoLoginError` —
+that fallback matters because these are undocumented endpoints Fyers could
+change without notice, unlike the official OAuth flow.
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

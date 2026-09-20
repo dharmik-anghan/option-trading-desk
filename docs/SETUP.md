@@ -39,6 +39,22 @@ the `auth_code` param). This writes `FYERS_ACCESS_TOKEN` into `.env`.
 
 **Fyers access tokens expire daily** — re-run this script each trading day.
 
+### Optional: skip the manual browser step
+
+Fill in `FYERS_USERNAME` (your Fyers ID, e.g. `XY12345`), `FYERS_TOTP_KEY`
+(the base32 secret shown when you set up TOTP 2FA on Fyers — not a 6-digit
+code, the underlying key), and `FYERS_PIN` (your trading PIN) in `.env`,
+and `scripts/fyers_login.py` will log in automatically with no browser step.
+
+This uses undocumented Fyers endpoints (see `broker/fyers_auth.py`) rather
+than Fyers' official OAuth flow, so it could break if Fyers changes them —
+if it does, the script automatically falls back to the manual flow.
+
+**These two extra secrets are more sensitive than your API key/secret** —
+your TOTP secret alone gives permanent 2FA-bypass capability if `.env` ever
+leaked. Only add them if you're comfortable with that tradeoff; leaving any
+of the three blank keeps you on the manual flow.
+
 ## 5. Verify the login actually works
 
 ```bash

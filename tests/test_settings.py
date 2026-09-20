@@ -17,6 +17,25 @@ def test_settings_load_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.fyers_secret_key == "supersecret"
     assert settings.fyers_redirect_uri == "https://127.0.0.1"
     assert settings.fyers_access_token == ""
+    assert settings.has_auto_login_credentials is False
+
+
+def test_has_auto_login_credentials_requires_all_three(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FYERS_CLIENT_ID", "ABC123-100")
+    monkeypatch.setenv("FYERS_SECRET_KEY", "supersecret")
+    monkeypatch.setenv("FYERS_REDIRECT_URI", "https://127.0.0.1")
+    monkeypatch.setenv("FYERS_USERNAME", "XY12345")
+    monkeypatch.setenv("FYERS_TOTP_KEY", "JBSWY3DPEHPK3PXP")
+    monkeypatch.delenv("FYERS_PIN", raising=False)
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.has_auto_login_credentials is False
+
+    monkeypatch.setenv("FYERS_PIN", "1234")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.has_auto_login_credentials is True
 
 
 def test_settings_missing_required_field_raises(monkeypatch: pytest.MonkeyPatch) -> None:
