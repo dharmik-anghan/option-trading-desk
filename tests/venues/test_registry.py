@@ -59,6 +59,8 @@ class TestSessions:
     saturday = datetime(2026, 9, 26, 12, 0, tzinfo=IST)
     weekday_open = datetime(2026, 9, 28, 12, 0, tzinfo=IST)
     weekday_shut = datetime(2026, 9, 28, 20, 0, tzinfo=IST)
+    overnight = datetime(2026, 9, 28, 3, 0, tzinfo=IST)
+    sunday = datetime(2026, 9, 27, 12, 0, tzinfo=IST)
 
     def test_the_exchange_keeps_its_hours(self) -> None:
         assert is_open(Session.NSE_FO, self.weekday_open)
@@ -68,6 +70,15 @@ class TestSessions:
     def test_a_market_that_never_closes_never_closes(self) -> None:
         for at in (self.saturday, self.weekday_open, self.weekday_shut):
             assert is_open(Session.ALWAYS, at)
+
+    def test_gold_and_oil_run_all_day_but_not_at_the_weekend(self) -> None:
+        # The tradfi perpetuals track underlying futures, which stand down on
+        # Saturday and Sunday even though the exchange listing them does not.
+        assert is_open(Session.WEEKDAYS_24H, self.weekday_open)
+        assert is_open(Session.WEEKDAYS_24H, self.weekday_shut), "24h means overnight too"
+        assert is_open(Session.WEEKDAYS_24H, self.overnight), "03:00 on a weekday is open"
+        assert not is_open(Session.WEEKDAYS_24H, self.saturday)
+        assert not is_open(Session.WEEKDAYS_24H, self.sunday)
 
     def test_holidays_do_not_apply_to_a_market_without_them(self) -> None:
         holidays = frozenset({self.weekday_open.date()})

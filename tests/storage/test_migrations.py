@@ -101,15 +101,16 @@ def test_a_step_that_alters_a_table_is_applied(monkeypatch: pytest.MonkeyPatch) 
 
     fresh = connect(":memory:")
     init_schema(fresh)
+    # One past whatever the real list ends at, so this keeps testing the runner
+    # as migrations are appended rather than silently becoming a no-op.
+    nextup = latest_version() + 1
     monkeypatch.setattr(
         migrations,
         "MIGRATIONS",
-        (
-            Migration(version=1, reason="baseline", apply=lambda c: None),
-            Migration(version=2, reason="adds a column", apply=add_column),
-        ),
+        (*migrations.MIGRATIONS, Migration(version=nextup, reason="adds a column",
+                                           apply=add_column)),
     )
-    assert [m.version for m in migrate(fresh)] == [2]
+    assert [m.version for m in migrate(fresh)] == [nextup]
     columns = {row[1] for row in fresh.execute("PRAGMA table_info(basket)")}
     assert "venue" in columns
     fresh.close()

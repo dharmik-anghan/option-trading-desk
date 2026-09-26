@@ -8,6 +8,7 @@ path, without ever needing real Fyers credentials or touching the real
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -94,7 +95,13 @@ def get_broker() -> OptionsBroker:
 
 
 def get_db_path() -> Path:
-    return DEFAULT_DB_PATH
+    """Where the database lives.
+
+    Honours DB_PATH, because `scripts/backup_db.py` already does and the two
+    disagreeing is a trap: pointing DB_PATH at a copy looked like it worked while
+    the app carried on writing to the real file.
+    """
+    return Path(os.environ.get("DB_PATH", DEFAULT_DB_PATH))
 
 
 # One set of feeds for the process, so the calendar is fetched a few times a

@@ -22,7 +22,7 @@ short is being tested, and what is scheduled to happen before they expire.
 | **Positions** | Open contracts from the broker, with per-leg P&L |
 | **P&L history** | A line of recorded snapshots, taken only while the exchange is trading |
 | **Open structures** | Your positions grouped into named structures, each with a payoff curve, greeks, breakevens and per-leg detail |
-| **Alerts** | Edge-triggered warnings with editable thresholds — a short being tested, buildup against you, an event before expiry, a limit breached |
+| **Alerts** | Edge-triggered warnings with editable thresholds — a short being tested, buildup against you, an event before expiry, a limit breached. Raised by the backend, so they fire with no browser open, and delivered to Telegram when configured |
 | **News / Calendar** | Market headlines and the economic calendar, with events that land before one of your expiries marked |
 | **Option chain** | Collapsed by default. Expiry selection, open-interest buildup, greeks |
 
@@ -103,7 +103,8 @@ uv run python scripts/backup_db.py             # one backup now
 uv run python scripts/backup_db.py --loop      # what the container runs
 ```
 
-Tune with `BACKUP_EVERY_HOURS` and `BACKUP_KEEP` in `docker-compose.yml`.
+Tune with `BACKUP_EVERY_HOURS` and `BACKUP_KEEP` in `docker-compose.yml`, and
+point the desk at another file with `DB_PATH`.
 Restoring is a file copy: stop the desk, replace `data/trading.db`, start it.
 
 ## How it is laid out
@@ -112,6 +113,8 @@ Dependencies point downward; nothing below knows about anything above it.
 
 ```
 api/         HTTP surface. app.py composes; routers/ holds the endpoints.
+alerting/    The alert engine: rules, edge triggering, the watcher loop.
+notify/      Getting an alert to someone who is not at the screen.
 venues/      What can be traded and where. No credentials, no I/O.
 feeds/       Economic calendar and news. Parsing kept apart from fetching.
 execution/   Portfolio and basket status.
@@ -128,6 +131,25 @@ instead of raising for the rest, and adding a venue is a new file rather than
 a change everywhere. `broker/cache.py` sits in
 front of it and holds reads for a few seconds — without it, four panels polling
 together breach Fyers' ten-per-second limit and the desk silently goes stale.
+
+## Alerts
+
+The engine lives in `alerting/` and runs as a background task for as long as the
+app is up, judging the book about once a minute. It is edge-triggered: an alert
+is written when a condition becomes true and not again while it stays true, with
+a release band on thresholds so a delta either side of a limit does not announce
+itself repeatedly, and a fifteen-minute floor per alert behind that.
+
+State is in SQLite, not the browser, which is what lets an alert fire with
+nothing open and reach Telegram. Set `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` to have them delivered; leave them blank and alerts are still
+recorded and shown, just not sent. A batch that fires together is sent as one
+message, and an alert stays queued until a send succeeds, so an unreachable
+Telegram means a late message rather than a lost one.
+
+`GET /api/alerts` returns the log, the conditions currently true, the thresholds,
+and whether the watcher is actually running — an empty list means "nothing is
+wrong" only if something is looking.
 
 ## Checks
 
@@ -158,7 +180,6 @@ against saved fixtures in `tests/feeds/fixtures/`.
 - **No websocket.** Everything polls; `subscribe_ticks` raises. Prices are a
   few seconds behind, which is immaterial for defined-risk positions held for
   weeks and would matter if you were trading intraday.
-- **Alerts run in the browser tab.** Close it and nothing is watching.
 - **The economic calendar is scraped**, so it will break when the source page
   changes. It reports "reachable but unreadable" rather than showing an empty
   calendar, but fixing it means fixing the parser.

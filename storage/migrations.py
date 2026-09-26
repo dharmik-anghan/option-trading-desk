@@ -37,9 +37,58 @@ def _noop(conn: sqlite3.Connection) -> None:
     """Baseline. Everything `init_schema` creates is version 1 by definition."""
 
 
+def _alert_state(conn: sqlite3.Connection) -> None:
+    """Somewhere for the alert engine to keep its log and its active keys.
+
+    The engine ran in the browser and kept both in `localStorage`, which is per
+    origin, dies with the tab, and cannot be read by anything that sends a
+    Telegram message. Moving it here is what lets alerts fire while nothing is
+    open - which is the only way a 24/7 market can be watched at all.
+
+    `alert_active` is the set of conditions currently true. It is not a log and
+    has no history: it exists so that a restart does not read every still-true
+    condition as a fresh transition and re-announce all of them.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS alert_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            subject TEXT,
+            message TEXT NOT NULL,
+            -- epoch milliseconds, matching the frontend's clock so one log can
+            -- hold entries written by either engine
+            at INTEGER NOT NULL,
+            -- whether this one has been delivered, so a restart does not send
+            -- the same Telegram message twice
+            notified_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_alert_log_at ON alert_log(at);
+        CREATE INDEX IF NOT EXISTS idx_alert_log_key_at ON alert_log(key, at);
+
+        CREATE TABLE IF NOT EXISTS alert_active (
+            key TEXT PRIMARY KEY,
+            since INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS alert_limits (
+            -- one row, so the thresholds are a value rather than a history
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            target REAL NOT NULL,
+            daily_loss REAL NOT NULL,
+            max_loss REAL NOT NULL,
+            short_delta REAL NOT NULL,
+            expiry_days REAL NOT NULL
+        );
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
+    Migration(version=2, reason="alert log, active keys and limits move server-side",
+              apply=_alert_state),
 )
 
 

@@ -16,17 +16,80 @@ that model is the frontend's review screen.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from alerting.watcher import Watcher
+from api.alert_inputs import gather
+from api.dependencies import get_broker, get_db_path, get_feeds
 from api.errors import broker_error_handler
-from api.routers import baskets, feeds, market, orders, portfolio, strategies, system
+from api.routers import alerts, baskets, feeds, market, orders, portfolio, strategies, system
+from api.store import open_db
 from broker.errors import BrokerError
+from notify import Telegram, TelegramConfig
+from settings import load_settings
 
-app = FastAPI(title="Option Strategy Dashboard API")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """Run the alert watcher for as long as the app is up.
+
+    Alerts used to be computed in the browser, so nothing was watching when the
+    tab was closed. This is the task that fixes that, and it is the reason the
+    app has a lifespan at all - the websocket work that comes next will hang off
+    the same hook.
+
+    Everything is best-effort: if the watcher cannot be built, the desk still
+    serves. A trading screen that refuses to start because a notifier is
+    misconfigured is worse than one that starts and says alerts are off, which is
+    what `/api/alerts` reports.
+    """
+    settings = load_settings()
+    notifier = (
+        Telegram(
+            TelegramConfig(
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
+            )
+        )
+        if settings.has_telegram
+        else None
+    )
+    db_path = get_db_path()
+    # Make sure the schema is current before the watcher's first pass, which runs
+    # on a worker thread and would otherwise race the first request to do it.
+    open_db(db_path).close()
+
+    feeds_cache = get_feeds()
+    watcher = Watcher(
+        gather=lambda: gather(db_path, get_broker(), feeds_cache),
+        open_conn=lambda: open_db(db_path),
+        notifier=notifier,
+    )
+    application.state.alert_watcher = watcher
+    application.state.alert_notifier = notifier
+
+    task = asyncio.create_task(watcher.run_forever(), name="alert-watcher")
+    log.info("alert watcher started (telegram=%s)", notifier is not None)
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        log.info("alert watcher stopped")
+
+
+app = FastAPI(title="Option Strategy Dashboard API", lifespan=lifespan)
 
 # Local dev only: the Vite dev server runs on a different port than uvicorn.
 # Tighten this (or drop it behind a reverse proxy) before exposing this
@@ -46,6 +109,7 @@ app.add_exception_handler(BrokerError, broker_error_handler)
 # distinct - except that all of them must be registered before the mount below.
 for _router in (
     system.router,
+    alerts.router,
     portfolio.router,
     market.router,
     feeds.router,

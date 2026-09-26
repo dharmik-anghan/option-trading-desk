@@ -31,9 +31,20 @@ class Settings(BaseSettings):
     fyers_totp_key: str = ""
     fyers_pin: str = ""
 
+    # Optional: where alerts are delivered when nobody is watching the screen.
+    # Both or neither - with either missing, the desk still records alerts and
+    # shows them, it just sends nothing. The bot token is a bearer credential:
+    # anyone holding it controls the bot, so never log or print it.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     @property
     def has_auto_login_credentials(self) -> bool:
         return bool(self.fyers_username and self.fyers_totp_key and self.fyers_pin)
+
+    @property
+    def has_telegram(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
 
 class MissingSettingsError(SystemExit):
