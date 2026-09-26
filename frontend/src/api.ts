@@ -96,6 +96,10 @@ export interface Basket {
   stop_loss: number | null;
   profit_target: number | null;
   delta_limit: number | null;
+  /** Overrides for the shared defaults. Null means the default is used. */
+  worst_case_limit: number | null;
+  short_delta_limit: number | null;
+  expiry_warn_days: number | null;
   /** What the open legs are worth now, and how the structure leans — computed
       server-side, so the screen and the alert about it read one number. Null
       when the broker has not priced every open leg. */
@@ -299,6 +303,9 @@ export interface BasketLevels {
   stop_loss: number | null;
   profit_target: number | null;
   delta_limit: number | null;
+  worst_case_limit: number | null;
+  short_delta_limit: number | null;
+  expiry_warn_days: number | null;
 }
 
 export function setBasketLevels(id: number, levels: BasketLevels): Promise<Basket> {

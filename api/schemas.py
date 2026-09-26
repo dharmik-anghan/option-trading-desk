@@ -148,6 +148,11 @@ class BasketResponse(BaseModel):
     stop_loss: float | None
     profit_target: float | None = None
     delta_limit: float | None = None
+    #: Overrides for the shared defaults. None means the default is used, which is
+    #: what lets a structure recorded before these existed behave as it did.
+    worst_case_limit: float | None = None
+    short_delta_limit: float | None = None
+    expiry_warn_days: float | None = None
     #: What the open legs are worth now, and how the structure leans. Computed
     #: server-side so the screen, the alert about it, and the rule that raises
     #: that alert all read one number. None when the broker has not priced every

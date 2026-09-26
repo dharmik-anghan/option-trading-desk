@@ -156,6 +156,9 @@ def _basket_to_response(
         stop_loss=basket.stop_loss,
         profit_target=basket.profit_target,
         delta_limit=basket.delta_limit,
+        worst_case_limit=basket.worst_case_limit,
+        short_delta_limit=basket.short_delta_limit,
+        expiry_warn_days=basket.expiry_warn_days,
         mtm=mtm,
         net_delta=net_delta,
         legs=legs,
@@ -309,10 +312,19 @@ class LevelsRequest(BaseModel):
     stop_loss: float | None = None
     profit_target: float | None = None
     delta_limit: float | None = None
+    worst_case_limit: float | None = None
+    short_delta_limit: float | None = None
+    expiry_warn_days: float | None = None
 
     @model_validator(mode="after")
     def _no_zero_levels(self) -> LevelsRequest:
-        for name in ("stop_loss", "profit_target", "delta_limit"):
+        for name in (
+            "stop_loss",
+            "profit_target",
+            "delta_limit",
+            "worst_case_limit",
+            "short_delta_limit",
+        ):
             value = getattr(self, name)
             if value is not None and value == 0:
                 raise ValueError(f"{name} of zero is not a level; send null to clear it")
@@ -335,6 +347,11 @@ def put_levels(basket_id: int, body: LevelsRequest, db_path: DbPathDep) -> Baske
             stop_loss=body.stop_loss,
             profit_target=body.profit_target,
             delta_limit=body.delta_limit,
+            worst_case_limit=body.worst_case_limit,
+            short_delta_limit=body.short_delta_limit,
+            # Zero days is a real answer here - "warn me on expiry day" - so it is
+            # not in the no-zero list above.
+            expiry_warn_days=body.expiry_warn_days,
         ):
             raise HTTPException(status_code=404, detail="no such basket")
         basket = get_basket(conn, basket_id)

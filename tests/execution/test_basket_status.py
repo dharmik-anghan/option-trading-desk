@@ -67,6 +67,9 @@ def _basket(legs: list[BasketLeg]) -> Basket:
         stop_loss=None,
         profit_target=None,
         delta_limit=None,
+        worst_case_limit=None,
+        short_delta_limit=None,
+        expiry_warn_days=None,
         legs=legs,
     )
 

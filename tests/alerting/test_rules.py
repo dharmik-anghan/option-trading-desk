@@ -388,3 +388,61 @@ class TestDeltaSigns:
         # The live condor: +20.80 -12.35 -14.95 +6.50 = 0.00, with no leg near zero.
         b = FakeBasket(id=8, net_delta=0.0, delta_limit=10.0)
         assert not [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
+
+
+class TestPerStructureOverrides:
+    """A structure's own threshold beats the shared default.
+
+    These three were account-wide, then became numbers nothing could edit. Both
+    are wrong for the same reason: a condor's tested-short delta is not a
+    strangle's, and a warning three days out suits a weekly and not a quarterly.
+    """
+
+    def test_a_structures_own_tested_delta_is_used(self) -> None:
+        # Default is 0.30; this structure says 0.50, so 0.40 is not yet tested.
+        leg = FakeLeg(id=19, side="SELL", delta=-0.40)
+        b = FakeBasket(id=8, legs=[leg], short_delta_limit=0.5)
+        assert "tested:19" not in keys(evaluate(None, [b], L))
+
+    def test_without_an_override_the_default_applies(self) -> None:
+        leg = FakeLeg(id=19, side="SELL", delta=-0.40)
+        b = FakeBasket(id=8, legs=[leg])
+        assert "tested:19" in keys(evaluate(None, [b], L))
+
+    def test_a_tighter_override_fires_sooner(self) -> None:
+        leg = FakeLeg(id=19, side="SELL", delta=-0.15)
+        b = FakeBasket(id=8, legs=[leg], short_delta_limit=0.1)
+        assert "tested:19" in keys(evaluate(None, [b], L))
+
+    def test_a_structures_own_expiry_warning_is_used(self) -> None:
+        # Default warns at 3 days; a quarterly might want a fortnight.
+        b = FakeBasket(id=8, days_to_expiry=10.0, expiry_warn_days=14.0)
+        assert f"expiry:{b.id}" in keys(evaluate(None, [b], L))
+
+    def test_zero_days_is_a_real_answer(self) -> None:
+        # "Warn me on expiry day" - so zero is not treated as unset here, unlike
+        # the money levels where zero and unset are indistinguishable.
+        b = FakeBasket(id=8, days_to_expiry=0.5, expiry_warn_days=0.0)
+        assert f"expiry:{b.id}" not in keys(evaluate(None, [b], L))
+
+    def test_a_structures_own_worst_case_is_used(self) -> None:
+        b = FakeBasket(id=8, max_loss=-50_000.0, worst_case_limit=60_000.0)
+        assert f"worst-case:{b.id}" not in keys(evaluate(None, [b], L))
+        tighter = FakeBasket(id=9, max_loss=-50_000.0, worst_case_limit=10_000.0)
+        assert f"worst-case:{tighter.id}" in keys(evaluate(None, [tighter], L))
+
+    def test_the_override_is_read_as_a_magnitude(self) -> None:
+        # A worst case is a loss and reads naturally as negative; typing it either
+        # way should mean the same thing.
+        for limit in (10_000.0, -10_000.0):
+            b = FakeBasket(id=8, max_loss=-50_000.0, worst_case_limit=limit)
+            assert f"worst-case:{b.id}" in keys(evaluate(None, [b], L))
+
+    def test_two_structures_can_disagree(self) -> None:
+        loose = FakeBasket(id=1, legs=[FakeLeg(id=1, side="SELL", delta=-0.4)],
+                           short_delta_limit=0.6)
+        tight = FakeBasket(id=2, legs=[FakeLeg(id=2, side="SELL", delta=-0.4)],
+                           short_delta_limit=0.2)
+        fired = keys(evaluate(None, [loose, tight], L))
+        assert "tested:1" not in fired
+        assert "tested:2" in fired

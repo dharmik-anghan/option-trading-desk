@@ -63,6 +63,11 @@ class Basket:
     profit_target: float | None
     #: |net delta| at which the structure has drifted further than you wanted.
     delta_limit: float | None
+    #: Overrides for the shared defaults. Null means "use the default", so a
+    #: structure recorded before these existed behaves exactly as it did.
+    worst_case_limit: float | None
+    short_delta_limit: float | None
+    expiry_warn_days: float | None
     legs: list[BasketLeg]
 
 
@@ -145,7 +150,8 @@ def _legs_for_basket(conn: sqlite3.Connection, basket_id: int) -> list[BasketLeg
 def get_basket(conn: sqlite3.Connection, basket_id: int) -> Basket | None:
     row = conn.execute(
         "SELECT id, name, strategy, underlying_symbol, created_at, stop_loss, "
-        "profit_target, delta_limit FROM basket WHERE id = ?",
+        "profit_target, delta_limit, worst_case_limit, short_delta_limit, "
+        "expiry_warn_days FROM basket WHERE id = ?",
         (basket_id,),
     ).fetchone()
     if row is None:
@@ -159,6 +165,9 @@ def get_basket(conn: sqlite3.Connection, basket_id: int) -> Basket | None:
         stop_loss=row[5],
         profit_target=row[6],
         delta_limit=row[7],
+        worst_case_limit=row[8],
+        short_delta_limit=row[9],
+        expiry_warn_days=row[10],
         legs=_legs_for_basket(conn, basket_id),
     )
 
@@ -226,6 +235,9 @@ def set_basket_levels(
     stop_loss: float | None,
     profit_target: float | None,
     delta_limit: float | None,
+    worst_case_limit: float | None = None,
+    short_delta_limit: float | None = None,
+    expiry_warn_days: float | None = None,
 ) -> bool:
     """Set this structure's own alert levels. False if there is no such basket.
 
@@ -233,8 +245,17 @@ def set_basket_levels(
     null rather than needing a separate call to unset it.
     """
     cursor = conn.execute(
-        "UPDATE basket SET stop_loss = ?, profit_target = ?, delta_limit = ? WHERE id = ?",
-        (stop_loss, profit_target, delta_limit, basket_id),
+        "UPDATE basket SET stop_loss = ?, profit_target = ?, delta_limit = ?, "
+        "worst_case_limit = ?, short_delta_limit = ?, expiry_warn_days = ? WHERE id = ?",
+        (
+            stop_loss,
+            profit_target,
+            delta_limit,
+            worst_case_limit,
+            short_delta_limit,
+            expiry_warn_days,
+            basket_id,
+        ),
     )
     conn.commit()
     return cursor.rowcount > 0

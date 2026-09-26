@@ -103,6 +103,17 @@ def evaluate(
         if not open_legs:
             continue
 
+        # This structure's own number, or the shared default. An override rather
+        # than a required field, so a structure recorded before these existed
+        # behaves exactly as it did.
+        worst_case = b.worst_case_limit if b.worst_case_limit is not None else limits.max_loss
+        tested_at = (
+            b.short_delta_limit if b.short_delta_limit is not None else limits.short_delta
+        )
+        warn_days = (
+            b.expiry_warn_days if b.expiry_warn_days is not None else limits.expiry_days
+        )
+
         if b.max_loss is None:
             on.append(
                 Condition(
@@ -112,7 +123,7 @@ def evaluate(
                     message="Unlimited downside — no worst case to check",
                 )
             )
-        elif abs(b.max_loss) > limits.max_loss:
+        elif abs(b.max_loss) > abs(worst_case):
             on.append(
                 Condition(
                     key=f"worst-case:{b.id}",
@@ -120,7 +131,7 @@ def evaluate(
                     subject=b.name,
                     message=(
                         f"Worst case {rupees_compact(b.max_loss)} is past your "
-                        f"{rupees_compact(-limits.max_loss)} limit"
+                        f"{rupees_compact(-abs(worst_case))} limit"
                     ),
                 )
             )
@@ -172,7 +183,7 @@ def evaluate(
                     )
                 )
 
-        if b.days_to_expiry is not None and b.days_to_expiry <= limits.expiry_days:
+        if b.days_to_expiry is not None and b.days_to_expiry <= warn_days:
             on.append(
                 Condition(
                     key=f"expiry:{b.id}",
@@ -206,7 +217,7 @@ def evaluate(
 
             # A band, not a line - see HYSTERESIS.
             tested_key = f"tested:{leg.id}"
-            bound = limits.short_delta * HYSTERESIS if tested_key in sticky else limits.short_delta
+            bound = tested_at * HYSTERESIS if tested_key in sticky else tested_at
             if leg.delta is not None and abs(leg.delta) >= bound:
                 on.append(
                     Condition(

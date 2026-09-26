@@ -134,6 +134,26 @@ def _basket_alert_levels(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _basket_thresholds(conn: sqlite3.Connection) -> None:
+    """The last three thresholds move onto the structure too.
+
+    A worst case, the delta a short counts as tested at, and how many days before
+    expiry to warn were left as account-wide numbers when the rest moved - and
+    then, when the account panel went, as numbers nothing could edit. Both are
+    wrong for the same reason: a condor's tested-short delta is not a strangle's,
+    and a warning three days before expiry suits a weekly and not a quarterly.
+
+    Nullable, and null means "use the default". A structure recorded before this
+    existed keeps behaving exactly as it did, which is the point of an override
+    rather than a required field.
+    """
+    conn.executescript("""
+        ALTER TABLE basket ADD COLUMN worst_case_limit REAL;
+        ALTER TABLE basket ADD COLUMN short_delta_limit REAL;
+        ALTER TABLE basket ADD COLUMN expiry_warn_days REAL;
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
@@ -143,6 +163,8 @@ MIGRATIONS: tuple[Migration, ...] = (
               apply=_alert_watches),
     Migration(version=4, reason="per-structure profit target and delta limit",
               apply=_basket_alert_levels),
+    Migration(version=5, reason="per-structure worst case, short delta and expiry warning",
+              apply=_basket_thresholds),
 )
 
 

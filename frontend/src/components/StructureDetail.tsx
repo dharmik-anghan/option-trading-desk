@@ -81,6 +81,9 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
     stop_loss: basket.stop_loss,
     profit_target: basket.profit_target,
     delta_limit: basket.delta_limit,
+    worst_case_limit: basket.worst_case_limit,
+    short_delta_limit: basket.short_delta_limit,
+    expiry_warn_days: basket.expiry_warn_days,
   };
 
   const rows: [string, string, string?][] = [
@@ -216,6 +219,48 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
                 nullable
                 placeholder="none"
                 onCommit={(v) => onLevels({ ...levels, delta_limit: v })}
+              />
+            </td>
+          </tr>
+          {/* Overrides, shown with the default they replace. Blank means the
+              default is in force - which is what a structure recorded before
+              these existed has, and it behaves exactly as it did. */}
+          <tr>
+            <td className="l">Short tested at delta</td>
+            <td>
+              <ThresholdInput
+                label="Delta a short counts as tested at, for this structure"
+                value={basket.short_delta_limit}
+                step={0.05}
+                nullable
+                placeholder="0.30"
+                onCommit={(v) => onLevels({ ...levels, short_delta_limit: v })}
+              />
+            </td>
+          </tr>
+          <tr>
+            <td className="l">Warn days before expiry</td>
+            <td>
+              <ThresholdInput
+                label="Days before expiry to warn, for this structure"
+                value={basket.expiry_warn_days}
+                step={1}
+                nullable
+                placeholder="3"
+                onCommit={(v) => onLevels({ ...levels, expiry_warn_days: v })}
+              />
+            </td>
+          </tr>
+          <tr>
+            <td className="l">Worst case past</td>
+            <td>
+              <ThresholdInput
+                label="Worst case limit for this structure"
+                value={basket.worst_case_limit}
+                step={1000}
+                nullable
+                placeholder="40,000"
+                onCommit={(v) => onLevels({ ...levels, worst_case_limit: v })}
               />
             </td>
           </tr>

@@ -37,6 +37,9 @@ class FakeBasket:
     stop_loss: float | None = None
     profit_target: float | None = None
     delta_limit: float | None = None
+    worst_case_limit: float | None = None
+    short_delta_limit: float | None = None
+    expiry_warn_days: float | None = None
     #: Computed server-side in the real thing; given here so the rules can be
     #: exercised without reconstructing the arithmetic in a test.
     mtm: float | None = None
