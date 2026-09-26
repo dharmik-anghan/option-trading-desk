@@ -37,10 +37,11 @@ SHARK = VenueSpec(
     id="shark",
     name="Crypto & commodities",
     asset_class=AssetClass.PERPETUALS,
-    # Quoted in USDT. Note the account margins in INR - a closed XAUUSDT
-    # position reports marginAsset INR with a marginConversionRate alongside the
-    # USDT figure - so a balance and a price are not in the same unit here.
+    # Prices and charts in USDT, money in INR. Not a simplification: a closed
+    # XAUUSDT position reports marginAsset INR and a marginConversionRate beside
+    # the USDT figure, so the two really are in different units.
     quote_currency="USDT",
+    margin_currency="INR",
     # The venue never closes; gold and oil do. That is per instrument, in
     # venues/instruments.py, because they sit on this same venue.
     session=Session.ALWAYS,

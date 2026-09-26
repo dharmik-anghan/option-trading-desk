@@ -12,6 +12,24 @@ dependencies = [
     "uvicorn>=0.30",
     "requests>=2.31",
     "pyotp>=2.9",
+    # Shark's public tick stream is socket.io, not raw WebSocket, so a WebSocket
+    # client cannot speak it. Pure Python, and its aiohttp transport is already
+    # here via the Fyers SDK - see broker/shark/stream.py.
+    "python-socketio[asyncio_client]>=5.11",
+    # Held below 4.11 deliberately. fyers-apiv3 pins aiohttp==3.9.3 exactly, and
+    # from 4.11 engineio calls aiohttp.ClientWSTimeout, which 3.9 does not have -
+    # so a newer engineio installs cleanly and then fails at connect time with an
+    # AttributeError. 4.9.1 speaks the same protocol against the same venue;
+    # verified streaming all three instruments.
+    #
+    # The alternative is overriding the SDK's exact aiohttp pin. That is the wrong
+    # risk to take for this: aiohttp is what Fyers' own websocket runs on, and
+    # upgrading a dependency a vendor pinned exactly, to fix something in a
+    # different venue's stream, is how the options desk breaks quietly.
+    "python-engineio<4.11",
+    # An explicit CA bundle for that stream: aiohttp's default SSL context could
+    # not verify the venue's certificate on macOS.
+    "certifi>=2024.2",
 ]
 
 [dependency-groups]
@@ -57,6 +75,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "requests.*"
+ignore_missing_imports = true
+
+# python-socketio ships no py.typed marker. Its surface here is two calls (`on`
+# and `emit`) plus `connect`/`disconnect`, all used from one module.
+[[tool.mypy.overrides]]
+module = "socketio.*"
 ignore_missing_imports = true
 
 [tool.ruff]

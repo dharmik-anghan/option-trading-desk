@@ -1,14 +1,17 @@
 """What each venue lists, where the instruments do not share one calendar.
 
 The options desk needs no such list: every NSE index keeps exchange hours, so the
-venue's session answers for all of them. A crypto futures venue does not work
-that way - BTCUSDT never closes, while the gold and oil perpetuals beside it
-track underlying futures that stand down at the weekend. Same exchange, same API,
-different weeks.
+venue's session answers for all of them. This exists for everything else an
+instrument carries that its venue cannot say on its behalf - what to call it, and
+how finely it prices and sizes.
 
-Only instruments that differ from their venue's default need an entry. The rest
-inherit it, so this stays a list of exceptions rather than a catalogue to keep in
-step with 343 contracts.
+On hours specifically: the USDT perpetuals all run continuously, gold and oil
+included. That was worth checking rather than assuming, because the underlying
+futures do stand down at the weekend and it would be reasonable to expect the
+perpetual to follow. It does not - a stream open on a Saturday delivered XAUUSDT
+and CLUSDT ticks less than three seconds old, alongside BTCUSDT.
+
+Only instruments the desk actually trades need an entry; the venue lists 343.
 """
 
 from __future__ import annotations
@@ -43,7 +46,6 @@ SHARK_INSTRUMENTS: tuple[Instrument, ...] = (
         symbol="BTCUSDT",
         name="Bitcoin",
         venue_id="shark",
-        # Crypto: no close, no holidays.
         session=Session.ALWAYS,
         quote_asset="USDT",
         price_dp=1,
@@ -53,9 +55,9 @@ SHARK_INSTRUMENTS: tuple[Instrument, ...] = (
         symbol="XAUUSDT",
         name="Gold",
         venue_id="shark",
-        # Round the clock on weekdays, shut at the weekend: the underlying
-        # futures do not trade Saturday or Sunday, whatever the exchange does.
-        session=Session.WEEKDAYS_24H,
+        # Continuous, confirmed against a live weekend stream - the perpetual
+        # keeps trading even though the underlying futures do not.
+        session=Session.ALWAYS,
         quote_asset="USDT",
         price_dp=2,
         quantity_dp=3,
@@ -64,7 +66,7 @@ SHARK_INSTRUMENTS: tuple[Instrument, ...] = (
         symbol="CLUSDT",
         name="Crude oil",
         venue_id="shark",
-        session=Session.WEEKDAYS_24H,
+        session=Session.ALWAYS,
         quote_asset="USDT",
         price_dp=2,
         quantity_dp=3,

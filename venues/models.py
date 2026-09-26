@@ -51,12 +51,26 @@ class VenueSpec:
     #: Shown in the venue switcher.
     name: str
     asset_class: AssetClass
-    #: What P&L and balances are denominated in. Mixing two currencies in one
-    #: total is meaningless, so a desk shows one venue at a time.
+    #: What prices are quoted in - what a chart's axis is measured in.
     quote_currency: str
-    #: When it trades.
+    #: When it trades. A venue default; an instrument can differ from it, which
+    #: is what venues/instruments.py is for.
     session: Session
     capabilities: frozenset[Capability]
+    #: What the account is denominated in, when that is not the quote currency.
+    #:
+    #: They differ on Shark: contracts are quoted in USDT while the account
+    #: margins in INR, and a position reports its P&L in both with the conversion
+    #: rate it used. Carrying one currency for the pair would mean labelling one
+    #: of those figures wrongly, and a mislabelled number is worse than an
+    #: unfamiliar one.
+    margin_currency: str = ""
+
+    @property
+    def money_currency(self) -> str:
+        """What a balance or a P&L figure is in - the quote currency, unless the
+        venue settles in something else."""
+        return self.margin_currency or self.quote_currency
 
     def can(self, capability: Capability) -> bool:
         return capability in self.capabilities

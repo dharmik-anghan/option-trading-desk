@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import StrEnum
 
-from broker.session import IST, in_session
+from broker.session import in_session
 
 
 class Session(StrEnum):
@@ -28,12 +28,11 @@ class Session(StrEnum):
     """
 
     NSE_FO = "nse_fo"
-    #: Never closes. Crypto pairs.
+    #: Never closes. Every USDT perpetual on Shark, gold and oil included - the
+    #: contract keeps trading through the weekend even where its underlying
+    #: future does not. Checked against a live Saturday stream rather than
+    #: assumed, because the reasonable assumption turned out to be wrong.
     ALWAYS = "always"
-    #: Round the clock on weekdays, shut at the weekend. The tradfi perpetuals -
-    #: gold, silver, oil, index and equity proxies - whose underlying futures do
-    #: not trade Saturday or Sunday.
-    WEEKDAYS_24H = "weekdays_24h"
 
 
 def is_open(session: Session, at: datetime, holidays: frozenset[date] = frozenset()) -> bool:
@@ -42,14 +41,7 @@ def is_open(session: Session, at: datetime, holidays: frozenset[date] = frozense
     Holidays are ignored for a market that has none rather than being an error -
     callers should not have to know which calendars take a holiday list.
 
-    Weekends are judged in IST, which is where this desk is. A market keeping New
-    York hours reopens on Sunday evening local time, which is Monday morning
-    here; treating that as shut is a few hours of pessimism, and the honest fix
-    is the venue publishing its own hours rather than us guessing at them.
     """
     if session is Session.ALWAYS:
         return True
-    local = at.astimezone(IST) if at.tzinfo is not None else at.replace(tzinfo=IST)
-    if session is Session.WEEKDAYS_24H:
-        return local.weekday() < 5
     return in_session(at, holidays)

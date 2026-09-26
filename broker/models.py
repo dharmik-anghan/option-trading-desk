@@ -131,3 +131,18 @@ class Position(BaseModel):
     ltp: float
     unrealized_pnl: float
     product_type: str
+
+
+class Tick(BaseModel):
+    """One price update from a live stream.
+
+    Deliberately thin. A venue's tick payload carries a dozen fields, most of
+    which nothing here reads; carrying only what is used means a second venue's
+    stream needs no new model, and a price that arrives is never mistaken for a
+    whole quote that was polled.
+    """
+
+    symbol: str
+    price: float
+    #: When the venue says it happened, not when we received it.
+    at: datetime

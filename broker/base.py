@@ -27,7 +27,16 @@ from collections.abc import Callable
 from datetime import date
 from typing import Protocol, runtime_checkable
 
-from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
+from broker.models import (
+    Candle,
+    Funds,
+    OptionChain,
+    OrderRequest,
+    OrderResult,
+    Position,
+    Quote,
+    Tick,
+)
 
 
 @runtime_checkable
@@ -91,10 +100,33 @@ class OptionsData(Protocol):
 
 @runtime_checkable
 class Streaming(Protocol):
-    """Live updates pushed by the venue rather than polled for."""
+    """Live updates pushed by the venue, consumed by a blocking caller."""
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:
         """Stream live quotes for `symbols`, calling `on_tick` for each update."""
+        ...
+
+
+@runtime_checkable
+class AsyncStreaming(Protocol):
+    """Live updates delivered on an event loop.
+
+    A separate protocol rather than an async variant of `Streaming` because the
+    two are different jobs, not two spellings of one. A blocking subscriber owns
+    its thread for the life of the stream; this one is a task among others, and
+    the desk's background work - the alert watcher, and the browser fan-out that
+    follows - already lives on a loop.
+
+    Kept as start/stop rather than one long-running coroutine so a caller can own
+    the task's lifetime, which is what makes a clean shutdown possible.
+    """
+
+    async def start(self, symbols: list[str], on_tick: Callable[[Tick], None]) -> None:
+        """Connect and subscribe. Returns once the stream is running."""
+        ...
+
+    async def stop(self) -> None:
+        """Disconnect. Safe to call when not connected."""
         ...
 
 

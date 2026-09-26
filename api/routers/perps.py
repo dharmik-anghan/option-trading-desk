@@ -1,0 +1,161 @@
+"""The perpetuals desk: live prices, candles and positions from Shark.
+
+A separate router from `market`, not a venue parameter on it, because the two
+desks have almost no vocabulary in common. An option chain means nothing here,
+and leverage, funding and a liquidation price mean nothing there. Sharing the
+endpoints would mean half the fields being null on either side.
+
+Prices come from the tick stream rather than a request per read: this venue allows
+60 requests a minute, and it pushes.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime, timedelta
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+from api.dependencies import broker_for
+from broker.errors import BrokerError
+from streaming import TickHub
+from venues import Capability, for_venue
+from venues import get as get_venue
+from venues.calendar import is_open
+from venues.instruments import instrument
+
+router = APIRouter(tags=["perps"], prefix="/api/perps")
+
+VENUE_ID = "shark"
+
+
+class InstrumentResponse(BaseModel):
+    symbol: str
+    name: str
+    quote_asset: str
+    price_dp: int
+    quantity_dp: int
+    #: Whether this instrument is trading right now. Per instrument, not per
+    #: venue: BTCUSDT never closes while gold and oil stand down at the weekend.
+    open: bool
+
+
+class PriceResponse(BaseModel):
+    symbol: str
+    #: None when the stream has not carried this symbol yet - not zero, which
+    #: would be a market at nothing.
+    price: float | None
+    #: Seconds since this price arrived, by our clock, so a dead stream shows as
+    #: a stale price rather than a current one.
+    age_seconds: float | None
+
+
+class StreamStatus(BaseModel):
+    connected: bool
+    ticks: int
+    #: Ticks dropped because a reader fell behind. Reported rather than hidden:
+    #: a number climbing here means something is not keeping up.
+    dropped: int
+    subscribers: int
+
+
+class DeskResponse(BaseModel):
+    venue: str
+    name: str
+    #: Prices are in this.
+    quote_currency: str
+    #: Balances and P&L are in this, which is not the same thing on this venue.
+    money_currency: str
+    instruments: list[InstrumentResponse]
+    prices: list[PriceResponse]
+    stream: StreamStatus
+
+
+class CandleResponse(BaseModel):
+    at: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+def _hub(request: Request) -> TickHub | None:
+    """The process-wide hub, or None before the lifespan has run (as in tests)."""
+    hub = getattr(request.app.state, "tick_hub", None)
+    return hub if isinstance(hub, TickHub) else None
+
+
+@router.get("", response_model=DeskResponse)
+def desk(request: Request) -> DeskResponse:
+    """Everything the perpetuals desk needs to draw itself once."""
+    spec = get_venue(VENUE_ID)
+    hub = _hub(request)
+    stream = getattr(request.app.state, "tick_stream", None)
+    now = datetime.now(UTC)
+
+    instruments = [
+        InstrumentResponse(
+            symbol=i.symbol,
+            name=i.name,
+            quote_asset=i.quote_asset,
+            price_dp=i.price_dp,
+            quantity_dp=i.quantity_dp,
+            open=is_open(i.session, now),
+        )
+        for i in for_venue(VENUE_ID)
+    ]
+    prices = [
+        PriceResponse(
+            symbol=i.symbol,
+            price=hub.price(i.symbol) if hub is not None else None,
+            age_seconds=hub.age_seconds(i.symbol) if hub is not None else None,
+        )
+        for i in for_venue(VENUE_ID)
+    ]
+    return DeskResponse(
+        venue=spec.id,
+        name=spec.name,
+        quote_currency=spec.quote_currency,
+        money_currency=spec.money_currency,
+        instruments=instruments,
+        prices=prices,
+        stream=StreamStatus(
+            connected=bool(getattr(stream, "connected", False)),
+            ticks=int(getattr(hub, "received", 0) or 0),
+            dropped=int(getattr(hub, "dropped", 0) or 0),
+            subscribers=int(getattr(hub, "subscriber_count", 0) or 0),
+        ),
+    )
+
+
+@router.get("/candles/{symbol}", response_model=list[CandleResponse])
+def candles(symbol: str, resolution: str = "60", days: int = 5) -> list[CandleResponse]:
+    """Candles for one instrument.
+
+    Polled rather than streamed: a chart is redrawn on a timeframe change, not on
+    every tick, and the last candle is kept current from the tick stream on the
+    client side.
+    """
+    if instrument(symbol) is None:
+        raise HTTPException(status_code=404, detail=f"{symbol} is not on this desk")
+    spec = get_venue(VENUE_ID)
+    if not spec.can(Capability.HISTORY):
+        raise HTTPException(status_code=501, detail="this venue serves no history")
+    broker = broker_for(spec)
+    today = date.today()
+    try:
+        rows = broker.get_history(symbol, resolution, today - timedelta(days=days), today)
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+    return [
+        CandleResponse(
+            at=c.timestamp.isoformat(),
+            open=c.open,
+            high=c.high,
+            low=c.low,
+            close=c.close,
+            volume=c.volume,
+        )
+        for c in rows
+    ]

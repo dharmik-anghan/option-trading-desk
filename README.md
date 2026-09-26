@@ -26,6 +26,12 @@ short is being tested, and what is scheduled to happen before they expire.
 | **News / Calendar** | Market headlines and the economic calendar, with events that land before one of your expiries marked |
 | **Option chain** | Collapsed by default. Expiry selection, open-interest buildup, greeks |
 
+A second desk covers perpetual futures on Shark Exchange - Bitcoin, gold and
+crude - reached through `GET /api/perps`. Prices there arrive on a stream rather
+than being polled: the venue allows 60 requests a minute against Fyers' ~200, and
+it pushes. Note that prices are quoted in USDT while the account margins in INR,
+so those two figures are deliberately labelled in different units.
+
 ## Running it
 
 ### With Docker
@@ -116,6 +122,7 @@ Dependencies point downward; nothing below knows about anything above it.
 ```
 api/         HTTP surface. app.py composes; routers/ holds the endpoints.
 alerting/    The alert engine: rules, edge triggering, the watcher loop.
+streaming/   Live prices, held once and shared with whoever is listening.
 notify/      Getting an alert to someone who is not at the screen.
 venues/      What can be traded and where. No credentials, no I/O.
 feeds/       Economic calendar and news. Parsing kept apart from fetching.
@@ -192,9 +199,12 @@ one situation reading as two is worse than a wrong figure.
 
 ## Known limits
 
-- **No websocket.** Everything polls; `subscribe_ticks` raises. Prices are a
-  few seconds behind, which is immaterial for defined-risk positions held for
-  weeks and would matter if you were trading intraday.
+- **The options desk polls.** Fyers' `subscribe_ticks` still raises, so those
+  prices are a few seconds behind - immaterial for defined-risk positions held
+  for weeks, and it would matter intraday. The perpetuals desk streams.
+- **`python-engineio` is pinned below 4.11.** `fyers-apiv3` pins `aiohttp==3.9.3`
+  exactly, and from 4.11 engineio calls an aiohttp API that version lacks, so a
+  newer one installs cleanly and fails at connect time.
 - **The economic calendar is scraped**, so it will break when the source page
   changes. It reports "reachable but unreadable" rather than showing an empty
   calendar, but fixing it means fixing the parser.

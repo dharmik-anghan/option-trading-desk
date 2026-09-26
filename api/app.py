@@ -30,11 +30,24 @@ from alerting.watcher import Watcher
 from api.alert_inputs import gather
 from api.dependencies import get_broker, get_db_path, get_feeds
 from api.errors import broker_error_handler
-from api.routers import alerts, baskets, feeds, market, orders, portfolio, strategies, system
+from api.routers import (
+    alerts,
+    baskets,
+    feeds,
+    market,
+    orders,
+    perps,
+    portfolio,
+    strategies,
+    system,
+)
 from api.store import open_db
 from broker.errors import BrokerError
+from broker.shark.stream import SharkStream
 from notify import Telegram, TelegramConfig
 from settings import load_settings
+from streaming import TickHub
+from venues import for_venue
 
 log = logging.getLogger(__name__)
 
@@ -80,12 +93,34 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     task = asyncio.create_task(watcher.run_forever(), name="alert-watcher")
     log.info("alert watcher started (telegram=%s)", notifier is not None)
+
+    # The perpetuals venue pushes prices rather than being polled for them, which
+    # is not a nicety: its budget is 60 requests a minute against Fyers' ~200, and
+    # three instruments across several panels would spend it on nothing. The hub
+    # holds the latest so everything else reads from memory.
+    hub = TickHub()
+    stream: SharkStream | None = None
+    application.state.tick_hub = hub
+    application.state.tick_stream = None
+    if settings.has_shark:
+        stream = SharkStream()
+        try:
+            await stream.start([i.symbol for i in for_venue("shark")], hub.publish)
+            application.state.tick_stream = stream
+            log.info("shark tick stream connected")
+        except Exception:  # noqa: BLE001 - a desk that will not start is worse
+            log.warning("shark tick stream could not connect", exc_info=True)
+            await stream.stop()
+            stream = None
+
     try:
         yield
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        if stream is not None:
+            await stream.stop()
         log.info("alert watcher stopped")
 
 
@@ -112,6 +147,7 @@ for _router in (
     alerts.router,
     portfolio.router,
     market.router,
+    perps.router,
     feeds.router,
     strategies.router,
     orders.router,
