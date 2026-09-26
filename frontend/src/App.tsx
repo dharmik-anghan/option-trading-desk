@@ -14,6 +14,7 @@ import {
   describeError,
 } from "./api";
 import { useLive, useNow } from "./useLive";
+import { usePerpPrices } from "./usePerpPrices";
 import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
@@ -61,7 +62,9 @@ const HEALTH_MS = 30000;
 const ALERTS_MS = 20000;
 // Faster than the rest: this one reads prices the stream already delivered, so a
 // poll costs the backend a dictionary lookup rather than a venue request.
-const PERPS_MS = 2000;
+// Slow, because prices arrive on their own now. What is left here changes on the
+// scale of an order being placed, not a tick.
+const PERPS_MS = 15000;
 
 function initialTheme(): Theme {
   try {
@@ -136,9 +139,13 @@ export default function App() {
     paused || onPerps,
     600,
   );
-  // Cheap: it reads the price hub in memory rather than calling the venue, which
-  // is the point of the stream.
-  const perps = useLive(getPerpsDesk, PERPS_MS, [], paused || !onPerps, 100);
+  // Positions, contract limits and stream health, on a slow poll. Prices do not
+  // come from here any more - they are pushed, below - so this no longer needs to
+  // run every couple of seconds.
+  const perps = useLive(getPerpsDesk, PERPS_MS, [basketNonce], paused || !onPerps, 100);
+  // Prices, pushed. The socket to the exchange was always there; this is the half
+  // that was missing, and why /api/perps was being called every two seconds.
+  const streamed = usePerpPrices(onPerps && !paused);
   // no request at all while the chain is hidden
   const chain = useLive(
     () => getOptionChain(symbol, depth, expiry),
@@ -277,6 +284,26 @@ export default function App() {
     [afterAlertWrite, noteAlertFailure],
   );
 
+  // The pushed price wins where there is one, and the polled figure stands in
+  // until the first tick arrives - so a freshly opened desk is not blank.
+  const livePrices = useMemo(
+    () =>
+      (perps.data?.prices ?? []).map((p) => {
+        const live = streamed.prices[p.symbol];
+        if (live === undefined) return p;
+        return {
+          ...p,
+          price: live.price,
+          change_pct: live.change_pct ?? p.change_pct,
+          // From the ticking clock rather than Date.now(): reading the wall clock
+          // during render makes the value change without a reason to re-render,
+          // and `useNow` is already here for exactly this.
+          age_seconds: (now - live.at) / 1000,
+        };
+      }),
+    [perps.data, streamed.prices, now],
+  );
+
   const onBasketChanged = useCallback(() => {
     setBasketNonce((n) => n + 1);
     portfolio.refresh();
@@ -304,13 +331,14 @@ export default function App() {
         venueId={venueId}
         onVenue={setVenueId}
         perps={onPerps ? (perps.data ?? null) : null}
+        pushing={streamed.connected}
       />
 
       <div id="left">
         {onPerps ? (
           <PerpsWatch
             instruments={perps.data?.instruments ?? []}
-            prices={perps.data?.prices ?? []}
+            prices={livePrices}
             selected={perpSymbol}
             onSelect={setPerpSymbol}
             quoteAsset={perps.data?.quote_currency ?? "USDT"}
@@ -326,9 +354,7 @@ export default function App() {
         {onPerps && (
           <PerpsTicket
             instruments={perps.data?.instruments ?? []}
-            prices={Object.fromEntries(
-              (perps.data?.prices ?? []).map((p) => [p.symbol, p.price]),
-            )}
+            prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
             symbol={perpSymbol}
             quoteCurrency={perps.data?.quote_currency ?? "USDT"}
             onPlaced={perps.refresh}

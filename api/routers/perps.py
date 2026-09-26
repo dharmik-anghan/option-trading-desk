@@ -11,11 +11,15 @@ Prices come from the tick stream rather than a request per read: this venue allo
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 from api.dependencies import broker_for
@@ -549,3 +553,73 @@ def order_log(db_path: DbPathDep, limit: int = 50) -> list[OrderRecordResponse]:
         ]
     finally:
         conn.close()
+
+
+#: How long to wait for a tick before sending a keep-alive. Proxies and browsers
+#: drop a connection that has said nothing, and a silent instrument is normal at
+#: three in the morning.
+STREAM_HEARTBEAT = 15.0
+
+
+@router.get("/stream")
+async def stream(request: Request) -> StreamingResponse:
+    """Prices as they arrive, rather than the browser asking every two seconds.
+
+    Server-sent events, not a websocket. The traffic is one-way - the desk needs
+    prices pushed and has nothing to say back - and SSE is a plain HTTP response a
+    browser reconnects by itself, where a websocket would mean a protocol upgrade,
+    a ping loop and reconnection logic of our own for the same result.
+
+    The socket to the venue was already here; this is the missing half. A tick that
+    arrived from the exchange reached the hub and then sat there until the page
+    asked for it, which is why /api/perps was being called every two seconds.
+
+    Each reader gets its own bounded queue, and the queue is unregistered when the
+    reader goes - a browser closing a tab must not leave one growing behind it.
+    """
+
+    async def events() -> AsyncIterator[str]:
+        hub = _hub(request)
+        if hub is None:
+            # Said once, rather than holding a connection open that will never
+            # carry anything: the stream never started.
+            yield 'event: closed\ndata: {"reason":"no price stream"}\n\n'
+            return
+        with hub.subscribe() as queue:
+            # The current picture first, so a page that has just loaded is not
+            # blank until something moves.
+            for symbol, price in hub.prices().items():
+                yield f"data: {json.dumps({'symbol': symbol, 'price': price})}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    tick = await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT)
+                except TimeoutError:
+                    # A comment, which SSE ignores: it keeps the connection open
+                    # without the client having to filter a fake price.
+                    yield ": keep-alive\n\n"
+                    continue
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "symbol": tick.symbol,
+                            "price": tick.price,
+                            "change_pct": tick.change_pct,
+                            "at": tick.at.isoformat(),
+                        }
+                    )
+                    + "\n\n"
+                )
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            # Without this a proxy will buffer the stream and deliver it in lumps,
+            # which defeats the point.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

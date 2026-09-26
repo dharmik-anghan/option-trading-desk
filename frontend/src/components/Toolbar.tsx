@@ -36,6 +36,8 @@ interface Props {
   /** Set only on the perpetuals desk, whose headline is a different shape: no
       booked P&L to read, and prices in a different currency from the account. */
   perps: PerpsDesk | null;
+  /** Whether this page is receiving pushed prices. */
+  pushing: boolean;
 }
 
 export function Toolbar({
@@ -58,6 +60,7 @@ export function Toolbar({
   venueId,
   onVenue,
   perps,
+  pushing,
 }: Props) {
   const name = UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol;
   const net = portfolio?.total_pnl ?? null;
@@ -118,8 +121,12 @@ export function Toolbar({
       {perps && (
         <div className="tbk">
           <small>Stream</small>
-          <b className={perps.stream.connected ? undefined : "dn"}>
-            {perps.stream.connected ? "live" : "down"}
+          {/* Two hops, and both have to be up for a price on screen to be live:
+              the venue to the backend, and the backend to this page. Reporting
+              only the first would call a price live while the page was showing a
+              memory of it. */}
+          <b className={perps.stream.connected && pushing ? undefined : "dn"}>
+            {!perps.stream.connected ? "venue down" : pushing ? "live" : "not pushing"}
             <span className="chg dim"> {perps.stream.ticks.toLocaleString("en-IN")} ticks</span>
           </b>
         </div>

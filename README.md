@@ -235,6 +235,10 @@ one situation reading as two is worse than a wrong figure.
 
 ## Known limits
 
+- **Perpetual prices are pushed to the browser**, over server-sent events rather
+  than a websocket: the traffic is one-way and a browser reconnects an EventSource
+  by itself. The rest of that desk - positions, contract limits - still polls, on a
+  slow timer, because it changes on the scale of an order rather than a tick.
 - **The options desk polls.** Fyers' `subscribe_ticks` still raises, so those
   prices are a few seconds behind - immaterial for defined-risk positions held
   for weeks, and it would matter intraday. The perpetuals desk streams.

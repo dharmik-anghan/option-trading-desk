@@ -7,7 +7,11 @@ ever arrived, and it must not report a zero as though it were a market.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -556,3 +560,84 @@ class TestPlacingAnOrder:
         assert "Notional" in log[0]["reason"]
         assert log[0]["sent"] is False
         assert log[1]["sent"] is True, "the sound one was sent"
+
+
+class TestTheStream:
+    """Pushing prices instead of being asked for them.
+
+    The socket to the exchange was always there; this is the half that was missing,
+    and why /api/perps was being polled every two seconds.
+
+    Driven through the endpoint's own generator rather than TestClient. An SSE
+    response never ends, and TestClient waits for the body to finish - so a test
+    that reads one frame and breaks hangs until it is killed, which is how the
+    first attempt at this went.
+    """
+
+    async def _events(self, hub: TickHub | None) -> AsyncGenerator[str, None]:
+        """The endpoint's own frame generator, with a request stubbed to the hub."""
+        from starlette.requests import Request as StarletteRequest
+
+        class FakeRequest:
+            """Enough of a request for the generator: app state, and connected."""
+
+            def __init__(self) -> None:
+                self.app = SimpleNamespace(state=SimpleNamespace(tick_hub=hub))
+
+            async def is_disconnected(self) -> bool:
+                return False
+
+        response = await perps_router.stream(cast(StarletteRequest, FakeRequest()))
+        return cast(AsyncGenerator[str, None], response.body_iterator)
+
+    def test_it_sends_what_is_already_known_first(self) -> None:
+        # A page that has just loaded should not be blank until something moves.
+        hub = TickHub()
+        hub.publish(Tick(symbol="BTCUSDT", price=84_000.0, at=datetime.now(UTC)))
+
+        async def read_one() -> str:
+            events = await self._events(hub)
+            return await asyncio.wait_for(anext(events), timeout=2)
+
+        frame = asyncio.run(read_one())
+        assert "BTCUSDT" in frame
+        assert "84000" in frame
+
+    def test_a_later_tick_is_pushed(self) -> None:
+        hub = TickHub()
+
+        async def read_pushed() -> str:
+            events = await self._events(hub)
+            task: asyncio.Task[str] = asyncio.create_task(anext(events))
+            await asyncio.sleep(0)  # let it subscribe
+            hub.publish(Tick(symbol="XAUUSDT", price=4285.6, at=datetime.now(UTC)))
+            return await asyncio.wait_for(task, timeout=2)
+
+        frame = asyncio.run(read_pushed())
+        assert "XAUUSDT" in frame
+        assert "4285.6" in frame
+
+    def test_no_hub_says_so_rather_than_hanging(self) -> None:
+        # Holding a connection open that will never carry anything is worse than
+        # saying the stream never started.
+        async def read_one() -> str:
+            events = await self._events(None)
+            return await asyncio.wait_for(anext(events), timeout=2)
+
+        frame = asyncio.run(read_one())
+        assert "closed" in frame
+        assert "no price stream" in frame
+
+    def test_a_reader_is_unregistered_when_it_leaves(self) -> None:
+        # A browser closing a tab must not leave a queue growing behind it.
+        hub = TickHub()
+        hub.publish(Tick(symbol="BTCUSDT", price=1.0, at=datetime.now(UTC)))
+
+        async def read_then_close() -> None:
+            events = await self._events(hub)
+            await asyncio.wait_for(anext(events), timeout=2)
+            assert hub.subscriber_count == 1
+            await events.aclose()
+
+        asyncio.run(read_then_close())
+        assert hub.subscriber_count == 0
