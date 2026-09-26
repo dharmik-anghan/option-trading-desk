@@ -1,0 +1,28 @@
+# Secrets and live data must never enter an image layer.
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.sqlite3
+fyers_tokens/
+*.log
+
+# Build inputs that the image rebuilds itself, or does not need.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+frontend/node_modules/
+frontend/dist/
+.git/
+.github/
+.claude/
+tests/
+docs/
+stitch_options_trading_desk_analytics/
+*.html
+.DS_Store

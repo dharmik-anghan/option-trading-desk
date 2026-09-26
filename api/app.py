@@ -24,6 +24,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from analytics import market_context as mc
 from analytics.payoff import (
@@ -912,3 +913,17 @@ def portfolio_history(db_path: DbPathDep, days: int = 7) -> list[PortfolioHistor
         )
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# The built frontend, when there is one.
+#
+# Mounted last so every /api route above is matched first; a mount at "/" would
+# otherwise swallow them. Absent in development, where Vite serves the frontend
+# on its own port and CORS above lets it through - so this is a no-op then, and
+# the two setups need no switch between them.
+_UI_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _UI_DIR.is_dir():
+    # html=True serves index.html for unknown paths, which a single-page app
+    # needs to survive a reload on any route.
+    app.mount("/", StaticFiles(directory=_UI_DIR, html=True), name="ui")

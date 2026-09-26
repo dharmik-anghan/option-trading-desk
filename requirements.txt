@@ -1,0 +1,117 @@
+# Generated from uv.lock, runtime dependencies only:
+#   uv export --no-dev --no-emit-project --no-hashes --format requirements-txt -o requirements.txt
+# Used only by the Docker image. Local development uses uv and uv.lock directly.
+aiohttp==3.9.3
+    # via fyers-apiv3
+aiosignal==1.4.0
+    # via aiohttp
+annotated-doc==0.0.5
+    # via fastapi
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.15.1
+    # via starlette
+asyncio==3.4.3
+    # via fyers-apiv3
+attrs==26.1.0
+    # via aiohttp
+aws-lambda-powertools==1.25.5
+    # via fyers-apiv3
+aws-xray-sdk==2.15.0
+    # via aws-lambda-powertools
+boto3==1.43.98
+    # via aws-lambda-powertools
+botocore==1.43.98
+    # via
+    #   aws-xray-sdk
+    #   boto3
+    #   s3transfer
+certifi==2026.7.22
+    # via requests
+charset-normalizer==3.5.1
+    # via requests
+click==8.5.0
+    # via uvicorn
+fastapi==0.141.1
+    # via option-strategy
+fastjsonschema==2.22.2
+    # via aws-lambda-powertools
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+fyers-apiv3==3.1.18
+    # via option-strategy
+h11==0.16.0
+    # via uvicorn
+idna==3.20
+    # via
+    #   anyio
+    #   requests
+    #   yarl
+jmespath==0.10.0
+    # via
+    #   aws-lambda-powertools
+    #   boto3
+    #   botocore
+multidict==6.9.0
+    # via
+    #   aiohttp
+    #   yarl
+propcache==0.5.4
+    # via yarl
+pydantic==2.13.5
+    # via
+    #   fastapi
+    #   option-strategy
+    #   pydantic-settings
+pydantic-core==2.46.5
+    # via pydantic
+pydantic-settings==2.15.0
+    # via option-strategy
+pyotp==2.10.0
+    # via option-strategy
+python-dateutil==2.9.0.post0
+    # via botocore
+python-dotenv==1.2.3
+    # via
+    #   option-strategy
+    #   pydantic-settings
+requests==2.31.0
+    # via
+    #   fyers-apiv3
+    #   option-strategy
+s3transfer==0.19.2
+    # via boto3
+setuptools==68.0.0
+    # via fyers-apiv3
+six==1.17.0
+    # via python-dateutil
+starlette==1.6.0
+    # via fastapi
+typing-extensions==4.16.0
+    # via
+    #   aiosignal
+    #   anyio
+    #   fastapi
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.4
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+urllib3==2.8.0
+    # via
+    #   botocore
+    #   requests
+uvicorn==0.53.0
+    # via option-strategy
+websocket-client==1.6.1
+    # via fyers-apiv3
+wrapt==2.4.1
+    # via aws-xray-sdk
+yarl==1.25.1
+    # via aiohttp
