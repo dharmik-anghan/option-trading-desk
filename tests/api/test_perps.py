@@ -338,11 +338,12 @@ class TestProtection:
 
 
 class TestPlacingAnOrder:
-    """The order path, which never sends in a test - dry-run is the default.
+    """The order path. Nothing leaves the process, because `stub_venue` replaces
+    the adapter - not because of any setting, since there is no longer one.
 
     What is asserted is the order of operations: checks server-side so a client
-    cannot skip them, the attempt logged before anything leaves, and "held back"
-    kept distinct from "refused".
+    cannot skip them, a refused order never reaching the venue, and the attempt
+    logged either way.
     """
 
     def _order(self, **over: object) -> dict[str, object]:

@@ -1,8 +1,8 @@
 """The record of every perpetual order this program formed.
 
-Written before the attempt, not after the reply, and written for refusals and
-rehearsals too. After a surprise the question is "what did it try to do", and a
-log kept only on success cannot answer that.
+Written before the attempt, not after the reply, and written for refusals too.
+After a surprise the question is "what did it try to do", and a log kept only on
+success cannot answer that.
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ class PerpOrderRecord:
     price: float | None
     leverage: float
     notional: float
-    #: False for a refusal or a dry run; `reason` says which.
+    #: False when it never left. `reason` says why - a failed check, or the venue
+    #: refusing it. There is no third case: nothing is held back any more.
     sent: bool
     reason: str
     venue_order_id: str | None

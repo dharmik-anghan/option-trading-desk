@@ -158,12 +158,14 @@ def _perp_order_log(conn: sqlite3.Connection) -> None:
     """Every order this program formed, whether or not it was sent.
 
     Recorded before the send rather than after the reply, and recorded even when
-    the checks refused it or dry-run held it back. The reason is the obvious one:
-    the interesting question after a surprise is "what did it try to do", and a log
-    written only on success cannot answer it.
+    the checks refused it. The reason is the obvious one: the interesting question
+    after a surprise is "what did it try to do", and a log written only on success
+    cannot answer it.
 
-    `sent` is the distinction that matters. A row with sent = 0 is either a refusal
-    or a rehearsal, and `reason` says which.
+    `sent` is the distinction that matters, and `reason` says why not. The comment
+    in the SQL below still mentions a dry run, which this desk no longer has - the
+    step has shipped, so its text is left as it was rather than rewritten to match
+    a later decision.
     """
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS perp_order (
