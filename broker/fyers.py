@@ -14,8 +14,10 @@ from typing import Any
 from fyers_apiv3 import fyersModel
 
 from broker.base import Broker
+from broker.errors import BrokerError, BrokerUnreachable, classify_status
 from broker.models import (
     Candle,
+    Expiry,
     Funds,
     Greeks,
     OptionChain,
@@ -27,18 +29,73 @@ from broker.models import (
 )
 
 
-class FyersApiError(RuntimeError):
-    """Raised when Fyers returns a non-ok response."""
+def _call(send: Callable[[], Any]) -> Any:
+    """Run an SDK call, turning a raised transport error into BrokerUnreachable.
+
+    Most failures come back as an error dict (see `_check_ok`), but a socket
+    that dies mid-flight raises instead, and an unclassified exception reaches
+    the desk as an opaque 500.
+    """
+    try:
+        return send()
+    except BrokerError:
+        raise
+    except (OSError, ConnectionError, TimeoutError) as exc:
+        raise BrokerUnreachable from exc
+
+
+class FyersApiError(BrokerError):
+    """Raised when Fyers returns a non-ok response.
+
+    Kept as a subclass of `BrokerError` so existing `except FyersApiError`
+    callers still work while the API layer can catch the broader class.
+    """
 
 
 def _check_ok(raw: dict[str, Any]) -> None:
-    if raw.get("s") == "error" or (raw.get("code") is not None and raw.get("code") != 200):
-        raise FyersApiError(f"Fyers API error: {raw.get('message') or raw}")
+    """Raise the error class that matches what Fyers said.
+
+    The SDK swallows transport failures and hands back a dict describing them,
+    so a rate limit, a dead connection and a stale token all arrive here
+    looking alike. Telling them apart is what lets the desk say which it is
+    instead of freezing silently.
+    """
+    if raw.get("s") != "error" and (raw.get("code") is None or raw.get("code") == 200):
+        return
+
+    detail = raw.get("Error") if isinstance(raw.get("Error"), dict) else None
+    code = (detail or raw).get("code") if isinstance(detail or raw, dict) else None
+    message = str((detail or raw).get("message") or raw)
+
+    # The SDK reports connection failures in the message rather than raising.
+    if any(
+        marker in message
+        for marker in (
+            "Max retries exceeded",
+            "NameResolutionError",
+            "Connection aborted",
+            "Connection reset",
+            "ConnectionError",
+            "Failed to resolve",
+            "timed out",
+        )
+    ):
+        raise BrokerUnreachable
+
+    # An error we cannot classify stays this adapter's own type, rather than
+    # the broker-agnostic base - callers already catch FyersApiError.
+    cls = classify_status(code if isinstance(code, int) else None, message)
+    if cls is BrokerError:
+        cls = FyersApiError
+    raise cls(f"Fyers API error: {message}")
 
 
-def parse_option_chain(raw: dict[str, Any], *, requested_symbol: str) -> OptionChain:
+def parse_option_chain(
+    raw: dict[str, Any], *, requested_symbol: str, expiry_token: str = ""
+) -> OptionChain:
     _check_ok(raw)
-    entries = raw["data"]["optionsChain"]
+    data = raw["data"]
+    entries = data["optionsChain"]
 
     underlying = next(e for e in entries if e.get("strike_price", -1) == -1)
     rows = [
@@ -52,17 +109,38 @@ def parse_option_chain(raw: dict[str, Any], *, requested_symbol: str) -> OptionC
             oi=e.get("oi", 0),
             prev_oi=e.get("prev_oi", 0),
             volume=e.get("volume", 0),
+            ltp_change=e.get("ltpch", 0.0),
+            ltp_change_pct=e.get("ltpchp", 0.0),
+            oi_change=e.get("oich", 0),
+            oi_change_pct=e.get("oichp", 0.0),
             greeks=Greeks(**e["greeks"]) if e.get("greeks") else None,
         )
         for e in entries
         if e.get("strike_price", -1) != -1
     ]
 
+    expiries = [
+        Expiry(
+            date=e["date"],
+            token=str(e["expiry"]),
+            # Fyers flags monthly expiries "M" and weeklies "W"
+            weekly=e.get("expiry_flag") != "M",
+        )
+        for e in data.get("expiryData", [])
+    ]
+    vix = data.get("indiavixData") or {}
+
     return OptionChain(
         underlying_symbol=requested_symbol,
         underlying_ltp=underlying["ltp"],
         fetched_at=datetime.now(UTC),
         rows=rows,
+        expiries=expiries,
+        # an empty request means "nearest", which is whatever came back first
+        expiry_token=expiry_token or (expiries[0].token if expiries else None),
+        call_oi=data.get("callOi", 0),
+        put_oi=data.get("putOi", 0),
+        india_vix=vix.get("ltp"),
     )
 
 
@@ -163,19 +241,23 @@ class FyersBroker(Broker):
         )
 
     def get_quote(self, symbols: list[str]) -> dict[str, Quote]:
-        raw = self._client.quotes(data={"symbols": ",".join(symbols)})
+        raw = _call(lambda: self._client.quotes(data={"symbols": ",".join(symbols)}))
         return parse_quotes(raw)
 
-    def get_option_chain(self, symbol: str, strike_count: int = 10) -> OptionChain:
-        raw = self._client.optionchain(
-            data={
-                "symbol": symbol,
-                "strikecount": strike_count,
-                "timestamp": "",
-                "greeks": "1",
-            }
+    def get_option_chain(
+        self, symbol: str, strike_count: int = 10, expiry_token: str = ""
+    ) -> OptionChain:
+        raw = _call(
+            lambda: self._client.optionchain(
+                data={
+                    "symbol": symbol,
+                    "strikecount": strike_count,
+                    "timestamp": expiry_token,
+                    "greeks": "1",
+                }
+            )
         )
-        return parse_option_chain(raw, requested_symbol=symbol)
+        return parse_option_chain(raw, requested_symbol=symbol, expiry_token=expiry_token)
 
     def get_history(
         self, symbol: str, resolution: str, date_from: date, date_to: date
@@ -193,7 +275,7 @@ class FyersBroker(Broker):
         return parse_candles(raw)
 
     def get_funds(self) -> Funds:
-        raw = self._client.funds()
+        raw = _call(self._client.funds)
         return parse_funds(raw)
 
     def place_order(self, order: OrderRequest) -> OrderResult:
@@ -214,7 +296,7 @@ class FyersBroker(Broker):
         return parse_place_order(raw)
 
     def get_positions(self) -> list[Position]:
-        raw = self._client.positions()
+        raw = _call(self._client.positions)
         return parse_positions(raw)
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:

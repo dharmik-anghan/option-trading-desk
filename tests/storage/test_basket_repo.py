@@ -9,6 +9,8 @@ from storage.basket_repo import (
     NewBasketLeg,
     close_leg,
     create_basket,
+    delete_basket,
+    delete_leg,
     get_basket,
     list_baskets,
 )
@@ -119,3 +121,96 @@ def test_close_leg_records_exit(conn: sqlite3.Connection) -> None:
     assert closed.exit_at == exit_at
     still_open = [leg for leg in updated.legs if leg.id != leg_to_close.id]
     assert all(leg.is_open for leg in still_open)
+
+
+def _make(conn: sqlite3.Connection, name: str = "condor") -> int:
+    return create_basket(
+        conn,
+        name=name,
+        strategy="iron_condor",
+        underlying_symbol="X",
+        legs=_iron_condor_legs(),
+        created_at=datetime.now(UTC),
+    )
+
+
+def test_delete_basket_removes_basket_and_its_legs(conn: sqlite3.Connection) -> None:
+    basket_id = _make(conn)
+
+    assert delete_basket(conn, basket_id) is True
+
+    assert get_basket(conn, basket_id) is None
+    orphans = conn.execute(
+        "SELECT COUNT(*) FROM basket_leg WHERE basket_id = ?", (basket_id,)
+    ).fetchone()[0]
+    assert orphans == 0
+
+
+def test_delete_basket_is_false_for_unknown_id(conn: sqlite3.Connection) -> None:
+    assert delete_basket(conn, 4242) is False
+
+
+def test_delete_basket_leaves_other_baskets_alone(conn: sqlite3.Connection) -> None:
+    keep = _make(conn, "keep")
+    drop = _make(conn, "drop")
+
+    delete_basket(conn, drop)
+
+    remaining = list_baskets(conn)
+    assert [b.id for b in remaining] == [keep]
+    assert len(remaining[0].legs) == 4
+
+
+def test_delete_leg_drops_only_that_leg(conn: sqlite3.Connection) -> None:
+    basket_id = _make(conn)
+    basket = get_basket(conn, basket_id)
+    assert basket is not None
+    victim = basket.legs[1].id
+
+    assert delete_leg(conn, basket_id, victim) is True
+
+    after = get_basket(conn, basket_id)
+    assert after is not None
+    assert [leg.id for leg in after.legs] == [
+        leg.id for leg in basket.legs if leg.id != victim
+    ]
+
+
+def test_delete_leg_refuses_a_leg_from_another_basket(conn: sqlite3.Connection) -> None:
+    mine = _make(conn, "mine")
+    theirs = _make(conn, "theirs")
+    other = get_basket(conn, theirs)
+    assert other is not None
+
+    # a stale id from another basket must not delete across the boundary
+    assert delete_leg(conn, mine, other.legs[0].id) is False
+
+    still_there = get_basket(conn, theirs)
+    assert still_there is not None
+    assert len(still_there.legs) == 4
+
+
+def test_removing_the_last_leg_deletes_the_empty_basket(conn: sqlite3.Connection) -> None:
+    basket_id = _make(conn)
+    basket = get_basket(conn, basket_id)
+    assert basket is not None
+
+    for leg in basket.legs:
+        assert delete_leg(conn, basket_id, leg.id) is True
+
+    assert get_basket(conn, basket_id) is None
+
+
+def test_delete_leg_is_distinct_from_closing_one(conn: sqlite3.Connection) -> None:
+    basket_id = _make(conn)
+    basket = get_basket(conn, basket_id)
+    assert basket is not None
+
+    close_leg(conn, basket.legs[0].id, exit_price=2.0, exit_at=datetime.now(UTC))
+
+    after = get_basket(conn, basket_id)
+    assert after is not None
+    # closing keeps the leg on the basket; deleting would have removed it
+    assert len(after.legs) == 4
+    assert after.legs[0].is_open is False
+    assert after.legs[0].exit_price == 2.0

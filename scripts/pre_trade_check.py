@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from analytics.payoff import analyze  # noqa: E402
 from broker.fyers import FyersBroker  # noqa: E402
+from broker.token_store import get_access_token  # noqa: E402
 from risk.pre_trade_check import (  # noqa: E402
     DEFAULT_MAX_LOSS_LIMIT,
     DEFAULT_MAX_RISK_PCT,
@@ -53,7 +54,7 @@ def main() -> int:
 
     settings = load_settings()
     broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=settings.fyers_access_token
+        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
     )
 
     funds = broker.get_funds()

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Markets</title>
+  <item>
+    <title><![CDATA[Nifty ends higher as banks lead <b>gains</b>]]></title>
+    <link>https://example.test/a</link>
+    <pubDate>Sat, 26 Sep 2026 10:33:46 +0530</pubDate>
+  </item>
+  <item>
+    <!-- a publisher leaking its own CDATA terminator into the text -->
+    <title>Biscuit maker files for $188 million IPO]]&gt;</title>
+    <link>https://example.test/b</link>
+    <pubDate>Sat, 26 Sep 2026 10:07:03 +0530</pubDate>
+  </item>
+  <item>
+    <title>An item with no date at all</title>
+    <link>https://example.test/c</link>
+  </item>
+  <item>
+    <title>Another undated item</title>
+    <link>https://example.test/d</link>
+  </item>
+  <item>
+    <title></title>
+    <link>https://example.test/empty</link>
+  </item>
+</channel></rss>

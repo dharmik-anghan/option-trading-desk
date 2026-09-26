@@ -28,8 +28,14 @@ class Broker(Protocol):
         """Fetch current account balances (for pre-trade margin checks)."""
         ...
 
-    def get_option_chain(self, symbol: str, strike_count: int = 10) -> OptionChain:
-        """Fetch the option chain for `symbol`'s nearest expiry."""
+    def get_option_chain(
+        self, symbol: str, strike_count: int = 10, expiry_token: str = ""
+    ) -> OptionChain:
+        """Fetch an option chain for `symbol`.
+
+        `expiry_token` selects which expiry; empty means the nearest one. Pass
+        back a token from a previous call's `OptionChain.expiries`.
+        """
         ...
 
     def get_history(

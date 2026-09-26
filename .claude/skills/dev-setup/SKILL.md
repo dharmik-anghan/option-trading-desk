@@ -35,11 +35,16 @@ agent) bootstraps the same way.
 
 ## When Fyers connectivity matters
 
-If the task touches `broker/` or needs a live Fyers session, also check
-whether `FYERS_ACCESS_TOKEN` is set and still valid by running
-`uv run python scripts/verify_login.py`. If it fails, tell the user to
-re-run `uv run python scripts/fyers_login.py` (tokens expire daily) — do not
-attempt to complete the interactive login flow yourself.
+If the task touches `broker/` or needs a live Fyers session, check the token
+with `uv run python scripts/verify_login.py`, which prints the expiry.
+
+Tokens die at 06:00 IST the morning after they're issued. When the three
+auto-login secrets are set, `broker/token_store.py` refreshes on demand, so
+an expired token is not by itself a problem — anything going through
+`get_access_token` recovers on the next call. If `verify_login.py` fails for
+any other reason, or auto-login isn't configured, tell the user to run
+`uv run python scripts/fyers_login.py` — do not attempt to complete the
+interactive login flow yourself.
 
 That script auto-detects TOTP auto-login (see `broker/fyers_auth.py`) if
 `FYERS_USERNAME`/`FYERS_TOTP_KEY`/`FYERS_PIN` are all set in `.env`, and

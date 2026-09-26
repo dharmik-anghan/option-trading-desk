@@ -245,6 +245,30 @@ the manual OAuth flow (`fyersModel.SessionModel`) on any `AutoLoginError` —
 that fallback matters because these are undocumented endpoints Fyers could
 change without notice, unlike the official OAuth flow.
 
+### Token lifetime
+
+`broker/token_store.py` owns the token, and nothing else reads
+`FYERS_ACCESS_TOKEN` directly. Callers ask for `get_access_token(settings)`,
+which returns the cached token from `.env` while it has time left and
+otherwise re-runs the auto-login above and persists the new one (to `.env`
+and to `os.environ`, since real environment variables outrank `.env` in
+pydantic-settings).
+
+This exists because Fyers tokens have no refresh grant and expire at 06:00
+IST the morning after they are issued — not 24 hours after. Before this,
+`scripts/fyers_login.py` was the only thing that ever minted a token and
+nothing scheduled it, so the day after a login every call returned
+`-16 Could not authenticate the user`. Expiry is checked per request (API
+dependencies build the broker per request), with a 15-minute skew so a
+request starting just under the wire doesn't land past it, and refreshes are
+serialised on a lock so a burst after expiry triggers one login rather than
+one each.
+
+Refresh needs the three auto-login secrets. Without them there is no
+non-interactive path, so `get_access_token` raises `TokenRefreshError`
+naming the script to run by hand rather than failing deep inside a broker
+call.
+
 ## Status
 
 See `docs/PHASES.md` for what's built vs. planned.

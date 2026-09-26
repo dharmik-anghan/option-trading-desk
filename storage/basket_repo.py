@@ -167,3 +167,45 @@ def close_leg(conn: sqlite3.Connection, leg_id: int, exit_price: float, exit_at:
         (exit_price, exit_at.isoformat(), leg_id),
     )
     conn.commit()
+
+def delete_basket(conn: sqlite3.Connection, basket_id: int) -> bool:
+    """Erase a basket and every leg in it.
+
+    This is a bookkeeping correction, not an exit: it removes our record of
+    the grouping and nothing else. Whatever is open at the broker stays open.
+    Legs go first because `db.connect` turns foreign keys on.
+
+    Returns False when there was no such basket, so the caller can 404.
+    """
+    if conn.execute("SELECT 1 FROM basket WHERE id = ?", (basket_id,)).fetchone() is None:
+        return False
+    conn.execute("DELETE FROM basket_leg WHERE basket_id = ?", (basket_id,))
+    conn.execute("DELETE FROM basket WHERE id = ?", (basket_id,))
+    conn.commit()
+    return True
+
+
+def delete_leg(conn: sqlite3.Connection, basket_id: int, leg_id: int) -> bool:
+    """Drop one leg out of a basket, for when the grouping was wrong.
+
+    Use `close_leg` instead when the leg was actually exited - that keeps it
+    on the basket with its exit price, which the basket's economics rely on.
+    A basket left with no legs is deleted too, rather than lingering as an
+    empty card.
+
+    `basket_id` is matched as well as `leg_id` so a stale id from one basket
+    can never delete a leg out of another.
+    """
+    cursor = conn.execute(
+        "DELETE FROM basket_leg WHERE id = ? AND basket_id = ?", (leg_id, basket_id)
+    )
+    if cursor.rowcount == 0:
+        conn.commit()
+        return False
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM basket_leg WHERE basket_id = ?", (basket_id,)
+    ).fetchone()[0]
+    if remaining == 0:
+        conn.execute("DELETE FROM basket WHERE id = ?", (basket_id,))
+    conn.commit()
+    return True

@@ -1,388 +1,1227 @@
-.dashboard {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 0 20px 80px;
+/* Workstation shell. Panels are the unit: a header strip, a scrolling body,
+   a hairline border. Density is the point — this is a screen you sit at. */
+
+/* Open structures is the view; the chain is reference material below it. */
+.ws {
+  height: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 5px;
+  grid-template-columns: 286px minmax(0, 1fr) 366px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "tb tb tb"
+    "left baskets alerts"
+    "left chain alerts";
 }
 
-/* ---- Top status bar ---- */
-
-.topbar {
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 22px 0 18px;
-  border-bottom: 1px solid var(--border-strong);
-  flex-wrap: wrap;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.topbar-title {
+.ph {
+  min-height: 29px;
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 0 9px;
+  background: var(--head);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ph::-webkit-scrollbar {
+  display: none;
+}
+.ph h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.012em;
+}
+.ph .sub {
+  color: var(--dim);
+  font-weight: 400;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ph .sp {
+  flex: 1;
+}
+.pb {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
-.topbar-name {
-  font-size: 1.5rem;
+#left {
+  grid-area: left;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  min-width: 0;
+}
+#left > .panel {
+  flex: none;
+}
+#left > .grow {
+  flex: 1 1 auto;
+  min-height: 160px;
+}
+.a-chain {
+  grid-area: chain;
+}
+.a-alerts {
+  grid-area: alerts;
+}
+
+/* ---------- market context strip ----------
+   Sits under the toolbar, describing the underlying rather than the chain -
+   which is where it used to live, and which is collapsed most of the time. */
+.context {
+  display: grid;
+  /* Content-width columns packed from the left, not eight equal thirds of a
+     wide screen: stretched to 1fr each, every cell was mostly air. */
+  grid-template-columns: repeat(auto-fit, minmax(104px, max-content));
+  border-top: 1px solid var(--line);
+  background: var(--head);
+}
+.cx {
+  padding: 5px 14px;
+  border-right: 1px solid var(--grid);
+  min-width: 0;
+}
+.cx:last-child {
+  border-right: 0;
+}
+.cx i {
+  display: block;
+  font-style: normal;
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  margin-bottom: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cx b {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+}
+/* strike-valued figures carry the market hue, per the colour law */
+.cx.k b {
+  color: var(--mkt);
+}
+/* shut, the panel is just its header strip */
+.a-chain.shut {
+  flex: none;
+}
+.disclose {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.012em;
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.disclose:hover {
+  color: var(--you);
+}
+.disclose span {
+  color: var(--dim);
+  font-size: 10px;
+}
+.a-baskets {
+  grid-area: baskets;
+}
+
+
+/* ---------- toolbar ---------- */
+.topbar {
+  grid-area: tb;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.tb {
+  display: flex;
+  align-items: stretch;
+  padding: 0 12px;
+  flex-wrap: wrap;
+  min-height: 52px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  font-family: var(--u);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  padding-right: 14px;
+}
+.tbk {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.1;
+  padding: 7px 14px;
+  border-left: 1px solid var(--grid);
+  min-width: 0;
+}
+.tbk small {
+  font-family: var(--u);
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  margin-bottom: 3px;
+}
+.tbk b {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: 13.5px;
+}
+.tbk.spot b {
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-
-.live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 0 rgba(232, 163, 61, 0.5);
-  animation: pulse 2.4s ease-in-out infinite;
+.tbk.spot .chg {
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 3px;
 }
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(232, 163, 61, 0.45);
-  }
-  70% {
-    box-shadow: 0 0 0 7px rgba(232, 163, 61, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(232, 163, 61, 0);
-  }
-}
-
-.topbar-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 20px;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.topbar-clock {
-  font-family: var(--font-mono);
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- Panels ---- */
-
-.panel {
-  padding: 28px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.panel-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.panel h2 {
-  font-size: 0.95rem;
+.tbk.hero b {
+  font-size: 21px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  margin: 0;
-  color: var(--text);
-}
-
-.panel-note {
-  color: var(--text-faint);
-  font-size: 0.82rem;
-  margin: -8px 0 16px;
-  max-width: 60ch;
-}
-
-/* ---- Hero P&L figure ---- */
-
-.hero-pnl {
-  font-family: var(--font-mono);
-  font-size: 2.4rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
   line-height: 1;
 }
-
-.pnl-strip {
+.tbsp {
+  flex: 1;
+  min-width: 8px;
+}
+/* The P&L figures are one family. One divider opens the group, one marks off
+   the sum; none between the two parts that make it up. */
+.tbgroup {
   display: flex;
-  gap: 40px;
-  margin: 4px 0 20px;
-  flex-wrap: wrap;
+  align-items: stretch;
+  border-left: 1px solid var(--grid);
+  min-width: 0;
+}
+.tbgroup > .tbk {
+  border-left: 0;
+}
+.tbgroup > .tbk.hero {
+  border-left: 1px solid var(--grid);
+}
+.tbtools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 14px;
+  border-left: 1px solid var(--grid);
 }
 
-.pnl-strip .stat-label {
-  display: block;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  margin-bottom: 4px;
-}
-
-/* ---- Tables (ledger style) ---- */
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  text-align: right;
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.88rem;
+.feed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
   white-space: nowrap;
 }
-
-th:first-child,
-td:first-child {
-  text-align: left;
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--up);
+  flex: none;
+}
+.dot.off {
+  background: var(--mkt);
+}
+.dot.bad {
+  background: var(--dn);
 }
 
-th {
-  color: var(--text-faint);
-  font-weight: 500;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--border-strong);
-}
-
-td {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-td:first-child {
-  font-family: var(--font-ui);
-}
-
-tbody tr:hover td {
-  background: var(--surface-raised);
-}
-
-.pnl-pos {
-  color: var(--profit);
-}
-
-.pnl-neg {
-  color: var(--loss);
-}
-
-/* ---- Strategy command bar ---- */
-
-.controls {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.controls select,
-.controls input,
-.controls button {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
+/* ---------- controls ---------- */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
   border-radius: 3px;
-  padding: 8px 10px;
-  font-size: 0.85rem;
+  overflow: hidden;
+  background: var(--panel);
+}
+.seg button {
+  border: 0;
+  background: none;
+  padding: 4px 11px;
+  cursor: pointer;
+  color: var(--dim);
+  border-right: 1px solid var(--line);
+  font-family: var(--u);
+  white-space: nowrap;
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.seg button:hover {
+  color: var(--fg);
+}
+.seg button[aria-pressed="true"] {
+  background: var(--you);
+  color: var(--you-fg);
+  font-weight: 600;
+}
+.seg.sm button {
+  padding: 2px 8px;
+  font-size: 11.5px;
 }
 
-.controls input,
-.controls select {
-  font-family: var(--font-mono);
+.tbtn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--dim);
+  font-family: var(--u);
 }
-
-.controls input[type="number"] {
-  width: 64px;
+.tbtn:hover {
+  border-color: var(--dim);
+  color: var(--fg);
 }
-
-.controls select:focus,
-.controls input:focus,
-.controls button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-color: var(--accent);
+.xbtn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 3px;
+  padding: 1px 7px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--dim);
+  font-family: var(--u);
 }
-
-.controls button {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #1a1206;
+.xbtn:hover {
+  border-color: var(--dim);
+  color: var(--fg);
+}
+.xbtn.danger:hover {
+  border-color: var(--dn);
+  color: var(--dn);
+}
+.bbtn {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 8px;
   font-weight: 600;
   cursor: pointer;
+  font-family: var(--u);
+  width: 100%;
+}
+.bbtn.buy {
+  background: var(--you);
+  color: var(--you-fg);
+}
+.bbtn.sell {
+  background: var(--sell);
+  color: var(--sell-fg);
+}
+.bbtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-.controls button:hover:not(:disabled) {
-  background: #f0b358;
+.field {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 9px;
+}
+.field label {
+  color: var(--dim);
+}
+.field input,
+.field select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 5px 7px;
+  width: 100%;
 }
 
-.controls button:disabled {
-  opacity: 0.6;
-  cursor: default;
+/* ---------- tables ---------- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--head);
+  color: var(--dim);
+  font-weight: 500;
+  text-align: right;
+  padding: 4px 7px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  font-size: 11px;
+}
+td {
+  padding: 2.5px 7px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--grid);
+  font-size: 12px;
+}
+th.l,
+td.l {
+  text-align: left;
+}
+tbody tr:hover td {
+  background-color: var(--selbg);
+}
+tr.total td {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+  background: var(--head);
 }
 
-.signal-heading {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  margin: 0 0 4px;
+.empty {
+  padding: 11px;
+  margin: 0;
+  color: var(--dim);
+  line-height: 1.45;
+}
+.err {
+  padding: 9px 11px;
+  margin: 0;
+  color: var(--dn);
+  line-height: 1.45;
+  border-bottom: 1px solid var(--grid);
 }
 
-.signal-heading .sym {
-  color: var(--text);
-  font-family: var(--font-mono);
+/* ---------- section rule ---------- */
+.sec {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 9px 4px;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--head);
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+}
+.sec .dim {
+  font-weight: 400;
 }
 
-/* ---- Risk checks + order placement ---- */
+/* ---------- instrument rail ---------- */
+.inst {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  display: block;
+}
+.inst:hover {
+  background: var(--selbg);
+}
+.inst.on {
+  border-left-color: var(--you);
+  background: var(--selbg);
+}
+.irow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 9px;
+}
+.irow + .irow {
+  margin-top: 2px;
+  font-size: 10.5px;
+}
+.inst b {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.ipx {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.irow.dim span:last-child {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+}
 
-.risk-checks {
-  list-style: none;
-  margin: 4px 0 20px;
-  padding: 0;
+/* ---------- option chain ---------- */
+.chain td {
+  padding: 2.5px 6px;
+}
+.chain th.k,
+.chain td.k {
+  text-align: center;
+  background: var(--head);
+  font-weight: 600;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.chain th.side {
+  text-align: center;
+  color: var(--dim);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+.chain th.side.c {
+  text-align: right;
+  padding-right: 10px;
+}
+.chain th.side.p {
+  text-align: left;
+  padding-left: 10px;
+}
+.chain tr.atm td {
+  background-color: var(--atm);
+}
+.chain tr.atm td.k {
+  box-shadow: inset 0 0 0 1px var(--mkt);
+}
+.chain td.itm {
+  background-color: var(--itm);
+}
+.chain td.oi {
+  background-repeat: no-repeat;
+}
+.leg {
+  display: inline-block;
+  font-family: var(--n);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 2px;
+  margin-left: 5px;
+  color: var(--you-fg);
+  background: var(--you);
+  vertical-align: 1px;
+}
+.leg.s {
+  background: var(--sell);
+  color: var(--sell-fg);
+}
+
+/* ---------- strategy / basket cards ---------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 7px;
+  padding: 7px;
+}
+.card {
+  border: 1px solid var(--line);
+  border-radius: 3px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.card-h {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+  overflow: hidden;
+  border-left: 3px solid var(--sc, var(--you));
+}
+.card-h b {
+  font-weight: 600;
+}
+.card-h .dim {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+}
+.card-h .mtm {
+  margin-left: auto;
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+}
+.met {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 4px 0;
+}
+.met div {
+  padding: 2px 9px;
+  min-width: 0;
+}
+.met small {
+  display: block;
+  color: var(--dim);
+  font-size: 10px;
+}
+.met span {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.card-a {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 5px 9px;
+  border-top: 1px solid var(--grid);
 }
 
-.risk-checks li {
-  font-size: 0.82rem;
-  font-family: var(--font-mono);
+/* ---------- payoff ---------- */
+.payoff {
+  position: relative;
+  width: 100%;
 }
-
-.check-pass {
-  color: var(--profit);
+.payoff svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
-
-.check-fail {
-  color: var(--loss);
-}
-
-.place-order-row {
+.legend {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
+  padding: 5px 10px 7px;
+  color: var(--dim);
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.legend svg {
+  display: block;
+  flex: none;
 }
 
-.place-order-btn {
-  background: var(--loss);
-  border: 1px solid var(--loss);
-  color: #fff;
-  font-family: var(--font-ui);
-  font-weight: 600;
-  font-size: 0.85rem;
-  padding: 9px 18px;
-  border-radius: 3px;
-  cursor: pointer;
+/* ---------- pre-trade checks ---------- */
+.checks {
+  display: grid;
+  gap: 3px;
+  padding: 7px 10px;
 }
-
-.place-order-btn:hover:not(:disabled) {
-  background: #e2504f;
-}
-
-.place-order-btn:disabled {
-  background: var(--surface-raised);
-  border-color: var(--border-strong);
-  color: var(--text-faint);
-  cursor: default;
-}
-
-.place-order-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.place-success {
-  color: var(--profit);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  margin-top: 12px;
-}
-
-/* ---- Baskets (strategy tracking) ---- */
-
-.ghost-btn {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-muted);
-  border-radius: 3px;
-  padding: 5px 10px;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.ghost-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.create-basket {
-  margin-bottom: 20px;
-}
-
-.create-basket-body {
-  margin-top: 14px;
-  padding: 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-}
-
-.basket-list {
+.checks div {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  align-items: baseline;
+  line-height: 1.4;
+}
+.checks .mk {
+  flex: none;
+  font-family: var(--n);
+  font-weight: 700;
+}
+.build-foot {
+  padding: 9px 10px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+}
+.warn-live {
+  color: var(--dn);
+  line-height: 1.4;
 }
 
-.basket-row {
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 12px 14px;
-}
-
-.basket-summary {
+/* ---------- confirm dialog ---------- */
+.ask {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(10, 14, 20, 0.55);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: center;
+  padding: 16px;
+}
+.askbox {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  max-width: 400px;
+  width: 100%;
+}
+.askbox h3 {
+  margin: 0;
+  padding: 13px 15px 0;
+  font-size: 13px;
+}
+.askbox .body {
+  padding: 8px 15px 12px;
+  line-height: 1.5;
+}
+.askbox table {
+  margin-top: 8px;
+  border-top: 1px solid var(--grid);
+}
+.askrow {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0 15px 13px;
+}
+.askrow button {
+  border-radius: 3px;
+  padding: 6px 13px;
   cursor: pointer;
+  font-family: var(--u);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.askrow button.go {
+  background: var(--sell);
+  border-color: var(--sell);
+  color: var(--sell-fg);
+  font-weight: 600;
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 1500px) {
+  .ws {
+    grid-template-columns: 262px minmax(0, 1fr) 330px;
+  }
+  .tbk.hero b {
+    font-size: 19px;
+  }
+}
+@media (max-width: 1180px) {
+  .ws {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas:
+      "tb tb"
+      "baskets baskets"
+      "alerts alerts"
+      "chain chain"
+      "left left";
+  }
+  #left {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  #left > .panel {
+    flex: 1 1 300px;
+  }
+  .a-chain .pb {
+    max-height: 520px;
+  }
+}
+@media (max-width: 820px) {
+  .ws {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "tb" "baskets" "alerts" "chain" "left";
+  }
+  .tbk {
+    border-left: 0;
+    padding-left: 0;
+    padding-right: 16px;
+  }
+  /* Stacked at this width, so the dividers that grouped the P&L figures on one
+     row no longer describe anything. */
+  .tbgroup,
+  .tbgroup > .tbk.hero {
+    border-left: 0;
+  }
+  .tbgroup {
+    flex-wrap: wrap;
+  }
+  .cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- adopt an existing position ---------- */
+.adopt {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  margin-top: 9px;
+}
+.adopt label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+}
+.adopt label:last-child {
+  border-bottom: 0;
+}
+.adopt label:hover {
+  background: var(--selbg);
+}
+.adopt input {
+  margin: 0;
+  flex: none;
+  accent-color: var(--you);
+}
+.adopt .who {
+  flex: 1;
+  min-width: 0;
+}
+.adopt .qty {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+}
+.askbox .askrow button.go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- market context strip ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.stats .st {
+  padding: 5px 9px;
+  border-right: 1px solid var(--grid);
+  min-width: 0;
+}
+.stats .st:last-child {
+  border-right: 0;
+}
+.stats i {
+  display: block;
+  font-style: normal;
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  margin-bottom: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stats b {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+/* strike-valued figures carry the market hue, per the colour law */
+.stats .st.k b {
+  color: var(--mkt);
+}
+
+/* ---------- expiry selector ---------- */
+.expiry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.expiry select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: var(--u);
+  max-width: 190px;
+}
+.tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--grid);
+  color: var(--dim);
+}
+.tag.m {
+  background: color-mix(in srgb, var(--mkt) 20%, transparent);
+  color: var(--mkt);
+}
+
+/* A proposed leg is an outline; a held one is filled. Same shape, so the
+   chain reads at a glance as "what I have" versus "what I'm considering". */
+.leg.proposed {
+  background: transparent;
+  color: var(--you);
+  box-shadow: inset 0 0 0 1px var(--you);
+}
+.leg.s.proposed {
+  color: var(--sell);
+  box-shadow: inset 0 0 0 1px var(--sell);
+}
+
+/* ---------- market watch ---------- */
+.watch tr.pick {
+  cursor: pointer;
+}
+.watch tr.pick.on td {
+  background: var(--selbg);
+}
+.watch tr.pick.on td.l {
+  box-shadow: inset 3px 0 0 var(--you);
+  font-weight: 600;
+}
+.watch tr:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: -2px;
+}
+/* India VIX is quoted but not tradable, so it sits apart */
+.watch tr.novix td {
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+}
+.watch tr.novix:hover td {
+  background: transparent;
+}
+
+#left > section:first-child {
+  flex: none;
+}
+
+/* ---------- open-interest buildup ----------
+   Not green/red: buildup is not profit or loss, and the colour law reserves
+   those. Positions opening take the market hue; positions closing recede. */
+.chain td.bu {
+  text-align: left;
+  font-family: var(--u);
+  white-space: nowrap;
+}
+.chain td.bu .opening {
+  color: var(--mkt);
+}
+.chain td.bu .closing {
+  color: var(--dim);
+}
+
+/* ---------- alert severities ---------- */
+.sev {
+  display: inline-block;
+  min-width: 46px;
+  flex: none;
+  text-align: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: var(--u);
+}
+.sev.risk {
+  background: color-mix(in srgb, var(--dn) 20%, transparent);
+  color: var(--dn);
+}
+.sev.warn {
+  background: color-mix(in srgb, var(--mkt) 20%, transparent);
+  color: var(--mkt);
+}
+.sev.target {
+  background: color-mix(in srgb, var(--up) 20%, transparent);
+  color: var(--up);
+}
+.sev.info {
+  background: var(--grid);
+  color: var(--dim);
+}
+/* One alert: the message on its own line at full width, then a quiet meta
+   row. The severity is a left edge as well as a chip, so the log can be
+   scanned for red without reading any of it. */
+.alert {
+  padding: 5px 9px 6px;
+  border-bottom: 1px solid var(--grid);
+  border-left: 3px solid transparent;
+}
+.alert.risk {
+  border-left-color: var(--dn);
+}
+.alert.warn {
+  border-left-color: var(--mkt);
+}
+.alert.target {
+  border-left-color: var(--up);
+}
+.alert.info {
+  border-left-color: var(--line);
+}
+.amsg {
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+.ameta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--dim);
+  font-size: 10.5px;
+  min-width: 0;
+}
+.atime {
+  margin-left: auto;
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.a-alerts .pb {
+  min-height: 110px;
+}
+/* the thresholds are a footer, not the content - keep them low */
+.lim.tight td {
+  padding: 2px 9px;
+  font-size: 11.5px;
+}
+.lim.tight input {
+  width: 74px;
+  padding: 0 4px;
+}
+
+/* a blocking failure is the one thing in the toolbar allowed to shout */
+.feed.bad {
+  color: var(--dn);
+}
+.feedtext {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+/* The card header doubles as the disclosure for the full analysis. */
+button.card-h {
+  width: 100%;
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+button.card-h:hover {
+  background: var(--selbg);
+}
+.caret {
+  color: var(--dim);
+  font-size: 10px;
+  flex: none;
+}
+.detail .sec {
+  border-top: 1px solid var(--grid);
+}
+/* Four greeks, two lines each: unit-bearing label, then the figure. Wraps to
+   two per row rather than squeezing four into a narrow card. */
+.greeks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  border-bottom: 1px solid var(--grid);
+}
+.greeks > div {
+  padding: 7px 10px;
+  border-right: 1px solid var(--grid);
+  min-width: 0;
+}
+.greeks > div:last-child {
+  border-right: 0;
+}
+.greeks small {
+  display: block;
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.greeks b {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+/* an expanded card wants the room, so it spans the grid */
+.cards > .card:has(.detail) {
+  grid-column: 1 / -1;
+}
+
+/* ---------- payoff zoom ---------- */
+.payoffwrap {
+  position: relative;
+}
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 0;
+  font-size: 11px;
+}
+.zoom .xbtn {
+  min-width: 24px;
+  text-align: center;
+  font-family: var(--n);
+  line-height: 1.5;
+}
+.zoom .dim {
+  margin-left: auto;
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- news and calendar ---------- */
+.fbar {
+  display: flex;
+  gap: 5px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
-
-.basket-name {
-  font-weight: 600;
-  margin-right: 10px;
-}
-
-.basket-meta {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  font-family: var(--font-mono);
-}
-
-.basket-row table {
-  margin-top: 14px;
-}
-
-/* ---- Misc ---- */
-
-.error {
-  color: var(--loss);
-  font-size: 0.85rem;
-}
-
-.empty-note {
-  color: var(--text-muted);
-  font-size: 0.88rem;
-}
-
-code {
-  font-family: var(--font-mono);
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
+.fbar button {
+  border: 1px solid var(--line);
+  background: var(--panel);
   border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 0.85em;
+  padding: 1px 8px;
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 11.5px;
+  font-family: var(--u);
+}
+.fbar button:hover {
+  color: var(--fg);
+}
+.fbar button[aria-pressed="true"] {
+  color: var(--you);
+  border-color: var(--you);
+  font-weight: 600;
+}
+.nitem {
+  display: block;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--grid);
+  color: inherit;
+  text-decoration: none;
+}
+a.nitem:hover {
+  background: var(--selbg);
+}
+a.nitem:hover .nhead {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.nmeta {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  color: var(--dim);
+  font-size: 10.5px;
+  min-width: 0;
+}
+.nmeta > span:first-child {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.nhead {
+  margin: 3px 0 0;
+  line-height: 1.38;
+  max-width: 58ch;
+}
+.imp {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+  flex: none;
+}
+.imp.H {
+  background: color-mix(in srgb, var(--dn) 20%, transparent);
+  color: var(--dn);
+}
+.imp.M {
+  background: color-mix(in srgb, var(--mkt) 20%, transparent);
+  color: var(--mkt);
+}
+.imp.L {
+  background: var(--grid);
+  color: var(--dim);
+}
+/* an event landing before an expiry you hold */
+.nitem.evh {
+  background: var(--band);
+  box-shadow: inset 2px 0 0 var(--mkt);
+}
+
+/* the next scheduled release, filling what was dead space mid-toolbar */
+.tbevent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.15;
+  padding: 7px 16px;
+  border-left: 1px solid var(--grid);
+  min-width: 0;
+  max-width: 340px;
+}
+.tbevent small {
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+.tbevent b {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--mkt);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

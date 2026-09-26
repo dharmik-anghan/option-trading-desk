@@ -48,7 +48,28 @@ class OptionChainRow(BaseModel):
     oi: int
     prev_oi: int
     volume: int
+    # Day changes as the broker reports them. Needed together to read open
+    # interest: whether OI is being added or closed only means something
+    # alongside which way the price moved. Defaults keep older callers and
+    # stored snapshots valid.
+    ltp_change: float = 0.0
+    ltp_change_pct: float = 0.0
+    oi_change: int = 0
+    oi_change_pct: float = 0.0
     greeks: Greeks | None = None
+
+
+class Expiry(BaseModel):
+    """One listed expiry for an underlying.
+
+    `token` is the broker's own selector for that expiry (Fyers calls it
+    `expiry`, a unix timestamp as a string) and is passed back verbatim when
+    asking for that expiry's chain - we never reconstruct it ourselves.
+    """
+
+    date: str  # as the exchange lists it, e.g. "29-10-2026"
+    token: str
+    weekly: bool
 
 
 class OptionChain(BaseModel):
@@ -56,6 +77,15 @@ class OptionChain(BaseModel):
     underlying_ltp: float
     fetched_at: datetime
     rows: list[OptionChainRow]
+    # Every expiry the broker lists, so the caller can offer a choice rather
+    # than silently always showing the nearest one.
+    expiries: list[Expiry] = []
+    expiry_token: str | None = None  # which of `expiries` these rows are for
+    # Whole-chain totals the broker already computes; summing `rows` would
+    # only match when every strike was fetched.
+    call_oi: int = 0
+    put_oi: int = 0
+    india_vix: float | None = None
 
 
 class Funds(BaseModel):

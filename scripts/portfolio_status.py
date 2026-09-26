@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from broker.fyers import FyersBroker  # noqa: E402
+from broker.token_store import get_access_token  # noqa: E402
 from execution.portfolio_status import get_portfolio_status  # noqa: E402
 from risk.limits import check_daily_kill_switch  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -35,7 +36,7 @@ def main() -> int:
 
     settings = load_settings()
     broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=settings.fyers_access_token
+        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
     )
 
     status = get_portfolio_status(broker)

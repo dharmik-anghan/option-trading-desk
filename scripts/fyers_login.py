@@ -1,5 +1,10 @@
-"""Daily Fyers login: TOTP auto-login when configured, manual browser flow
+"""Fyers login: TOTP auto-login when configured, manual browser flow
 otherwise.
+
+Normally you should not need to run this: `broker/token_store.py` refreshes
+an expired token on demand whenever the app asks for one. Run it by hand to
+prove the credentials work, or when auto-login is not configured and the
+manual browser flow is the only way in.
 
 Manual flow: Fyers uses an OAuth-style flow: we send you to a login URL, you
 authenticate in the browser, Fyers redirects to `FYERS_REDIRECT_URI` with an
@@ -19,14 +24,11 @@ connectivity is proven before any broker/market-data code is written.
 
 from __future__ import annotations
 
-import base64
-import json
 import re
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from dotenv import set_key
 from fyers_apiv3 import fyersModel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +36,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from broker.fyers_auth import AutoLoginError, auto_login  # noqa: E402
+from broker.token_store import jwt_subject, persist_token  # noqa: E402
 from settings import Settings, load_settings  # noqa: E402
 
 ENV_PATH = REPO_ROOT / ".env"
@@ -51,26 +54,6 @@ def extract_auth_code(raw: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", raw):
         raise ValueError("That doesn't look like a valid auth code or URL.")
     return raw
-
-
-def jwt_subject(token: str) -> str | None:
-    """Best-effort peek at a Fyers JWT's `sub` claim, without verifying it.
-
-    Fyers issues JWTs at two stages: the auth_code (sub="auth_code") and the
-    real access_token (sub="access_token"). Used here only to catch, with a
-    clear error, the case where the exchange step didn't actually happen and
-    we're about to save the unexchanged auth_code as if it were the token.
-    """
-    parts = token.split(".")
-    if len(parts) != 3:
-        return None
-    padded = parts[1] + "=" * (-len(parts[1]) % 4)
-    try:
-        payload = json.loads(base64.urlsafe_b64decode(padded))
-    except (ValueError, UnicodeDecodeError):
-        return None
-    subject = payload.get("sub")
-    return subject if isinstance(subject, str) else None
 
 
 def try_auto_login(settings: Settings) -> str | None:
@@ -145,7 +128,7 @@ def main() -> int:
         )
         return 1
 
-    set_key(str(ENV_PATH), "FYERS_ACCESS_TOKEN", access_token)
+    persist_token(access_token, env_path=ENV_PATH)
     print(f"Login succeeded. Access token saved to {ENV_PATH}.")
     return 0
 

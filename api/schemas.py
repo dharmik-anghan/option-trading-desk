@@ -53,6 +53,11 @@ class StrategySignalResponse(BaseModel):
     max_loss: float | None
     breakevens: list[float]
     payoff_curve: list[PayoffPoint]
+    # What the position is worth *now* rather than at expiry, priced off each
+    # leg's live IV. Empty when the feed gave us no usable IV or no expiry to
+    # measure time against - better to draw one curve than a made-up second.
+    payoff_curve_today: list[PayoffPoint]
+    days_to_expiry: float | None
     pre_trade_checks: list[RiskCheckResponse]
     can_place: bool
 
@@ -69,6 +74,10 @@ class PlaceOrderRequest(BaseModel):
     symbol: str
     quantity: int = 1
     basket_name: str | None = None
+    # Which expiry to trade. Empty means the nearest one, matching the chain
+    # endpoint's default - if it were left implicit, the order could fill a
+    # different expiry than the one previewed.
+    expiry: str | None = None
 
 
 class OrderResultResponse(BaseModel):
@@ -110,6 +119,22 @@ class BasketLegResponse(BaseModel):
     exit_price: float | None
     exit_at: str | None
     is_open: bool
+    # Live state of this contract, filled only with ?live=true. The chain is
+    # already being fetched for the pre-expiry curve, so carrying delta and the
+    # day changes costs nothing extra - and it is what lets a watcher notice a
+    # short strike being tested without polling the whole chain itself.
+    ltp: float | None = None
+    # Greeks as the broker reports them, per unit of the contract: delta per
+    # point of the underlying, theta per day, vega per volatility point. Gamma
+    # and vega are identical for the call and put at a strike, which is correct
+    # under put-call parity rather than a quirk of the feed.
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None
+    vega: float | None = None
+    iv: float | None = None
+    ltp_change: float | None = None
+    oi_change: int | None = None
 
 
 class BasketResponse(BaseModel):
@@ -124,7 +149,91 @@ class BasketResponse(BaseModel):
     max_loss: float | None
     breakevens: list[float]
     payoff_curve: list[PayoffPoint]
+    # Only filled when asked for with ?live=true, and only when the legs all
+    # share one listed expiry we can price against. Empty otherwise.
+    payoff_curve_today: list[PayoffPoint] = []
+    days_to_expiry: float | None = None
+    expiry_date: str | None = None
+    #: False when the open legs sit in different expiries - a calendar or a
+    #: diagonal. The payoff fields above are then empty rather than wrong: they
+    #: are worked out from intrinsic value at one expiry, which for a calendar
+    #: reports the whole net debit as a certain loss.
+    single_expiry: bool = True
 
 
 class CloseLegRequest(BaseModel):
     exit_price: float
+
+
+class MarketContextResponse(BaseModel):
+    """What the chain says about one underlying, for the desk header.
+
+    Every figure is optional: a missing one means the feed did not supply
+    enough to compute it, which is a different thing from zero.
+    """
+
+    underlying_symbol: str
+    spot: float
+    change: float
+    change_pct: float
+    expiry_date: str | None
+    futures_symbol: str | None
+    futures: float | None
+    futures_premium: float | None
+    # Carry the futures premium implies, annualised, as a percentage.
+    carry_pct: float | None
+    atm_strike: float | None
+    atm_straddle: float | None
+    atm_iv: float | None
+    historical_vol: float | None
+    # Implied over historical: above 1 means options cost more than the index
+    # has lately been moving.
+    iv_over_hv: float | None
+    put_call_ratio: float | None
+    max_pain: float | None
+    # Where open interest concentrates either side of spot. `*_prominence` is
+    # how heavy that strike is relative to others of the same roundness: round
+    # numbers carry far more open interest whatever the market is doing, so the
+    # plain maximum mostly measures which strike is roundest. `*_heaviest` is
+    # that plain maximum, kept so the two can be compared.
+    resistance: float | None
+    resistance_prominence: float | None
+    resistance_heaviest: float | None
+    support: float | None
+    support_prominence: float | None
+    support_heaviest: float | None
+    skew: float | None
+
+
+class EventResponse(BaseModel):
+    """One scheduled release. Date only - the calendar publishes no time."""
+
+    day: str
+    name: str
+    label: str
+    importance: str
+    coverage: str
+    country: str | None
+
+
+class EventsResponse(BaseModel):
+    events: list[EventResponse]
+    #: Seconds since the calendar was last refreshed, so the desk can say "as
+    #: of" instead of implying the list is current. None means never fetched.
+    age_seconds: float | None
+    #: Set when the last refresh failed or the page could not be read. The
+    #: events above may still be usable, just stale.
+    error: str | None
+
+
+class HeadlineResponse(BaseModel):
+    title: str
+    link: str
+    source: str
+    published: str | None
+
+
+class NewsResponse(BaseModel):
+    headlines: list[HeadlineResponse]
+    age_seconds: float | None
+    error: str | None

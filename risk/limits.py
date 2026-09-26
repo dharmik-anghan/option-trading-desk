@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 
+from analytics.payoff import PayoffResult
 from risk.result import RiskCheckResult
 
 
@@ -49,3 +50,49 @@ def check_daily_kill_switch(
         passed=True,
         reason=f"Today's P&L {realized_and_unrealized_pnl_today} is within the daily loss limit",
     )
+
+
+def check_position_is_real(payoff: PayoffResult) -> RiskCheckResult:
+    """Reject a structure that has no exposure at all.
+
+    A strike-selection failure can return offsetting legs - the same strike
+    bought and sold - which nets to zero profit and zero loss. Every other
+    check passes such a position happily: nothing to lose is trivially within
+    any loss limit. But placing it still sends every leg to the exchange and
+    pays brokerage and slippage on all of them, for no position.
+
+    This is deliberately a check rather than only a strategy-side assertion,
+    so a bug in any strategy cannot reach the exchange through this gate.
+    """
+    duplicates = _offsetting_legs(payoff)
+    if duplicates:
+        listed = ", ".join(duplicates)
+        return RiskCheckResult(
+            passed=False,
+            reason=(
+                f"These legs cancel out, leaving no position: {listed}. "
+                "Usually the strike window is too narrow for the deltas asked for."
+            ),
+        )
+    if payoff.max_profit == 0 and payoff.max_loss == 0:
+        return RiskCheckResult(
+            passed=False,
+            reason="This structure cannot gain or lose anything - there is no position to take",
+        )
+    return RiskCheckResult(passed=True, reason="The structure has real exposure")
+
+
+def _offsetting_legs(payoff: PayoffResult) -> list[str]:
+    """Strike/type pairs held both long and short in the same quantity."""
+    net: dict[tuple[str, float], int] = {}
+    seen: dict[tuple[str, float], int] = {}
+    for leg in payoff.legs:
+        key = (leg.option_type, leg.strike)
+        signed = leg.quantity if leg.side == "BUY" else -leg.quantity
+        net[key] = net.get(key, 0) + signed
+        seen[key] = seen.get(key, 0) + 1
+    return [
+        f"{int(strike)} {option_type}"
+        for (option_type, strike), total in sorted(net.items(), key=lambda kv: kv[0][1])
+        if total == 0 and seen[(option_type, strike)] > 1
+    ]

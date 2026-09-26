@@ -47,11 +47,14 @@ def client(fake_broker: FakeBroker, db_path: Path) -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-def test_health() -> None:
-    response = TestClient(app).get("/api/health")
+def test_health(client: TestClient) -> None:
+    response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    # reports whether broker reads are currently being served over a rate limit
+    assert body["rate_limited"] is False
 
 
 def test_portfolio_endpoint_returns_positions_and_pnl(client: TestClient) -> None:
@@ -318,3 +321,139 @@ def test_close_leg_endpoint_empty_curve_when_fully_closed(client: TestClient) ->
 
     assert response.status_code == 200
     assert response.json()["payoff_curve"] == []
+
+
+@pytest.fixture
+def market_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretend the exchange is trading, whatever day the suite runs on."""
+    import api.app as app_module
+
+    monkeypatch.setattr(app_module, "in_session", lambda *_a, **_k: True)
+    app_module._last_snapshot = None
+
+
+def test_fetching_the_portfolio_records_a_snapshot(
+    client: TestClient, market_open: None
+) -> None:
+    client.get("/api/portfolio")
+
+    history = client.get("/api/portfolio/history?days=7").json()
+    assert len(history) == 1
+
+
+def test_snapshots_are_throttled_rather_than_one_per_poll(
+    client: TestClient, market_open: None
+) -> None:
+    """The portfolio is polled every few seconds; history is not needed that often."""
+    for _ in range(5):
+        client.get("/api/portfolio")
+
+    history = client.get("/api/portfolio/history?days=7").json()
+    assert len(history) == 1
+
+
+def test_nothing_is_recorded_while_the_exchange_is_shut(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overnight, at weekends and on holidays the P&L cannot move, so a
+    snapshot then is a duplicate of the close."""
+    import api.app as app_module
+
+    monkeypatch.setattr(app_module, "in_session", lambda *_a, **_k: False)
+    app_module._last_snapshot = None
+
+    for _ in range(3):
+        assert client.get("/api/portfolio").status_code == 200
+
+    assert client.get("/api/portfolio/history?days=7").json() == []
+
+
+def test_a_snapshot_failure_does_not_fail_the_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, market_open: None
+) -> None:
+    import sqlite3
+
+    import api.app as app_module
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise sqlite3.OperationalError("disk is full")
+
+    monkeypatch.setattr(app_module, "save_portfolio_snapshot", boom)
+
+    # the P&L on screen matters more than the history behind it
+    response = client.get("/api/portfolio")
+    assert response.status_code == 200
+    assert "total_pnl" in response.json()
+
+
+def test_a_calendar_spread_does_not_report_a_single_expiry_payoff(
+    client: TestClient,
+) -> None:
+    """Intrinsic value at one expiry prices a calendar's far leg at zero, so the
+    whole net debit comes out as a certain loss. Better to show nothing."""
+    created = client.post(
+        "/api/baskets",
+        json={
+            "name": "Oct/Nov calendar",
+            "strategy": "Calendar spread",
+            "underlying_symbol": "NSE:NIFTY50-INDEX",
+            "legs": [
+                {
+                    "symbol": "NSE:NIFTY26OCT23100CE",
+                    "option_type": "CE",
+                    "strike": 23100,
+                    "side": "SELL",
+                    "quantity": 75,
+                    "entry_price": 402.15,
+                },
+                {
+                    "symbol": "NSE:NIFTY26NOV23100CE",
+                    "option_type": "CE",
+                    "strike": 23100,
+                    "side": "BUY",
+                    "quantity": 75,
+                    "entry_price": 520.0,
+                },
+            ],
+        },
+    ).json()
+
+    assert created["single_expiry"] is False
+    assert created["payoff_curve"] == []
+    assert created["breakevens"] == []
+    # and not the net debit dressed up as a worst case
+    assert created["max_loss"] == 0.0
+
+
+def test_a_vertical_in_one_expiry_still_gets_its_payoff(client: TestClient) -> None:
+    created = client.post(
+        "/api/baskets",
+        json={
+            "name": "Bear call",
+            "strategy": "Whatever I want to call it",
+            "underlying_symbol": "NSE:NIFTY50-INDEX",
+            "legs": [
+                {
+                    "symbol": "NSE:NIFTY26OCT23100CE",
+                    "option_type": "CE",
+                    "strike": 23100,
+                    "side": "SELL",
+                    "quantity": 75,
+                    "entry_price": 402.15,
+                },
+                {
+                    "symbol": "NSE:NIFTY26OCT23500CE",
+                    "option_type": "CE",
+                    "strike": 23500,
+                    "side": "BUY",
+                    "quantity": 75,
+                    "entry_price": 212.10,
+                },
+            ],
+        },
+    ).json()
+
+    assert created["single_expiry"] is True
+    assert created["payoff_curve"]
+    # the structure label is stored as given, not matched against a known list
+    assert created["strategy"] == "Whatever I want to call it"

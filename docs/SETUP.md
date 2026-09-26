@@ -37,7 +37,12 @@ uv run python scripts/fyers_login.py
 Follow the printed URL, log in, and paste back the redirected URL (or just
 the `auth_code` param). This writes `FYERS_ACCESS_TOKEN` into `.env`.
 
-**Fyers access tokens expire daily** — re-run this script each trading day.
+**Fyers access tokens expire at 06:00 IST the morning after they're issued**
+(there is no refresh grant — a new token means a new login). If you set up
+auto-login below, the app handles this for you: `broker/token_store.py`
+notices the expired token and logs in again on the next call. Without
+auto-login there's no way to renew without a browser, so you'll need to
+re-run this script each trading day.
 
 ### Optional: skip the manual browser step
 
@@ -45,6 +50,9 @@ Fill in `FYERS_USERNAME` (your Fyers ID, e.g. `XY12345`), `FYERS_TOTP_KEY`
 (the base32 secret shown when you set up TOTP 2FA on Fyers — not a 6-digit
 code, the underlying key), and `FYERS_PIN` (your trading PIN) in `.env`,
 and `scripts/fyers_login.py` will log in automatically with no browser step.
+
+With these set you generally never run the login script again — the app
+refreshes the token itself whenever it has expired.
 
 This uses undocumented Fyers endpoints (see `broker/fyers_auth.py`) rather
 than Fyers' official OAuth flow, so it could break if Fyers changes them —

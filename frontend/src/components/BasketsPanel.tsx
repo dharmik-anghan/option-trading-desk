@@ -1,329 +1,338 @@
-import { useEffect, useState } from "react";
-import {
-  closeBasketLeg,
-  createBasket,
-  getBaskets,
-  getPortfolio,
-  type Basket,
-  type NewBasketLegInput,
-  type Position,
-} from "../api";
-import { formatPnl } from "../format";
+import { useMemo, useState } from "react";
+import type { Basket, Position, Quote } from "../api";
+import { closeBasketLeg, deleteBasket, removeBasketLeg } from "../api";
+import { dir, int, num, rupeesC, signed } from "../format";
 import { PayoffChart } from "./PayoffChart";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { AdoptDialog } from "./AdoptDialog";
+import { StructureDetail } from "./StructureDetail";
 
-function parseOptionSymbol(
-  symbol: string,
-): { option_type: "CE" | "PE"; strike: number } | null {
-  const match = symbol.match(/(\d+)(CE|PE)$/);
-  if (!match) return null;
-  return { strike: Number(match[1]), option_type: match[2] as "CE" | "PE" };
-}
-
-function CreateBasketForm({ onCreated }: { onCreated: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [positions, setPositions] = useState<Position[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [name, setName] = useState("");
-  const [strategy, setStrategy] = useState("iron_condor");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  function toggleOpen() {
-    if (!open && positions === null) {
-      getPortfolio()
-        .then((p) => setPositions(p.positions))
-        .catch((err: Error) => setError(err.message));
-    }
-    setOpen(!open);
-  }
-
-  function toggleSelected(symbol: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(symbol)) next.delete(symbol);
-      else next.add(symbol);
-      return next;
-    });
-  }
-
-  function handleSubmit() {
-    if (!positions) return;
-    const chosen = positions.filter((p) => selected.has(p.symbol));
-    const legs: NewBasketLegInput[] = [];
-    for (const position of chosen) {
-      const parsed = parseOptionSymbol(position.symbol);
-      if (!parsed) {
-        setError(`Could not parse strike/type from symbol: ${position.symbol}`);
-        return;
-      }
-      legs.push({
-        symbol: position.symbol,
-        option_type: parsed.option_type,
-        strike: parsed.strike,
-        side: position.net_quantity >= 0 ? "BUY" : "SELL",
-        quantity: Math.abs(position.net_quantity),
-        entry_price: position.average_price,
-      });
-    }
-    if (legs.length === 0) {
-      setError("Select at least one position.");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    createBasket(
-      name || `${strategy} basket`,
-      strategy,
-      "NSE:NIFTY50-INDEX",
-      legs,
-    )
-      .then(() => {
-        onCreated();
-        setOpen(false);
-        setSelected(new Set());
-        setName("");
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setSubmitting(false));
-  }
-
-  return (
-    <div className="create-basket">
-      <button className="ghost-btn" onClick={toggleOpen}>
-        {open ? "Cancel" : "+ Create basket from current positions"}
-      </button>
-      {open && (
-        <div className="create-basket-body">
-          {error && <p className="error">{error}</p>}
-          {!positions ? (
-            <p className="empty-note">Loading positions…</p>
-          ) : positions.length === 0 ? (
-            <p className="empty-note">No open positions to group.</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Symbol</th>
-                  <th>Net qty</th>
-                  <th>Avg price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((p) => (
-                  <tr key={p.symbol}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(p.symbol)}
-                        onChange={() => toggleSelected(p.symbol)}
-                      />
-                    </td>
-                    <td>{p.symbol}</td>
-                    <td>{p.net_quantity}</td>
-                    <td>{p.average_price}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <div className="controls">
-            <input
-              placeholder="Basket name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <input
-              placeholder="Strategy label"
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value)}
-            />
-            <button onClick={handleSubmit} disabled={submitting}>
-              {submitting ? "Creating…" : "Create basket"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BasketRow({
-  basket,
-  onChanged,
-}: {
-  basket: Basket;
+interface Props {
+  baskets: Basket[] | null;
+  error: Error | null;
+  loading: boolean;
+  positions: Position[];
+  /** The underlying currently in focus, used as the default when adopting. */
+  symbol: string;
+  /** Quotes for every watched underlying, so each card knows its own spot
+      rather than only the one in focus. */
+  quotes: Record<string, Quote> | null;
   onChanged: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [closingLegId, setClosingLegId] = useState<number | null>(null);
-  const [exitPrice, setExitPrice] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const openLegs = basket.legs.filter((l) => l.is_open).length;
-  const closedLegs = basket.legs.length - openLegs;
-
-  function handleClose(legId: number) {
-    const price = Number(exitPrice);
-    if (!Number.isFinite(price)) {
-      setError("Enter a valid exit price.");
-      return;
-    }
-    closeBasketLeg(basket.id, legId, price)
-      .then(() => {
-        setClosingLegId(null);
-        setExitPrice("");
-        setError(null);
-        onChanged();
-      })
-      .catch((err: Error) => setError(err.message));
-  }
-
-  return (
-    <div className="basket-row">
-      <div className="basket-summary" onClick={() => setExpanded(!expanded)}>
-        <div>
-          <span className="basket-name">{basket.name}</span>
-          <span className="basket-meta">
-            {basket.strategy} · {basket.underlying_symbol} · {openLegs} open
-            {closedLegs > 0 ? `, ${closedLegs} closed` : ""}
-          </span>
-        </div>
-        <div className="pnl-strip" style={{ margin: 0 }}>
-          <div>
-            <span className="stat-label">Max profit</span>
-            <span
-              className={
-                basket.max_profit === null || basket.max_profit >= 0
-                  ? "pnl-pos"
-                  : "pnl-neg"
-              }
-            >
-              {basket.max_profit === null
-                ? "Unbounded"
-                : formatPnl(basket.max_profit)}
-            </span>
-          </div>
-          <div>
-            <span className="stat-label">Max loss</span>
-            <span
-              className={
-                basket.max_loss === null || basket.max_loss >= 0
-                  ? "pnl-pos"
-                  : "pnl-neg"
-              }
-            >
-              {basket.max_loss === null
-                ? "Unbounded"
-                : formatPnl(basket.max_loss)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {expanded && (
-        <>
-          <PayoffChart
-            points={basket.payoff_curve}
-            breakevens={basket.breakevens}
-          />
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Qty</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {basket.legs.map((leg) => (
-                <tr key={leg.id}>
-                  <td>{leg.symbol}</td>
-                  <td>{leg.side}</td>
-                  <td>{leg.quantity}</td>
-                  <td>{leg.entry_price}</td>
-                  <td>{leg.exit_price ?? "—"}</td>
-                  <td className={leg.is_open ? "" : "pnl-pos"}>
-                    {leg.is_open ? "Open" : "Closed"}
-                  </td>
-                  <td>
-                    {leg.is_open &&
-                      (closingLegId === leg.id ? (
-                        <span className="controls" style={{ margin: 0 }}>
-                          <input
-                            type="number"
-                            placeholder="exit price"
-                            value={exitPrice}
-                            onChange={(e) => setExitPrice(e.target.value)}
-                          />
-                          <button onClick={() => handleClose(leg.id)}>
-                            Confirm
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          className="ghost-btn"
-                          onClick={() => setClosingLegId(leg.id)}
-                        >
-                          Close
-                        </button>
-                      ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-      {error && <p className="error">{error}</p>}
-    </div>
-  );
 }
 
-export function BasketsPanel() {
-  const [baskets, setBaskets] = useState<Basket[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+/** A colour per open basket, so a basket reads the same everywhere it appears. */
+const CARD_COLOURS = ["#45BDD4", "#9A8CF5", "#E585C0", "#D6A25A", "#6FA8FF", "#C77DFF"];
 
-  function load() {
-    getBaskets()
-      .then(setBaskets)
-      .catch((err: Error) => setError(err.message));
+/**
+ * Open structures, each as one card with its own payoff.
+ *
+ * Grouping legs into the basket they were placed as is the whole point: a
+ * flat list of eight option legs tells you nothing about the two positions
+ * you actually hold.
+ */
+export function BasketsPanel({
+  baskets,
+  error,
+  loading,
+  positions,
+  symbol,
+  quotes,
+  onChanged,
+}: Props) {
+  const [closing, setClosing] = useState<{ basket: Basket; legId: number; price: number } | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+  // "remove" is a bookkeeping fix, kept deliberately separate from "close",
+  // which records a real exit and keeps the leg on the basket
+  const [dropping, setDropping] = useState<Basket | null>(null);
+  const [unlinking, setUnlinking] = useState<{ basket: Basket; legId: number; what: string } | null>(
+    null,
+  );
+
+  // live P&L per leg, matched to broker positions by contract symbol
+  const ltpBySymbol = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of positions) m.set(p.symbol, p.ltp);
+    return m;
+  }, [positions]);
+
+  const open = (baskets ?? []).filter((b) => b.legs.some((l) => l.is_open));
+
+  const alreadyGrouped = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of baskets ?? []) {
+      for (const l of b.legs) if (l.is_open) set.add(l.symbol);
+    }
+    return set;
+  }, [baskets]);
+
+  const adoptable = positions.filter(
+    (p) => p.net_quantity !== 0 && !alreadyGrouped.has(p.symbol),
+  ).length;
+
+  async function run(fn: () => Promise<unknown>, done: () => void) {
+    setBusy(true);
+    setCloseError(null);
+    try {
+      await fn();
+      done();
+      onChanged();
+    } catch (e) {
+      setCloseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  useEffect(() => {
-    load();
-    window.addEventListener("portfolio:refresh", load);
-    return () => window.removeEventListener("portfolio:refresh", load);
-  }, []);
+  async function doClose() {
+    if (!closing) return;
+    setBusy(true);
+    setCloseError(null);
+    try {
+      await closeBasketLeg(closing.basket.id, closing.legId, closing.price);
+      setClosing(null);
+      onChanged();
+    } catch (e) {
+      setCloseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Strategies</h2>
+    <section className="panel a-baskets">
+      <div className="ph">
+        <h2>Open structures</h2>
+        <span className="sub">{baskets ? `${open.length} live` : " "}</span>
+        <span className="sp" />
+        <button className="tbtn" onClick={() => setAdopting(true)} disabled={!positions.length}>
+          Record an open position{adoptable ? ` (${adoptable})` : ""}
+        </button>
       </div>
-      <p className="panel-note">
-        Grouped strategies tracked by us (not the broker) — keeps every leg ever
-        part of a strategy, including closed ones, so the payoff reflects
-        P&amp;L already banked from legs you've exited.
-      </p>
 
-      <CreateBasketForm onCreated={load} />
+      {error && <p className="err">{error.message}</p>}
 
-      {error && <p className="error">Failed to load baskets: {error}</p>}
-      {!baskets ? (
-        <p className="empty-note">Loading strategies…</p>
-      ) : baskets.length === 0 ? (
-        <p className="empty-note">No strategies tracked yet.</p>
-      ) : (
-        <div className="basket-list">
-          {baskets.map((basket) => (
-            <BasketRow key={basket.id} basket={basket} onChanged={load} />
-          ))}
-        </div>
+      <div className="pb">
+        {!baskets && loading && <p className="empty">Loading…</p>}
+        {baskets && !open.length && (
+          <p className="empty">
+            Nothing grouped yet. Place a structure from the right and it lands here automatically —
+            or, if you already hold legs at your broker, use “Record an open position” above to
+            group them into a card.
+          </p>
+        )}
+        {!!open.length && (
+          <div className="cards">
+            {open.map((b, i) => {
+              const colour = CARD_COLOURS[i % CARD_COLOURS.length];
+              const live = b.legs.filter((l) => l.is_open);
+              const pnl = live.reduce((a, l) => {
+                const ltp = ltpBySymbol.get(l.symbol);
+                if (ltp === undefined) return a;
+                const sign = l.side === "SELL" ? -1 : 1;
+                return a + sign * (ltp - l.entry_price) * l.quantity;
+              }, 0);
+              const known = live.some((l) => ltpBySymbol.has(l.symbol));
+
+              return (
+                <div className="card" key={b.id}>
+                  <button
+                    className="card-h"
+                    style={{ ["--sc" as string]: colour }}
+                    aria-expanded={openId === b.id}
+                    onClick={() => setOpenId(openId === b.id ? null : b.id)}
+                    title={openId === b.id ? "Hide the analysis" : "Show the full analysis"}
+                  >
+                    <span className="caret" aria-hidden="true">
+                      {openId === b.id ? "\u25be" : "\u25b8"}
+                    </span>
+                    <b>{b.name}</b>
+                    <span className="dim">
+                      {b.strategy}
+                      {b.expiry_date ? ` · expires ${b.expiry_date}` : ""}
+                      {b.days_to_expiry != null ? ` · ${b.days_to_expiry.toFixed(1)}d left` : ""}
+                    </span>
+                    {known && <span className={`mtm ${dir(pnl)}`}>{signed(pnl)}</span>}
+                  </button>
+
+                  <div className="met">
+                    <div>
+                      <small>Best case</small>
+                      <span>{rupeesC(b.max_profit)}</span>
+                    </div>
+                    <div>
+                      <small>Worst case</small>
+                      <span className="dn">{rupeesC(b.max_loss)}</span>
+                    </div>
+                    <div>
+                      <small>Breaks even at</small>
+                      <span>{b.breakevens.length ? b.breakevens.map(int).join(", ") : "—"}</span>
+                    </div>
+                  </div>
+
+                  {!b.single_expiry && (
+                    <p className="empty" style={{ padding: "7px 9px" }}>
+                      Legs in different expiries, so there is no single payoff curve — the near leg
+                      can expire while the far one still has time value.
+                    </p>
+                  )}
+                  {openId !== b.id && b.payoff_curve.length > 1 && (
+                    <PayoffChart
+                      curve={b.payoff_curve}
+                      todayCurve={b.payoff_curve_today}
+                      spot={quotes?.[b.underlying_symbol]?.ltp ?? null}
+                      breakevens={b.breakevens}
+                      height={120}
+                      color={colour}
+                      compactMode
+                    />
+                  )}
+
+                  {openId === b.id ? (
+                    <StructureDetail
+                      basket={b}
+                      spot={quotes?.[b.underlying_symbol]?.ltp ?? null}
+                      onCloseLeg={(l) =>
+                        setClosing({ basket: b, legId: l.id, price: l.ltp ?? l.entry_price })
+                      }
+                      onRemoveLeg={(l) =>
+                        setUnlinking({
+                          basket: b,
+                          legId: l.id,
+                          what: `${l.side === "SELL" ? "Short" : "Long"} ${int(l.strike)} ${l.option_type}`,
+                        })
+                      }
+                    />
+                  ) : (
+                    <table>
+                      <tbody>
+                        {live.map((l) => (
+                          <tr key={l.id}>
+                            <td className="l">
+                              {l.side === "SELL" ? "Short" : "Long"} {int(l.strike)} {l.option_type}
+                            </td>
+                            <td>{int(l.quantity)}</td>
+                            <td className="dim">{num(l.entry_price)}</td>
+                            <td>{l.ltp === null ? "\u2014" : num(l.ltp)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  <div className="card-a">
+                    <span className="dim">{live.length} open legs</span>
+                    <button
+                      className="xbtn danger"
+                      style={{ marginLeft: "auto" }}
+                      onClick={() => setDropping(b)}
+                    >
+                      Delete structure
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {adopting && (
+        <AdoptDialog
+          positions={positions}
+          alreadyGrouped={alreadyGrouped}
+          defaultUnderlying={symbol}
+          onClose={() => setAdopting(false)}
+          onCreated={onChanged}
+        />
+      )}
+
+      {dropping && (
+        <ConfirmDialog
+          title="Delete this structure?"
+          go={busy ? "Deleting…" : "Delete the record"}
+          disabled={busy}
+          onCancel={() => setDropping(null)}
+          onConfirm={() =>
+            run(() => deleteBasket(dropping.id), () => setDropping(null))
+          }
+        >
+          <p style={{ margin: 0 }}>
+            Forgets <b>{dropping.name}</b> and its {dropping.legs.length} legs. Your position at
+            the broker is <b>not</b> touched — nothing is squared off, and the legs will go back to
+            showing as ungrouped positions you can record again.
+          </p>
+          <p className="dim" style={{ margin: "8px 0 0", lineHeight: 1.45 }}>
+            If the trade is actually over, close each leg instead — that keeps its exit price, so
+            the P&amp;L stays in your history.
+          </p>
+          {closeError && (
+            <p className="err" style={{ padding: "8px 0 0", border: 0 }}>
+              {closeError}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
+
+      {unlinking && (
+        <ConfirmDialog
+          title="Remove this leg from the structure?"
+          go={busy ? "Removing…" : "Remove the leg"}
+          disabled={busy}
+          onCancel={() => setUnlinking(null)}
+          onConfirm={() =>
+            run(
+              () => removeBasketLeg(unlinking.basket.id, unlinking.legId),
+              () => setUnlinking(null),
+            )
+          }
+        >
+          <p style={{ margin: 0 }}>
+            Takes <b>{unlinking.what}</b> out of <b>{unlinking.basket.name}</b>. Use this when the
+            leg was grouped here by mistake — it sends nothing to the broker, and the position
+            stays open.
+          </p>
+          <p className="dim" style={{ margin: "8px 0 0", lineHeight: 1.45 }}>
+            {unlinking.basket.legs.length === 1
+              ? "This is the last leg, so the structure itself will go too."
+              : "The structure's payoff and breakevens will be recalculated without it."}
+          </p>
+          {closeError && (
+            <p className="err" style={{ padding: "8px 0 0", border: 0 }}>
+              {closeError}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
+
+      {closing && (
+        <ConfirmDialog
+          title="Record this leg as closed?"
+          go={busy ? "Recording…" : "Record the exit"}
+          onCancel={() => setClosing(null)}
+          onConfirm={doClose}
+        >
+          <p style={{ margin: 0 }}>
+            This writes an exit price into your own records for{" "}
+            <b>{closing.basket.name}</b>. It does <b>not</b> send an order to your broker — square
+            the leg off there first, then record it here.
+          </p>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label htmlFor="exitpx">Exit price</label>
+            <input
+              id="exitpx"
+              type="number"
+              step="0.05"
+              value={closing.price}
+              onChange={(e) => setClosing({ ...closing, price: Number(e.target.value) || 0 })}
+            />
+          </div>
+          {closeError && <p className="err" style={{ padding: "8px 0 0", border: 0 }}>{closeError}</p>}
+        </ConfirmDialog>
       )}
     </section>
   );

@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 
 from analytics.payoff import PayoffResult
-from risk.limits import check_max_loss_limit
+from risk.limits import check_max_loss_limit, check_position_is_real
 from risk.margin import check_sufficient_margin
 from risk.result import RiskCheckResult
 from risk.sizing import max_quantity_for_risk
@@ -41,6 +41,8 @@ def run_pre_trade_checks(
     max_loss_limit: float,
 ) -> PreTradeCheckResult:
     checks = [
+        # first, because the others are meaningless for a position that does nothing
+        check_position_is_real(payoff),
         check_sufficient_margin(available_funds, required_margin),
         check_max_loss_limit(payoff.max_loss, max_loss_limit),
     ]

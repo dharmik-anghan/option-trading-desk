@@ -1,52 +1,162 @@
+/* ============================================================
+   Option Desk — design tokens
+
+   Colour law, one meaning per hue. Nothing may borrow another's:
+     --you    your book: selection, focus, buy actions
+     --mkt    market structure: ATM, open-interest walls, spot marker
+     --up/dn  profit and loss direction ONLY, never an action or a side
+     --sell   sell actions, on chrome only, never on a number
+
+   Calls and puts are told apart by the strike spine, not by colour.
+
+   Type law: values are WIDE (Archivo, tabular figures), labels are
+   NARROW (Archivo Narrow). Width carries the hierarchy, so a number
+   reads as a number without needing size or weight to shout.
+   ============================================================ */
 :root {
-  /* Amber phosphor-terminal palette: charcoal-navy base, amber chrome,
-     status green/red reserved strictly for P&L polarity. */
-  --bg: #0d0f12;
-  --surface: #15181d;
-  --surface-raised: #1a1e24;
-  --border: #262b33;
-  --border-strong: #363c46;
+  --bg: #ede9e3;
+  --panel: #fbfaf8;
+  --head: #e4dfd7;
+  --grid: #e8e4dd;
+  --line: #cfc8bd;
+  --fg: #1b1f24;
+  --dim: #5c5f67;
+  --you: #5b4bd6;
+  --you-fg: #ffffff;
+  --sell: #b02a50;
+  --sell-fg: #ffffff;
+  --mkt: #805706;
+  --up: #0a6b45;
+  --dn: #ae2835;
+  --selbg: rgba(91, 75, 214, 0.1);
+  --atm: rgba(128, 87, 6, 0.1);
+  --itm: rgba(27, 31, 36, 0.055);
+  --fu: rgba(10, 107, 69, 0.22);
+  --fd: rgba(174, 40, 53, 0.2);
+  --oibar: rgba(27, 31, 36, 0.1);
+  --band: rgba(128, 87, 6, 0.1);
+  --shadow: 0 14px 44px rgba(27, 31, 36, 0.22);
+  --u: "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+  --n: "Archivo", system-ui, sans-serif;
+  color-scheme: light;
+}
 
-  --text: #e7e4dc;
-  --text-muted: #8a8f98;
-  --text-faint: #565c66;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141b;
+    --panel: #151d26;
+    --head: #1c2734;
+    --grid: #1e2a38;
+    --line: #2c3b4d;
+    --fg: #dce5ee;
+    --dim: #7e90a4;
+    --you: #9a8cf5;
+    --you-fg: #12101f;
+    --sell: #e86a8a;
+    --sell-fg: #1a0e13;
+    --mkt: #d9a441;
+    --up: #31c48d;
+    --dn: #f26d78;
+    --selbg: rgba(154, 140, 245, 0.15);
+    --atm: rgba(217, 164, 65, 0.11);
+    --itm: rgba(255, 255, 255, 0.035);
+    --fu: rgba(49, 196, 141, 0.32);
+    --fd: rgba(242, 109, 120, 0.3);
+    --oibar: rgba(220, 229, 238, 0.11);
+    --band: rgba(217, 164, 65, 0.09);
+    --shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
 
-  --accent: #e8a33d;
-  --accent-dim: #8a6323;
-
-  --profit: #0ca30c;
-  --loss: #d03b3b;
-
-  --font-ui: "Space Grotesk", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-
+:root[data-theme="dark"] {
+  --bg: #0e141b;
+  --panel: #151d26;
+  --head: #1c2734;
+  --grid: #1e2a38;
+  --line: #2c3b4d;
+  --fg: #dce5ee;
+  --dim: #7e90a4;
+  --you: #9a8cf5;
+  --you-fg: #12101f;
+  --sell: #e86a8a;
+  --sell-fg: #1a0e13;
+  --mkt: #d9a441;
+  --up: #31c48d;
+  --dn: #f26d78;
+  --selbg: rgba(154, 140, 245, 0.15);
+  --atm: rgba(217, 164, 65, 0.11);
+  --itm: rgba(255, 255, 255, 0.035);
+  --fu: rgba(49, 196, 141, 0.32);
+  --fd: rgba(242, 109, 120, 0.3);
+  --oibar: rgba(220, 229, 238, 0.11);
+  --band: rgba(217, 164, 65, 0.09);
+  --shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-ui);
-}
-
-#root {
-  min-height: 100svh;
+  color: var(--fg);
+  font: 12px/1.35 var(--u);
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
+input,
 select,
-input {
-  font-family: inherit;
+textarea {
+  font: inherit;
+  color: inherit;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* values wide + tabular, labels narrow — see the type law above */
+.n,
+td,
+input[type="number"] {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+td.l,
+th,
+.lbl {
+  font-family: var(--u);
+  font-variant-numeric: normal;
+}
+
+.up {
+  color: var(--up);
+}
+.dn {
+  color: var(--dn);
+}
+.dim {
+  color: var(--dim);
+}
+.mkt {
+  color: var(--mkt);
+}
+.you {
+  color: var(--you);
 }

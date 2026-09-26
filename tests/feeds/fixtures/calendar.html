@@ -1,0 +1,58 @@
+<!-- A trimmed slice of the published calendar, keeping one row of every shape
+     the parser has to survive. Not a full copy: the point is the variation. -->
+<section class="markets economic-calendar">
+  <table>
+    <tbody>
+      <tr class="date" data-date-row="Fri, 25 Sep 2026">
+        <td colspan="6" class="date"><strong>Fri, 25 Sep 2026</strong></td>
+      </tr>
+      <tr class="entry" data-tag="global|M" data-date="Fri, 25 Sep 2026">
+        <td></td>
+        <td class="event-name">
+          House Price Index
+          (Philippines)
+          <a class="remind">Remind me</a>
+        </td>
+        <td><span class="importance m">Medium</span></td>
+        <td class="prev">4.5</td>
+        <td class="actual actual-down">0.4</td>
+      </tr>
+      <tr class="entry" data-tag="india|H" data-date="Wed, 07 Oct 2026">
+        <td></td>
+        <td class="event-name">RBI Policy Rate <a class="remind">Remind me</a></td>
+        <td><span class="importance h">High</span></td>
+        <td class="prev">5.50</td>
+        <td class="actual"></td>
+      </tr>
+      <!-- the same release listed three times on one date, differing only in a
+           value column the parser does not read -->
+      <tr class="entry" data-tag="india|M" data-date="Mon, 28 Sep 2026">
+        <td></td><td class="event-name">Corporate Bond Issuance Remind me</td>
+        <td><span class="importance m">Medium</span></td><td>1.2</td><td>1.1</td>
+      </tr>
+      <tr class="entry" data-tag="india|M" data-date="Mon, 28 Sep 2026">
+        <td></td><td class="event-name">Corporate Bond Issuance Remind me</td>
+        <td><span class="importance m">Medium</span></td><td>2.4</td><td>2.2</td>
+      </tr>
+      <tr class="entry" data-tag="india|L" data-date="Mon, 28 Sep 2026">
+        <td></td><td class="event-name">NREGA Demand Remind me</td>
+        <td><span class="importance l">Low</span></td><td>9</td><td>8</td>
+      </tr>
+      <tr class="entry" data-tag="global|H" data-date="Wed, 14 Oct 2026">
+        <td></td>
+        <td class="event-name">Inflation (United States) Remind me</td>
+        <td><span class="importance h">High</span></td><td>2.9</td><td></td>
+      </tr>
+      <!-- rows the parser must skip rather than choke on -->
+      <tr class="entry" data-tag="nonsense" data-date="Wed, 14 Oct 2026">
+        <td></td><td class="event-name">Unknown tag shape</td><td></td>
+      </tr>
+      <tr class="entry" data-tag="india|H" data-date="not a date at all">
+        <td></td><td class="event-name">Unparseable date</td><td></td>
+      </tr>
+      <tr class="entry" data-tag="india|H" data-date="Thu, 15 Oct 2026">
+        <td></td><td class="event-name">   </td><td></td>
+      </tr>
+    </tbody>
+  </table>
+</section>

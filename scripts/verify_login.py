@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from broker.token_store import token_expiry  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 
@@ -37,6 +38,10 @@ def main() -> int:
 
     profile = response.get("data", {})
     print(f"Login OK. Logged in as: {profile.get('name')} ({profile.get('fy_id')})")
+    expiry = token_expiry(settings.fyers_access_token)
+    if expiry is not None:
+        local = expiry.astimezone()
+        print(f"Token expires at {local:%Y-%m-%d %H:%M %Z}.")
     return 0
 
 

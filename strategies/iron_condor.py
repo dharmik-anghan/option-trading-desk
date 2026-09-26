@@ -22,9 +22,27 @@ class IronCondor(Strategy):
 
     def build_legs(self, chain: OptionChain) -> list[Leg]:
         short_call = select_by_delta(chain, "CE", self.short_delta)
-        long_call = select_by_delta(chain, "CE", self.long_delta)
+        long_call = select_by_delta(
+            chain, "CE", self.long_delta, exclude_strikes=frozenset({short_call.strike})
+        )
         short_put = select_by_delta(chain, "PE", self.short_delta)
-        long_put = select_by_delta(chain, "PE", self.long_delta)
+        long_put = select_by_delta(
+            chain, "PE", self.long_delta, exclude_strikes=frozenset({short_put.strike})
+        )
+
+        # A condor's protection has to sit further out than the strike it
+        # protects. If the chain could not supply that, say so rather than
+        # return a structure that is not an iron condor.
+        if long_call.strike <= short_call.strike:
+            raise ValueError(
+                f"Long call wing {long_call.strike} is not above the short call "
+                f"{short_call.strike} - load more strikes above spot"
+            )
+        if long_put.strike >= short_put.strike:
+            raise ValueError(
+                f"Long put wing {long_put.strike} is not below the short put "
+                f"{short_put.strike} - load more strikes below spot"
+            )
 
         return [
             Leg(
