@@ -201,10 +201,16 @@ export function PerpsTicket({
         <div className="outcome">
           {/* Held back and refused are different things, and a screen that blurs
               them teaches you to ignore it. */}
+          {/* The venue's own words when the venue decided. "Not sent" on its own
+              is a dead end: the checks below may all have passed and the refusal
+              have come from the exchange, which is a different problem with a
+              different fix. */}
           <p className={result.sent ? "sent" : "err"}>
             {result.sent
               ? `Sent. Venue reference ${result.venue_order_id ?? "—"}.`
-              : "Not sent. Nothing reached the venue."}
+              : result.reasons.length
+                ? "Refused here. Nothing reached the venue."
+                : `The venue refused it. ${result.outcome}`}
           </p>
           <table className="lim tight">
             <tbody>

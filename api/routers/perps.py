@@ -372,6 +372,10 @@ class OrderResponse(BaseModel):
     sent: bool
     checks: list[CheckResponse]
     reasons: list[str]
+    #: What happened, in the venue's words when it was the venue that decided.
+    #: Without this the screen could only say "not sent" and leave you guessing,
+    #: which is exactly what it did.
+    outcome: str
     notional: float
     #: What it was priced against, which for a market order is the streamed price.
     price: float | None
@@ -486,6 +490,7 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
 
     return OrderResponse(
         sent=sent,
+        outcome=reason,
         checks=[CheckResponse(passed=c.passed, reason=c.reason) for c in outcome.checks],
         reasons=outcome.reasons,
         notional=outcome.notional,

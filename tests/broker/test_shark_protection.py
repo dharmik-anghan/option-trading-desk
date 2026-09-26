@@ -184,3 +184,85 @@ class TestTheOrderBody:
         with pytest.raises(BrokerError, match="needs a price"):
             _broker(rec).place_order(self._order(order_type="LIMIT"))
         assert rec.calls == []
+
+
+class TestTheBodyIsWrittenAsJavaScriptWouldWriteIt:
+    """The venue parses the JSON and re-serialises it with JavaScript before
+    hashing, so the body has to match JavaScript's rendering rather than Python's.
+
+    Both differences below were proven against the live venue with the same key at
+    the same moment: the accepted form was processed and failed on a missing
+    position, the rejected form came back "Access denied: Signature mismatch" -
+    which reads like a bad key and is nothing of the kind.
+    """
+
+    def test_no_spaces_go_on_the_wire(self) -> None:
+        rec = Recorder()
+        _broker(rec).set_protection("p-1", quantity=0.01, stop_loss=85000)
+        body = rec.calls[0]["data"]
+        assert ", " not in body
+        assert '": ' not in body
+
+    def test_the_signature_matches_the_compact_form(self) -> None:
+        rec = Recorder()
+        _broker(rec).set_protection("p-1", quantity=0.01, stop_loss=85000)
+        call = rec.calls[0]
+        sent = json.loads(call["data"])
+        canonical = json.dumps(sent, separators=(",", ":"))
+        expected = hmac.new(SECRET.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+        assert call["headers"]["signature"] == expected
+
+    def test_a_whole_float_is_written_without_its_point(self) -> None:
+        # JavaScript has one number type: 1000000.0 and 1000000 are one value and
+        # print as "1000000". Python keeps the ".0", and Pydantic makes every number
+        # in a request a float - so a price of 1,000,000 broke every order while
+        # 0.001 was fine, which is how this survived a probe using integer literals.
+        rec = Recorder()
+        _broker(rec).set_protection("p-1", quantity=1.0, stop_loss=1000000.0)
+        body = rec.calls[0]["data"]
+        assert '"price":1000000' in body
+        assert "1000000.0" not in body
+        assert '"quantity":1' in body
+        assert "1.0" not in body
+
+    def test_a_fractional_float_is_left_alone(self) -> None:
+        # Both languages print the shortest string that round-trips, so these
+        # already agree and must not be mangled.
+        rec = Recorder()
+        _broker(rec).set_protection("p-1", quantity=0.001, stop_loss=4287.55)
+        body = rec.calls[0]["data"]
+        assert '"quantity":0.001' in body
+        assert '"price":4287.55' in body
+
+    def test_a_boolean_stays_a_boolean(self) -> None:
+        # A bool is an int in Python, and would otherwise be turned into 0 or 1 -
+        # which is not what `reduceOnly` means.
+        from broker.models import OrderRequest
+
+        rec = Recorder(body={"clientOrderId": "x"})
+        _broker(rec).place_order(
+            OrderRequest(symbol="BTCUSDT", quantity=0.002, side="BUY", order_type="MARKET")
+        )
+        assert '"reduceOnly":false' in rec.calls[0]["data"]
+
+    def test_the_signature_covers_that_rendering(self) -> None:
+        from broker.shark.signing import canonical_json
+
+        rec = Recorder()
+        _broker(rec).set_protection("p-1", quantity=1.0, stop_loss=1000000.0)
+        call = rec.calls[0]
+        expected = hmac.new(
+            SECRET.encode(),
+            canonical_json(json.loads(call["data"])).encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        assert call["headers"]["signature"] == expected
+
+    def test_an_order_body_is_compact_too(self) -> None:
+        from broker.models import OrderRequest
+
+        rec = Recorder(body={"clientOrderId": "x"})
+        _broker(rec).place_order(
+            OrderRequest(symbol="BTCUSDT", quantity=0.002, side="BUY", order_type="MARKET")
+        )
+        assert ", " not in rec.calls[0]["data"]

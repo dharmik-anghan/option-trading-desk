@@ -580,6 +580,8 @@ export interface PerpOrderResult {
   sent: boolean;
   checks: OrderCheck[];
   reasons: string[];
+  /** What happened, in the venue's words when the venue decided. */
+  outcome: string;
   notional: number;
   price: number | null;
   venue_order_id: string | null;

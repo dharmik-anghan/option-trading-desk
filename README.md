@@ -252,6 +252,14 @@ one situation reading as two is worse than a wrong figure.
 - **Calendars and diagonals get no payoff curve.** The maths assumes one
   expiry, and applying it across two reports the whole debit as a certain loss,
   so it is suppressed rather than shown wrong.
+- **Shark signs its own rendering of the body, not the bytes you send.** It parses
+  the JSON and re-serialises it with JavaScript before hashing, so the body has to
+  be written the way JavaScript writes it: compact separators, and whole numbers
+  without a decimal point. Python renders `1000000.0` where JavaScript renders
+  `1000000`, and Pydantic makes every number in a request a float - so a price of
+  1,000,000 fails where 0.001 works. `broker/shark/signing.py` handles it, and the
+  error if it ever regresses is "Access denied: Signature mismatch", which reads
+  like a bad key and is nothing of the kind.
 - **One shape in the Shark integration is unverified.** An open perpetual
   position's unrealised-P&L field name is guessed, because the account had no
   open position to capture and a closed one reports realised profit instead. When

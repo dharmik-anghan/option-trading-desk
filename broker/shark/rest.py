@@ -133,12 +133,23 @@ class SharkBroker:
             raise BrokerError(f"Shark returned a non-JSON body: {response.text[:120]}") from exc
 
     def _error(self, response: requests.Response) -> BrokerError:
-        """Translate a failure into something the desk can act on."""
+        """Translate a failure into something the desk can act on.
+
+        `details` is included, and that is not a nicety. The venue answers a bad
+        signature with message "Access denied" and details "Signature mismatch" -
+        the first is a category and the second is the cause, and reading only the
+        first turned a one-line fix into an afternoon of guessing.
+        """
         message = response.text[:200]
         try:
             body = response.json()
             if isinstance(body, dict):
-                message = str(body.get("message") or body.get("error") or message)
+                headline = str(body.get("message") or body.get("error") or "").strip()
+                details = str(body.get("details") or "").strip()
+                if headline and details and details != headline:
+                    message = f"{headline}: {details}"
+                elif headline or details:
+                    message = headline or details
         except ValueError:
             pass
         return classify_status(response.status_code, message)(f"Shark: {message}")
