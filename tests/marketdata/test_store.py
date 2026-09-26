@@ -150,3 +150,21 @@ def test_it_lists_what_it_holds(store: BarStore) -> None:
     held = dict(store.series_held())
     assert held[BTC] == 2
     assert held[GOLD] == 1
+
+
+def test_a_repeated_timestamp_within_one_batch_keeps_the_later_bar() -> None:
+    """The same rule as a later fetch: the newer answer about a bar is the true one."""
+    store = BarStore()
+    series = Series("binance", "BTCUSDT", Interval.M5)
+    at = datetime(2026, 1, 1, tzinfo=UTC)
+
+    written = store.write(
+        series,
+        [
+            Bar(ts=at, open=1.0, high=1.0, low=1.0, close=1.0, volume=1.0),
+            Bar(ts=at, open=2.0, high=2.0, low=2.0, close=2.0, volume=2.0),
+        ],
+    )
+
+    assert written == 1
+    assert store.read(series)[0].close == 2.0

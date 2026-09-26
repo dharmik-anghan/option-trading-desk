@@ -92,6 +92,27 @@ class BinanceBars:
     def __init__(self, session: requests.Session | None = None) -> None:
         self._session = session or requests.Session()
 
+    def fetch_from(self, symbol: str, interval: Interval, start: datetime) -> list[Bar]:
+        """One page of bars beginning at `start`, oldest first.
+
+        The piece `fetch` cannot do. `fetch` asks for the most recent N bars, which
+        is all a chart needs and useless for history: the endpoint caps at a
+        thousand, so three years of five-minute bars is three hundred pages and
+        there is no way to ask for the second one without naming a time.
+
+        Returns fewer than `MAX_BARS` at the end of the series, and an empty list
+        past it - which is how the caller knows to stop.
+        """
+        rows = self._get(
+            {
+                "symbol": symbol,
+                "interval": BINANCE_INTERVAL[interval],
+                "startTime": str(int(start.timestamp() * 1000)),
+                "limit": str(MAX_BARS),
+            }
+        )
+        return parse_klines(rows)
+
     def fetch(self, symbol: str, interval: Interval, days: int) -> Fetched:
         """The most recent bars for one pair.
 
@@ -100,11 +121,21 @@ class BinanceBars:
         have to do. Capped at the documented maximum.
         """
         wanted = max(1, min(MAX_BARS, int(days * 86400 / interval.seconds) + 1))
-        params = {
-            "symbol": symbol,
-            "interval": BINANCE_INTERVAL[interval],
-            "limit": str(wanted),
-        }
+        rows = self._get(
+            {
+                "symbol": symbol,
+                "interval": BINANCE_INTERVAL[interval],
+                "limit": str(wanted),
+            }
+        )
+        return Fetched(bars=parse_klines(rows), name=symbol, currency="USDT")
+
+    def _get(self, params: dict[str, str]) -> list[Any]:
+        """One call to the klines endpoint, with its refusals named.
+
+        Shared by both callers so that a backfill running for several minutes
+        reports a rate limit the same way a chart does, rather than as a crash.
+        """
         try:
             response = self._session.get(KLINES_URL, params=params, timeout=TIMEOUT)
         except requests.RequestException as exc:
@@ -123,4 +154,4 @@ class BinanceBars:
             raise Unavailable("Binance sent something that is not JSON") from exc
         if not isinstance(rows, list):
             raise Unavailable("Binance sent no candles")
-        return Fetched(bars=parse_klines(rows), name=symbol, currency="USDT")
+        return rows

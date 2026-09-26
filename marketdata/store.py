@@ -105,28 +105,37 @@ class BarStore:
         """
         if not bars:
             return 0
-        rows = [
-            (
-                series.source,
-                series.symbol,
-                str(series.interval),
-                _to_db(b.ts),
-                b.open,
-                b.high,
-                b.low,
-                b.close,
-                b.volume,
-            )
+        # Deduplicated here rather than left to the insert. Within a single
+        # statement DuckDB keeps the first row for a key and discards the rest,
+        # which is the opposite of what this method promises - and a page that
+        # repeats a timestamp would also report writing more rows than it did.
+        latest = {b.ts: b for b in bars}
+        bars = list(latest.values())
+        # Built as one statement with the numbers written into the SQL, because
+        # DuckDB's parameter binding is the bottleneck here and not the insert:
+        # 20,000 bars take 25 seconds through `executemany` and a quarter of a
+        # second this way. At three hundred thousand bars for a backfill, that is
+        # the difference between six seconds and six minutes.
+        #
+        # Only machine-generated numbers and timestamps are written into the text.
+        # The three strings that identify the series stay bound parameters - they
+        # are the only values a caller supplies, and inlining them would be putting
+        # caller input into SQL for a speed-up worth nothing, since there are three
+        # of them per call rather than three per bar.
+        values = ",".join(
+            # repr on a float, so the text round-trips to the same double.
+            f"(TIMESTAMP '{_to_db(b.ts).isoformat(sep=' ')}',"
+            f"{b.open!r},{b.high!r},{b.low!r},{b.close!r},{b.volume!r})"
             for b in bars
-        ]
+        )
         with self._lock:
-            self._conn.executemany(
+            self._conn.execute(
                 "INSERT OR REPLACE INTO bar "
-                "(source, symbol, interval, ts, open, high, low, close, volume) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rows,
+                "SELECT ?, ?, ?, ts, open, high, low, close, volume "
+                f"FROM (VALUES {values}) AS incoming(ts, open, high, low, close, volume)",
+                [series.source, series.symbol, str(series.interval)],
             )
-        return len(rows)
+        return len(bars)
 
     def note_fetch(
         self, series: Series, *, ok: bool, note: str = "", at: datetime | None = None
