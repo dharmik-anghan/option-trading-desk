@@ -367,6 +367,7 @@ export default function App() {
         }
         telegram={alerts.data?.watcher.telegram ?? false}
         watching={alerts.data?.watcher.running ?? false}
+        showThresholds={!onPerps}
         trouble={alerts.data?.watcher.last_error ?? null}
         onLimits={onLimits}
         onClear={onClear}

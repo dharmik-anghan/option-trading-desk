@@ -12,6 +12,10 @@ interface Props {
   symbols: readonly { id: string; name: string }[];
   telegram: boolean;
   watching: boolean;
+  /** Whether the risk thresholds below apply to what is on screen. They are read
+      off the options book - its P&L, its structures, its short legs - so on any
+      other desk they would be somebody else's numbers to edit. */
+  showThresholds: boolean;
   trouble: string | null;
   onLimits: (next: Limits) => void;
   onClear: () => void;
@@ -50,6 +54,7 @@ export function AlertsPanel({
   symbols,
   telegram,
   watching,
+  showThresholds,
   trouble,
   onLimits,
   onClear,
@@ -211,29 +216,37 @@ export function AlertsPanel({
         </table>
       )}
 
-      <div className="sec">Watch for</div>
-      <table className="lim tight">
-        <tbody>
-          {FIELDS.map((f) => (
-            <tr key={f.key}>
-              <td className="l">{f.label}</td>
-              <td>
-                <input
-                  type="number"
-                  step={f.step}
-                  min={0}
-                  value={limits[f.key]}
-                  aria-label={f.label}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    onLimits({ ...limits, [f.key]: Number.isFinite(v) ? Math.abs(v) : 0 });
-                  }}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* Named for what they are. "Watch for" read as a heading for the whole
+          panel, which made five live thresholds look like decoration. */}
+      {showThresholds && (
+        <>
+          <div className="sec">
+            Risk thresholds<span className="dim">on your option structures</span>
+          </div>
+          <table className="lim tight">
+            <tbody>
+              {FIELDS.map((f) => (
+                <tr key={f.key}>
+                  <td className="l">{f.label}</td>
+                  <td>
+                    <input
+                      type="number"
+                      step={f.step}
+                      min={0}
+                      value={limits[f.key]}
+                      aria-label={f.label}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        onLimits({ ...limits, [f.key]: Number.isFinite(v) ? Math.abs(v) : 0 });
+                      }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="dim" style={{ margin: 0, padding: "6px 9px 9px", lineHeight: 1.4 }}>
         {telegram
           ? "Raised by the backend and sent to Telegram, so they fire with this tab closed."
