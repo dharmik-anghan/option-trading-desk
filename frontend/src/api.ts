@@ -517,6 +517,27 @@ export interface StreamStatus {
   subscribers: number;
 }
 
+export interface PerpPosition {
+  symbol: string;
+  name: string;
+  side: string;
+  quantity: number;
+  entry_price: number;
+  price: number | null;
+  leverage: number;
+  margin_type: string;
+  /** In the desk's money currency, not the currency the price is in. */
+  margin: number;
+  unrealized_pnl: number | null;
+  /** True when we worked the P&L out from the price because the venue gave none.
+      A figure we derived should not be shown as the venue's. */
+  pnl_is_ours: boolean;
+  liquidation_price: number | null;
+  /** Fraction of price. Comparable across instruments; a points difference is not. */
+  liquidation_distance: number | null;
+  position_id: string;
+}
+
 export interface PerpsDesk {
   venue: string;
   name: string;
@@ -526,6 +547,10 @@ export interface PerpsDesk {
   money_currency: string;
   instruments: PerpInstrument[];
   prices: PerpPrice[];
+  positions: PerpPosition[];
+  /** Why the list is empty, when it is empty because something failed. "No
+      positions" is a dangerous thing to show wrongly on a leveraged book. */
+  positions_error: string | null;
   stream: StreamStatus;
 }
 

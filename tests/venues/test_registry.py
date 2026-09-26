@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from broker.base import Funds_, MarketData, OptionsData, Streaming, Trading
+from broker.base import Funds_, MarketData, OptionsData, PerpetualsData, Streaming, Trading
 from broker.fake import FakeBroker
 from broker.shark import SharkBroker
 from venues import AssetClass, Capability, Session, VenueSpec, get, is_open, listed
@@ -86,6 +86,7 @@ _PROTOCOL_FOR = {
     Capability.TRADING: Trading,
     Capability.FUNDS: Funds_,
     Capability.OPTION_CHAIN: OptionsData,
+    Capability.PERPETUALS: PerpetualsData,
     Capability.STREAMING: Streaming,
 }
 

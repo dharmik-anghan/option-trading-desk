@@ -27,7 +27,10 @@ short is being tested, and what is scheduled to happen before they expire.
 | **Option chain** | Collapsed by default. Expiry selection, open-interest buildup, greeks |
 
 A second desk covers perpetual futures on Shark Exchange - Bitcoin, gold and
-crude - reached through `GET /api/perps`. Prices there arrive on a stream rather
+crude - reached through `GET /api/perps`. It lists what is open with the figures
+leverage makes matter: the margin behind a position, and how far it is from the
+price the venue closes it at, as a percentage rather than in points so gold at
+4,300 and Bitcoin at 84,000 can be read side by side. Prices there arrive on a stream rather
 than being polled: the venue allows 60 requests a minute against Fyers' ~200, and
 it pushes. Note that prices are quoted in USDT while the account margins in INR,
 so those two figures are deliberately labelled in different units.
@@ -225,6 +228,12 @@ one situation reading as two is worse than a wrong figure.
 - **Calendars and diagonals get no payoff curve.** The maths assumes one
   expiry, and applying it across two reports the whole debit as a certain loss,
   so it is suppressed rather than shown wrong.
+- **One shape in the Shark integration is unverified.** An open perpetual
+  position's unrealised-P&L field name is guessed, because the account had no
+  open position to capture and a closed one reports realised profit instead. When
+  the venue reports nothing the desk works the figure out from the price and marks
+  it with an asterisk, so a wrong guess shows as a derived number rather than a
+  confident zero.
 - **Greeks come from the broker**, which publishes one implied vol per strike.
   Skew is therefore read across strikes rather than between a call and a put.
 - **`fyers-apiv3` pulls in the AWS SDK** — around 30MB of `botocore`, `boto3`

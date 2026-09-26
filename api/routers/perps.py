@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from api.dependencies import broker_for
+from broker.base import PerpetualsData
 from broker.errors import BrokerError
 from streaming import TickHub
 from venues import Capability, for_venue
@@ -62,6 +63,31 @@ class StreamStatus(BaseModel):
     subscribers: int
 
 
+class PositionResponse(BaseModel):
+    symbol: str
+    name: str
+    side: str
+    quantity: float
+    entry_price: float
+    #: What it is worth now, from the stream if the venue gave no mark.
+    price: float | None
+    leverage: float
+    margin_type: str
+    #: Margin posted, in `margin_currency` - not the currency the price is in.
+    margin: float
+    #: In the quote asset. Taken from the venue when it reports one, worked out
+    #: from the price when it does not - and `pnl_is_ours` says which, because a
+    #: figure we derived should not be presented as the venue's.
+    unrealized_pnl: float | None
+    pnl_is_ours: bool
+    liquidation_price: float | None
+    #: Distance to liquidation as a fraction of price. The number that matters on
+    #: a leveraged position, and comparable across instruments in a way that a
+    #: difference in points is not.
+    liquidation_distance: float | None
+    position_id: str
+
+
 class DeskResponse(BaseModel):
     venue: str
     name: str
@@ -71,6 +97,11 @@ class DeskResponse(BaseModel):
     money_currency: str
     instruments: list[InstrumentResponse]
     prices: list[PriceResponse]
+    positions: list[PositionResponse]
+    #: Why the position list is empty, when it is empty because of a failure
+    #: rather than because nothing is open. The two look identical otherwise, and
+    #: "no positions" is a dangerous thing to show wrongly.
+    positions_error: str | None
     stream: StreamStatus
 
 
@@ -119,6 +150,46 @@ def desk(request: Request) -> DeskResponse:
                 change_pct=tick.change_pct if tick is not None else None,
             )
         )
+    positions: list[PositionResponse] = []
+    positions_error: str | None = None
+    broker = broker_for(spec)
+    if isinstance(broker, PerpetualsData):
+        try:
+            for p in broker.get_perp_positions():
+                listed = instrument(p.symbol)
+                price = p.mark_price or (hub.price(p.symbol) if hub is not None else None)
+                pnl = p.unrealized_pnl
+                ours = False
+                if pnl is None and price is not None:
+                    # The venue did not report one. Worked out here rather than
+                    # shown as zero, and flagged as ours so the screen can say so.
+                    direction = 1 if p.is_long else -1
+                    pnl = direction * (price - p.entry_price) * p.quantity
+                    ours = True
+                positions.append(
+                    PositionResponse(
+                        symbol=p.symbol,
+                        name=listed.name if listed else p.symbol,
+                        side=p.side,
+                        quantity=p.quantity,
+                        entry_price=p.entry_price,
+                        price=price,
+                        leverage=p.leverage,
+                        margin_type=p.margin_type,
+                        margin=p.margin,
+                        unrealized_pnl=pnl,
+                        pnl_is_ours=ours,
+                        liquidation_price=p.liquidation_price,
+                        liquidation_distance=p.liquidation_distance(price),
+                        position_id=p.position_id,
+                    )
+                )
+        except BrokerError as exc:
+            # Said out loud rather than swallowed: an empty list because the
+            # request failed looks exactly like an empty list because nothing is
+            # open, and on a leveraged book those are very different.
+            positions_error = exc.message
+
     return DeskResponse(
         venue=spec.id,
         name=spec.name,
@@ -126,6 +197,8 @@ def desk(request: Request) -> DeskResponse:
         money_currency=spec.money_currency,
         instruments=instruments,
         prices=prices,
+        positions=positions,
+        positions_error=positions_error,
         stream=StreamStatus(
             connected=bool(getattr(stream, "connected", False)),
             ticks=int(getattr(hub, "received", 0) or 0),

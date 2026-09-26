@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from broker.models import Candle, Position, Quote
+from broker.shark.models import PerpPosition
 
 
 class SharkParseError(ValueError):
@@ -173,3 +174,71 @@ def parse_positions(rows: list[dict[str, Any]]) -> list[Position]:
         if str(row.get("positionStatus", "OPEN")).upper() == "OPEN"
     ]
     return [p for p in (parse_position(row) for row in open_rows) if p.net_quantity != 0]
+
+
+def parse_perp_position(row: dict[str, Any]) -> PerpPosition:
+    """One leveraged position, with everything that decides whether it survives.
+
+    Unrealised P&L is read from whichever key the venue uses, because this is the
+    shape that could not be verified: the account had no open position when these
+    fixtures were captured, and a closed one reports `realizedProfit` instead. The
+    names tried below are the plausible ones. When none is present the figure is
+    None rather than zero, and the desk works it out from the mark price instead -
+    which is why a missing field here shows as a computed P&L rather than a wrong
+    one.
+    """
+    symbol = str(row.get("contractPair") or row.get("symbol") or "")
+    if not symbol:
+        raise SharkParseError("position has no contract pair")
+
+    unrealized = next(
+        (
+            value
+            for value in (
+                _opt_num(row.get("unrealizedProfit")),
+                _opt_num(row.get("unrealisedProfit")),
+                _opt_num(row.get("unrealizedPnl")),
+                _opt_num(row.get("pnl")),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    unrealized_margin = next(
+        (
+            value
+            for value in (
+                _opt_num(row.get("unrealizedProfitInMarginAsset")),
+                _opt_num(row.get("unrealisedProfitInMarginAsset")),
+            )
+            if value is not None
+        ),
+        None,
+    )
+
+    return PerpPosition(
+        symbol=symbol,
+        side=str(row.get("positionType") or "").upper(),
+        quantity=abs(_opt_num(row.get("positionAmount")) or _opt_num(row.get("quantity")) or 0.0),
+        entry_price=_opt_num(row.get("entryPrice")) or 0.0,
+        mark_price=_opt_num(row.get("markPrice")),
+        leverage=_opt_num(row.get("leverage")) or 1.0,
+        liquidation_price=_opt_num(row.get("liquidationPrice")),
+        margin_type=str(row.get("marginType") or ""),
+        margin=_opt_num(row.get("margin")) or 0.0,
+        margin_asset=str(row.get("marginAsset") or ""),
+        unrealized_pnl=unrealized,
+        unrealized_pnl_in_margin_asset=unrealized_margin,
+        position_id=str(row.get("positionId") or row.get("id") or ""),
+    )
+
+
+def parse_perp_positions(rows: list[dict[str, Any]]) -> list[PerpPosition]:
+    """Only the positions actually open - see `parse_positions` for why status is
+    believed over the endpoint asked for."""
+    return [
+        parse_perp_position(row)
+        for row in rows
+        if str(row.get("positionStatus", "OPEN")).upper() == "OPEN"
+        and (_opt_num(row.get("positionAmount")) or _opt_num(row.get("quantity")) or 0.0)
+    ]

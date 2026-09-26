@@ -14,7 +14,13 @@ from typing import Any
 
 import pytest
 
-from broker.shark.parse import SharkParseError, parse_klines, parse_positions, parse_ticker
+from broker.shark.parse import (
+    SharkParseError,
+    parse_klines,
+    parse_perp_positions,
+    parse_positions,
+    parse_ticker,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "shark"
 
@@ -153,3 +159,100 @@ class TestPositions:
         rows = [{"contractPair": "X", "positionType": "LONG", "positionAmount": 1,
                  "entryPrice": 1, "marginType": "ISOLATED"}]
         assert parse_positions(rows)[0].product_type == "ISOLATED"
+
+
+class TestPerpPositions:
+    """The richer model: leverage, margin, and the price you get closed out at.
+
+    The open shape is the one thing here not captured from a live example - the
+    account had no open position - so these tests build one from the closed
+    fixture's own fields, which is the closest honest thing to a real one.
+    """
+
+    def _open(self, **over: object) -> dict[str, Any]:
+        row = dict(load("positions_closed.json")[0])
+        row["positionStatus"] = "OPEN"
+        row.update(over)
+        return row
+
+    def test_a_closed_position_is_not_listed(self) -> None:
+        assert parse_perp_positions(load("positions_closed.json")) == []
+
+    def test_the_fields_that_decide_survival_come_through(self) -> None:
+        (p,) = parse_perp_positions([self._open()])
+        assert p.symbol == "XAUUSDT"
+        assert p.side == "SHORT"
+        assert p.leverage == 8
+        assert p.liquidation_price == 4750.0
+        assert p.margin_type == "ISOLATED"
+        assert p.margin_asset == "INR"
+
+    def test_size_is_positive_and_the_side_carries_direction(self) -> None:
+        # Not a signed quantity: the venue reports SHORT with a positive size, and
+        # re-deriving a side from a sign we just invented adds a step that can be
+        # wrong.
+        (p,) = parse_perp_positions([self._open()])
+        assert p.quantity > 0
+        assert p.is_long is False
+
+    def test_a_long_reads_as_long(self) -> None:
+        (p,) = parse_perp_positions([self._open(positionType="LONG")])
+        assert p.is_long is True
+
+    def test_margin_is_in_the_margin_asset_not_the_quote_asset(self) -> None:
+        # The venue's own asymmetry: a USDT-quoted contract margined in INR.
+        (p,) = parse_perp_positions([self._open()])
+        assert p.margin_asset == "INR"
+        assert load("positions_closed.json")[0]["quoteAsset"] == "USDT"
+
+    def test_unrealised_pnl_is_none_when_the_venue_does_not_say(self) -> None:
+        # None, not zero: the desk then works it out from the mark price, so a
+        # field name we guessed wrongly shows as a computed figure rather than a
+        # confident zero.
+        (p,) = parse_perp_positions([self._open()])
+        assert p.unrealized_pnl is None
+
+    def test_unrealised_pnl_is_read_when_it_is_there(self) -> None:
+        (p,) = parse_perp_positions([self._open(unrealizedProfit="-0.42")])
+        assert p.unrealized_pnl == -0.42
+
+    def test_an_alternative_spelling_is_also_read(self) -> None:
+        (p,) = parse_perp_positions([self._open(unrealisedProfit="-0.42")])
+        assert p.unrealized_pnl == -0.42
+
+
+class TestLiquidationDistance:
+    def _position(self, liq: float | None, side: str = "SHORT") -> Any:
+        rows = [
+            {
+                "contractPair": "XAUUSDT",
+                "positionType": side,
+                "positionAmount": 0.01,
+                "entryPrice": 4300.0,
+                "liquidationPrice": liq,
+                "leverage": 8,
+            }
+        ]
+        return parse_perp_positions(rows)[0]
+
+    def test_it_is_a_fraction_of_price_not_a_difference(self) -> None:
+        # 200 points from liquidation means one thing on gold at 4,300 and
+        # another on Bitcoin at 84,000.
+        p = self._position(4500.0)
+        assert p.liquidation_distance(4300.0) == pytest.approx(200 / 4300)
+
+    def test_it_is_positive_whichever_side_you_are(self) -> None:
+        # A long is liquidated below and a short above, so the sign is not
+        # information - the distance is.
+        short = self._position(4500.0, "SHORT").liquidation_distance(4300.0)
+        long = self._position(4100.0, "LONG").liquidation_distance(4300.0)
+        assert short is not None and short > 0
+        assert long is not None and long > 0
+
+    def test_no_liquidation_price_means_no_distance(self) -> None:
+        assert self._position(None).liquidation_distance(4300.0) is None
+
+    def test_no_price_means_no_distance(self) -> None:
+        # Rather than dividing by a zero or a missing mark.
+        assert self._position(4500.0).liquidation_distance(None) is None
+        assert self._position(4500.0).liquidation_distance(0.0) is None

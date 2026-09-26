@@ -37,6 +37,7 @@ from broker.models import (
     Quote,
     Tick,
 )
+from broker.shark.models import PerpPosition
 
 
 @runtime_checkable
@@ -95,6 +96,22 @@ class OptionsData(Protocol):
         `expiry_token` selects which expiry; empty means the nearest one. Pass
         back a token from a previous call's `OptionChain.expiries`.
         """
+        ...
+
+
+@runtime_checkable
+class PerpetualsData(Protocol):
+    """What only a leveraged venue can answer.
+
+    Positions again, but a different shape: `Trading.get_positions` returns the
+    shared `Position`, which has no room for leverage, margin mode or the price
+    at which the venue closes you out. A perps desk cannot be drawn without
+    those, and an options desk has no use for them, so they are their own
+    protocol rather than nullable fields on the shared one.
+    """
+
+    def get_perp_positions(self) -> list[PerpPosition]:
+        """Open positions, with their leverage, margin and liquidation price."""
         ...
 
 

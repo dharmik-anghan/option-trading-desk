@@ -22,6 +22,7 @@ import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { PerpsChart } from "./components/PerpsChart";
+import { PerpsPositions } from "./components/PerpsPositions";
 import { PerpsWatch } from "./components/PerpsWatch";
 import {
   UNDERLYINGS,
@@ -319,6 +320,14 @@ export default function App() {
             onSymbol={pickSymbol}
             quotes={quotes.data}
             error={blockingOnly(quotes.error)}
+          />
+        )}
+        {onPerps && (
+          <PerpsPositions
+            positions={perps.data?.positions ?? []}
+            error={perps.data?.positions_error ?? null}
+            quoteCurrency={perps.data?.quote_currency ?? "USDT"}
+            moneyCurrency={perps.data?.money_currency ?? "INR"}
           />
         )}
         {!onPerps && (

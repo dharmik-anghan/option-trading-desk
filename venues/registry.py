@@ -50,6 +50,7 @@ SHARK = VenueSpec(
             Capability.QUOTES,
             Capability.HISTORY,
             Capability.TRADING,
+            Capability.PERPETUALS,
             # No FUNDS: the documented wallet endpoint answers 404, so this
             # adapter cannot say what the account holds. No OPTION_CHAIN either -
             # these are perpetuals and never expire. STREAMING lands with the

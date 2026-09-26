@@ -23,7 +23,13 @@ import requests
 
 from broker.errors import BrokerError, BrokerUnreachable, classify_status
 from broker.models import Candle, OrderRequest, OrderResult, Position, Quote
-from broker.shark.parse import parse_klines, parse_positions, parse_ticker
+from broker.shark.models import PerpPosition
+from broker.shark.parse import (
+    parse_klines,
+    parse_perp_positions,
+    parse_positions,
+    parse_ticker,
+)
 from broker.shark.signing import headers, signed_body, signed_query
 
 log = logging.getLogger(__name__)
@@ -181,6 +187,20 @@ class SharkBroker:
         if not isinstance(rows, list):
             raise BrokerError("Shark returned no position list")
         return parse_positions(rows)
+
+    def get_perp_positions(self) -> list[PerpPosition]:
+        """Open positions with their leverage, margin and liquidation price.
+
+        The same request as `get_positions`, read into the richer model. Both
+        exist because the generic one satisfies `Trading` - which anything
+        venue-agnostic uses - while a perps desk needs what only this one carries.
+        """
+        rows = self._request("GET", "/v1/positions/OPEN", signed=True)
+        if rows is None:
+            return []
+        if not isinstance(rows, list):
+            raise BrokerError("Shark returned no position list")
+        return parse_perp_positions(rows)
 
     def place_order(self, order: OrderRequest) -> OrderResult:
         """Place a real order, with real money, on leverage.

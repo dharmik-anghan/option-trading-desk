@@ -1524,3 +1524,30 @@ a.nitem:hover .nhead {
   border-radius: 2px;
   padding: 0 3px;
 }
+
+/* ---------- perpetual positions ----------
+   Direction in words rather than a sign: "Short 0.01" reads faster than
+   "-0.01" and cannot be mistaken for a loss. */
+.pside {
+  font-family: var(--u);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 0 3px;
+}
+/* The selection hue for long and the sell hue for short: these are your
+   positions, not market facts, and short is the side the desk already draws in
+   rose everywhere else. */
+.pside.long {
+  color: var(--you);
+  box-shadow: inset 0 0 0 1px var(--you);
+}
+.pside.short {
+  color: var(--sell);
+  box-shadow: inset 0 0 0 1px var(--sell);
+}
+.a-positions td,
+.a-positions th {
+  white-space: nowrap;
+}

@@ -40,6 +40,9 @@ class Capability(StrEnum):
     #: pre-trade margin check is possible at all.
     FUNDS = "funds"
     OPTION_CHAIN = "option_chain"
+    #: Leveraged positions: margin, leverage and a liquidation price. What a perps
+    #: desk needs and an options desk has no use for.
+    PERPETUALS = "perpetuals"
     STREAMING = "streaming"
 
 
