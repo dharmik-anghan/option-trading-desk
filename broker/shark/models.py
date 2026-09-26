@@ -13,6 +13,7 @@ have.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -86,3 +87,54 @@ class PerpPosition:
         if price is None or not price or self.liquidation_price is None:
             return None
         return abs(price - self.liquidation_price) / price
+
+
+@dataclass(frozen=True)
+class ContractSpec:
+    """What the venue will accept for one contract.
+
+    Fetched rather than written down, because these are the venue's rules and a
+    copy of them in this repository is a copy that goes stale silently. They
+    change rarely, so the fetch is cached for a day.
+
+    The interesting one is `min_notional`. A minimum quantity looks like the floor
+    and usually is not: BTCUSDT allows 0.001 but demands 115 USDT of notional, so
+    at 84,000 the smallest real order is 0.002 - and the figure moves with the
+    price, which is why it has to be computed rather than remembered.
+    """
+
+    symbol: str
+    max_leverage: float
+    #: Smallest quantity the venue accepts, before the notional floor is applied.
+    min_quantity: float
+    #: Smallest order value. Usually the binding constraint, and price-dependent.
+    min_notional: float
+    price_dp: int
+    quantity_dp: int
+    #: Percentage of notional that must remain as margin. Higher means liquidated
+    #: sooner: oil is 35% where crypto and gold are 15%.
+    maintenance_margin_pct: float
+
+    def smallest_order(self, price: float) -> float:
+        """The smallest quantity that satisfies both floors at this price.
+
+        Rounded up to the venue's quantity precision, because rounding down
+        produces a number the venue rejects - which is the whole point of asking.
+        """
+        if price <= 0:
+            return self.min_quantity
+        step = 10.0**-self.quantity_dp
+        needed = max(self.min_quantity, self.min_notional / price)
+        steps = math.ceil(round(needed / step, 6))
+        return round(steps * step, self.quantity_dp)
+
+    def margin_required(self, quantity: float, price: float, leverage: float) -> float | None:
+        """What the position costs to hold, in the quote asset.
+
+        Notional over leverage. Not what the venue will charge to the rupee - it
+        margins in INR at a rate it decides, and adds a buffer - so this is the
+        size of the commitment rather than a quotation.
+        """
+        if leverage <= 0 or price <= 0:
+            return None
+        return (quantity * price) / leverage

@@ -38,11 +38,10 @@ class PerpLimits:
     max_quantity: float
     #: Largest notional in one order, quantity times price, in the quote asset.
     max_notional: float
-    #: Highest leverage this program will use, whatever the venue allows. The
-    #: venue permits 150x on some contracts; that is not an invitation.
-    max_leverage: float
-    #: When true, orders are formed, checked and recorded but never sent.
-    dry_run: bool
+    #: An optional ceiling of your own, on top of the venue's per-contract
+    #: maximum. Zero means "no ceiling of ours" - the venue's limit still applies,
+    #: since it is the one that would reject the order.
+    max_leverage: float = 0.0
 
 
 def check_quantity(quantity: float, limit: float) -> RiskCheckResult:
@@ -72,12 +71,23 @@ def check_notional(quantity: float, price: float, limit: float) -> RiskCheckResu
     return RiskCheckResult(True, f"Notional {notional:,.0f} is within the {limit:,.0f} cap")
 
 
-def check_leverage(leverage: float, limit: float) -> RiskCheckResult:
+def check_leverage(leverage: float, venue_max: float, own_ceiling: float = 0.0) -> RiskCheckResult:
+    """Against the venue's maximum for this contract, and any ceiling of your own.
+
+    The venue's number is per contract and differs sharply - 150x on BTCUSDT, 75x
+    on gold, 50x on oil - so a single figure written here would either block a
+    legitimate order or wave through one the venue rejects. It is asked for rather
+    than remembered.
+    """
     if leverage <= 0:
         return RiskCheckResult(False, f"Leverage {leverage} is not a multiple")
-    if leverage > limit:
-        return RiskCheckResult(False, f"Leverage {leverage:g}x is past the {limit:g}x cap")
-    return RiskCheckResult(True, f"Leverage {leverage:g}x is within the {limit:g}x cap")
+    if venue_max > 0 and leverage > venue_max:
+        return RiskCheckResult(
+            False, f"Leverage {leverage:g}x is past the venue's {venue_max:g}x for this contract"
+        )
+    if own_ceiling > 0 and leverage > own_ceiling:
+        return RiskCheckResult(False, f"Leverage {leverage:g}x is past your own {own_ceiling:g}x")
+    return RiskCheckResult(True, f"Leverage {leverage:g}x is allowed here")
 
 
 def check_liquidation_distance(
@@ -112,11 +122,6 @@ class PerpOrderCheck:
     checks: list[RiskCheckResult]
     #: What the order is worth, for the review screen.
     notional: float
-    #: True when the checks passed but the order will be recorded rather than
-    #: sent. Held apart from `passed` so a client cannot mistake "we did not send
-    #: this" for "this was refused".
-    dry_run: bool
-
     @property
     def passed(self) -> bool:
         return all(check.passed for check in self.checks)
@@ -126,22 +131,38 @@ class PerpOrderCheck:
         return [check.reason for check in self.checks if not check.passed]
 
 
+def check_minimum(quantity: float, smallest: float) -> RiskCheckResult:
+    """Whether the venue would accept a size this small.
+
+    A floor rather than a cap, and the only check here that protects you from a
+    rejection rather than from a mistake. Worth running anyway: the venue's answer
+    is "order failed" with no arithmetic, and the real floor moves with the price
+    because it is a notional minimum.
+    """
+    if smallest <= 0:
+        return RiskCheckResult(True, "No minimum known for this contract")
+    if quantity < smallest:
+        return RiskCheckResult(
+            False, f"Quantity {quantity:g} is under the {smallest:g} minimum for this contract"
+        )
+    return RiskCheckResult(True, f"Quantity {quantity:g} is at or above the {smallest:g} minimum")
+
+
 def check_perp_order(
     quantity: float,
     price: float,
     leverage: float,
     limits: PerpLimits,
     liquidation: float | None = None,
+    venue_max_leverage: float = 0.0,
+    smallest_order: float = 0.0,
 ) -> PerpOrderCheck:
     """Run every check. Order matters only for reading the result."""
     checks = [
         check_quantity(quantity, limits.max_quantity),
+        check_minimum(quantity, smallest_order),
         check_notional(quantity, price, limits.max_notional),
-        check_leverage(leverage, limits.max_leverage),
+        check_leverage(leverage, venue_max_leverage, limits.max_leverage),
         check_liquidation_distance(price, liquidation),
     ]
-    return PerpOrderCheck(
-        checks=checks,
-        notional=quantity * max(price, 0.0),
-        dry_run=limits.dry_run,
-    )
+    return PerpOrderCheck(checks=checks, notional=quantity * max(price, 0.0))

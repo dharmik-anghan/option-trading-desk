@@ -44,14 +44,13 @@ class Settings(BaseSettings):
     # good trade, which is why they are small: a cap too tight costs a retyped
     # order, a cap too loose costs whatever the bug was.
     #
-    # SHARK_DRY_RUN defaults to true on purpose. With it on, orders are formed,
-    # checked and recorded and never sent - so the desk can be watched deciding
-    # before it is allowed to spend. Turning it off is a deliberate act, and the
-    # string must be exactly "false".
-    shark_dry_run: bool = True
+    # Leverage is checked against the venue's own per-contract maximum, which it
+    # publishes and which differs sharply - 150x on BTCUSDT, 75x on gold, 50x on
+    # oil. SHARK_MAX_LEVERAGE is an optional ceiling of your own on top of that;
+    # zero means you are not imposing one.
     shark_max_quantity: float = 0.01
     shark_max_notional: float = 2000.0
-    shark_max_leverage: float = 10.0
+    shark_max_leverage: float = 0.0
 
     # Optional: where alerts are delivered when nobody is watching the screen.
     # Both or neither - with either missing, the desk still records alerts and
@@ -74,7 +73,6 @@ class Settings(BaseSettings):
             max_quantity=self.shark_max_quantity,
             max_notional=self.shark_max_notional,
             max_leverage=self.shark_max_leverage,
-            dry_run=self.shark_dry_run,
         )
 
     @property

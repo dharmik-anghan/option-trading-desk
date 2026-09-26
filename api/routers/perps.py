@@ -11,6 +11,7 @@ Prices come from the tick stream rather than a request per read: this venue allo
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
@@ -23,6 +24,7 @@ from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
 from broker.models import OrderRequest as BrokerOrderRequest
+from broker.shark.models import ContractSpec
 from risk.perps import check_perp_order
 from settings import load_settings
 from storage.perp_order_repo import note_outcome, recent_orders, record_order
@@ -31,6 +33,8 @@ from venues import Capability, for_venue
 from venues import get as get_venue
 from venues.calendar import is_open
 from venues.instruments import instrument
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["perps"], prefix="/api/perps")
 
@@ -41,6 +45,15 @@ class InstrumentResponse(BaseModel):
     symbol: str
     name: str
     quote_asset: str
+    #: The venue's own ceiling for this contract. 150x on BTCUSDT, 75x on gold,
+    #: 50x on oil - published by the venue rather than written down here, since a
+    #: copy of somebody else's rule goes stale silently.
+    max_leverage: float
+    #: Smallest order the venue will accept at the current price. Usually set by a
+    #: notional floor rather than a quantity one, so it moves with the price:
+    #: BTCUSDT allows 0.001 but demands 115 USDT, which at 84,000 is 0.002.
+    min_quantity: float
+    min_notional: float
     price_dp: int
     quantity_dp: int
     #: Whether this instrument is trading right now. Per instrument, not per
@@ -141,17 +154,38 @@ def desk(request: Request) -> DeskResponse:
     stream = getattr(request.app.state, "tick_stream", None)
     now = datetime.now(UTC)
 
-    instruments = [
-        InstrumentResponse(
-            symbol=i.symbol,
-            name=i.name,
-            quote_asset=i.quote_asset,
-            price_dp=i.price_dp,
-            quantity_dp=i.quantity_dp,
-            open=is_open(i.session, now),
+    # The venue's published limits, if it will tell us. Without them the ticket
+    # falls back to what the instrument carries and the venue does its own
+    # rejecting, which is worse but not broken.
+    specs: dict[str, ContractSpec] = {}
+    broker = broker_for(spec)
+    if isinstance(broker, PerpetualsData):
+        try:
+            specs = broker.get_contracts()
+        except BrokerError:
+            log.warning("could not read contract limits")
+
+    instruments = []
+    for i in for_venue(VENUE_ID):
+        contract = specs.get(i.symbol)
+        streamed = hub.price(i.symbol) if hub is not None else None
+        instruments.append(
+            InstrumentResponse(
+                symbol=i.symbol,
+                name=i.name,
+                quote_asset=i.quote_asset,
+                max_leverage=contract.max_leverage if contract else 0.0,
+                min_quantity=(
+                    contract.smallest_order(streamed)
+                    if contract is not None and streamed is not None
+                    else (contract.min_quantity if contract else 0.0)
+                ),
+                min_notional=contract.min_notional if contract else 0.0,
+                price_dp=contract.price_dp if contract else i.price_dp,
+                quantity_dp=contract.quantity_dp if contract else i.quantity_dp,
+                open=is_open(i.session, now),
+            )
         )
-        for i in for_venue(VENUE_ID)
-    ]
     prices = []
     for i in for_venue(VENUE_ID):
         tick = hub.tick(i.symbol) if hub is not None else None
@@ -165,7 +199,6 @@ def desk(request: Request) -> DeskResponse:
         )
     positions: list[PositionResponse] = []
     positions_error: str | None = None
-    broker = broker_for(spec)
     if isinstance(broker, PerpetualsData):
         try:
             for p in broker.get_perp_positions():
@@ -334,10 +367,9 @@ class CheckResponse(BaseModel):
 
 
 class OrderResponse(BaseModel):
-    #: Whether it actually left. False for a refusal and false for a rehearsal -
-    #: `dry_run` says which, and they must not be confused.
+    #: Whether it actually left. False means it was refused, and `reasons` says
+    #: why - there is no third state now that nothing is held back.
     sent: bool
-    dry_run: bool
     checks: list[CheckResponse]
     reasons: list[str]
     notional: float
@@ -350,13 +382,16 @@ class OrderResponse(BaseModel):
 
 @router.post("/orders", response_model=OrderResponse)
 def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> OrderResponse:
-    """Check an order, record it, and send it unless dry-run holds it back.
+    """Check an order, record it, and send it.
 
     The order of those verbs is the point. Checks run server-side, so a client
-    cannot skip them; the attempt is written to the log *before* the request
-    leaves, so a process that dies mid-send still leaves a record that something
-    was tried; and dry-run is the default, so the desk can be watched deciding
-    before it is allowed to spend.
+    cannot skip them, and the attempt is written to the log *before* the request
+    leaves - so a process that dies mid-send still leaves a record that something
+    was tried.
+
+    This sends real orders. The caps in `risk/perps.py` are what stands between a
+    mistake in this program and a position, which is why they are checked here
+    rather than in the browser.
 
     Sizing is against the streamed price for a market order. A market order with
     no price to size against is refused rather than sent blind - the notional cap
@@ -377,11 +412,37 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
         )
 
     limits = load_settings().perp_limits
-    outcome = check_perp_order(body.quantity, price, body.leverage, limits)
+    broker = broker_for(spec)
+
+    # The venue's own rules for this contract: its leverage ceiling, and the
+    # smallest order it will accept at this price. Asked rather than remembered -
+    # they differ per contract and the size floor moves with the price, because it
+    # is a notional minimum rather than a quantity one.
+    venue_max_leverage = 0.0
+    smallest = 0.0
+    if isinstance(broker, PerpetualsData):
+        try:
+            contract = broker.get_contracts().get(body.symbol)
+            if contract is not None:
+                venue_max_leverage = contract.max_leverage
+                smallest = contract.smallest_order(price)
+        except BrokerError:
+            # Not fatal: without the catalogue the venue's own limits go
+            # unchecked, and it will reject the order itself if they are broken.
+            log.warning("could not read contract limits for %s", body.symbol)
+
+    outcome = check_perp_order(
+        body.quantity,
+        price,
+        body.leverage,
+        limits,
+        venue_max_leverage=venue_max_leverage,
+        smallest_order=smallest,
+    )
 
     now = datetime.now(UTC).isoformat()
     refused = None if outcome.passed else "; ".join(outcome.reasons)
-    reason = refused or ("Held back: dry run" if outcome.dry_run else "Sending")
+    reason = refused or "Sending"
 
     conn = open_db(db_path)
     try:
@@ -401,8 +462,7 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
 
         sent = False
         venue_order_id: str | None = None
-        if outcome.passed and not outcome.dry_run:
-            broker = broker_for(spec)
+        if outcome.passed:
             try:
                 result = broker.place_order(
                     BrokerOrderRequest(
@@ -426,7 +486,6 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
 
     return OrderResponse(
         sent=sent,
-        dry_run=outcome.dry_run,
         checks=[CheckResponse(passed=c.passed, reason=c.reason) for c in outcome.checks],
         reasons=outcome.reasons,
         notional=outcome.notional,

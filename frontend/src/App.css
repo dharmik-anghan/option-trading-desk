@@ -1698,3 +1698,17 @@ a.nitem:hover .nhead {
   margin: 0;
   color: var(--up);
 }
+
+/* A rule the venue imposes, stated where it applies rather than discovered by a
+   rejection. Turns to the loss hue when the value breaks it. */
+.tnote {
+  margin: 0;
+  padding: 0 0 0 84px;
+  font-family: var(--u);
+  font-size: 10.5px;
+  color: var(--dim);
+  line-height: 1.35;
+}
+.tnote.bad {
+  color: var(--dn);
+}

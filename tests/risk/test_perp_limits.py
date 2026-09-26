@@ -18,7 +18,9 @@ from risk.perps import (
     check_quantity,
 )
 
-CAPS = PerpLimits(max_quantity=0.01, max_notional=2000.0, max_leverage=10.0, dry_run=True)
+CAPS = PerpLimits(max_quantity=0.01, max_notional=2000.0, max_leverage=10.0)
+#: What the venue itself allows on BTCUSDT, for the checks that ask.
+VENUE_MAX = 150.0
 
 
 class TestQuantity:
@@ -52,13 +54,28 @@ class TestNotional:
 
 
 class TestLeverage:
-    def test_what_the_venue_allows_is_not_an_invitation(self) -> None:
-        # Shark permits 150x on some contracts.
-        assert not check_leverage(150, 10.0).passed
-        assert check_leverage(8, 10.0).passed
+    def test_the_venues_own_ceiling_is_enforced(self) -> None:
+        # Per contract, and sharply different: 150x on BTCUSDT, 75x on gold, 50x
+        # on oil. A single number written here would block a legitimate order or
+        # wave through one the venue rejects.
+        assert check_leverage(100, 150.0).passed
+        assert not check_leverage(100, 75.0).passed
+        assert not check_leverage(60, 50.0).passed
+
+    def test_your_own_ceiling_applies_on_top(self) -> None:
+        assert not check_leverage(50, 150.0, own_ceiling=10.0).passed
+        assert check_leverage(8, 150.0, own_ceiling=10.0).passed
+
+    def test_no_ceiling_of_your_own_means_only_the_venues(self) -> None:
+        assert check_leverage(100, 150.0, own_ceiling=0.0).passed
+
+    def test_an_unknown_venue_maximum_does_not_block(self) -> None:
+        # Without the catalogue the venue's limit goes unchecked, and it will
+        # reject the order itself if it is broken.
+        assert check_leverage(100, 0.0).passed
 
     def test_zero_is_not_a_multiple(self) -> None:
-        assert not check_leverage(0, 10.0).passed
+        assert not check_leverage(0, 150.0).passed
 
 
 class TestLiquidationDistance:
@@ -90,11 +107,11 @@ class TestLiquidationDistance:
 
 class TestAllTogether:
     def test_a_sensible_order_passes_every_check(self) -> None:
-        result = check_perp_order(0.005, 84_000.0 / 1000, 8, CAPS)
+        result = check_perp_order(0.005, 84_000.0 / 1000, 8, CAPS, venue_max_leverage=VENUE_MAX)
         assert result.passed, result.reasons
 
     def test_one_failure_fails_the_order_and_names_only_that(self) -> None:
-        result = check_perp_order(0.5, 100.0, 8, CAPS)
+        result = check_perp_order(0.5, 100.0, 8, CAPS, venue_max_leverage=VENUE_MAX)
         assert not result.passed
         assert len(result.reasons) == 1
         assert "Quantity" in result.reasons[0]
@@ -102,13 +119,21 @@ class TestAllTogether:
     def test_it_reports_the_notional_for_the_review(self) -> None:
         assert check_perp_order(0.002, 84_000.0, 8, CAPS).notional == 168.0
 
-    def test_dry_run_is_held_apart_from_passing(self) -> None:
-        # "We did not send this" must not be mistakable for "this was refused".
-        result = check_perp_order(0.005, 100.0, 8, CAPS)
-        assert result.passed is True
-        assert result.dry_run is True
+    def test_a_size_under_the_venues_minimum_is_refused(self) -> None:
+        # The floor that protects against a rejection rather than a mistake. The
+        # venue answers "order failed" with no arithmetic, and the real floor moves
+        # with the price because it is a notional minimum.
+        result = check_perp_order(
+            0.001, 84_000.0, 8, CAPS, venue_max_leverage=VENUE_MAX, smallest_order=0.002
+        )
+        assert not result.passed
+        assert any("minimum" in r for r in result.reasons)
 
-    def test_live_mode_says_so(self) -> None:
-        live = PerpLimits(max_quantity=0.01, max_notional=2000.0, max_leverage=10.0,
-                          dry_run=False)
-        assert check_perp_order(0.005, 100.0, 8, live).dry_run is False
+    def test_exactly_the_minimum_is_allowed(self) -> None:
+        result = check_perp_order(
+            0.002, 84_000.0, 8, CAPS, venue_max_leverage=VENUE_MAX, smallest_order=0.002
+        )
+        assert result.passed, result.reasons
+
+    def test_an_unknown_minimum_does_not_block(self) -> None:
+        assert check_perp_order(0.001, 100.0, 8, CAPS, smallest_order=0.0).passed

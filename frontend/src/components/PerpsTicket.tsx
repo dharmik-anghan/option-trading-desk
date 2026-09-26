@@ -12,14 +12,22 @@ interface Props {
   onPlaced: () => void;
 }
 
+/** Leverage worth offering, coarsest first. Filtered to what the contract allows,
+    because the venue's ceiling differs sharply per instrument: 150x on BTCUSDT,
+    75x on gold, 50x on oil. Offered as a list rather than a free number so that
+    choosing is picking from what exists rather than typing and being refused. */
+const LEVERAGE_STEPS = [2, 3, 5, 10, 15, 20, 25, 50, 75, 100, 125, 150];
+
 /**
- * An order, and what it would cost before you send it.
+ * An order, what it will cost to hold, and what the venue will accept.
  *
- * Two deliberate frictions. Leverage has no default, because a default is a
- * decision about risk taken quietly and on a venue offering 150x the difference
- * between 8 and 80 is not a detail. And the notional is shown as you type rather
- * than after you commit, because "0.002" means nothing and "168 USDT" means
- * something.
+ * Three things the venue knows and you should not have to: the leverage ceiling
+ * for this contract, the smallest order it will take, and what the position
+ * demands as margin. All three are shown rather than discovered by being refused.
+ *
+ * Margin is notional over leverage, in the quote asset. It is the size of the
+ * commitment rather than a quotation - the venue margins in rupees at a rate it
+ * decides and adds a buffer, so the figure it charges will differ.
  *
  * The result is shown in full, every check listed, whether it passed or not. A
  * green screen saying "done" teaches nothing about what was checked; the point of
@@ -35,7 +43,7 @@ export function PerpsTicket({
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [type, setType] = useState<"MARKET" | "LIMIT">("MARKET");
   const [quantity, setQuantity] = useState("");
-  const [leverage, setLeverage] = useState("");
+  const [leverage, setLeverage] = useState(10);
   const [limitPrice, setLimitPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PerpOrderResult | null>(null);
@@ -45,11 +53,17 @@ export function PerpsTicket({
   const live = prices[symbol] ?? null;
   const priceUsed = type === "LIMIT" ? Number(limitPrice) || null : live;
   const qty = Number(quantity);
-  const lev = Number(leverage);
+  const lev = leverage;
   const notional = priceUsed !== null && qty > 0 ? qty * priceUsed : null;
+  const margin = notional !== null && lev > 0 ? notional / lev : null;
+  const ceiling = instrument?.max_leverage ?? 0;
+  const steps = LEVERAGE_STEPS.filter((x) => ceiling <= 0 || x <= ceiling);
+  const smallest = instrument?.min_quantity ?? 0;
+  const tooSmall = qty > 0 && smallest > 0 && qty < smallest;
 
   const ready =
     qty > 0 &&
+    !tooSmall &&
     lev > 0 &&
     priceUsed !== null &&
     (type === "MARKET" || Number(limitPrice) > 0);
@@ -110,22 +124,34 @@ export function PerpsTicket({
             type="number"
             step={instrument ? 10 ** -instrument.quantity_dp : 0.001}
             value={quantity}
-            placeholder="0.000"
+            placeholder={smallest > 0 ? String(smallest) : "0.000"}
             onChange={(e) => setQuantity(e.target.value)}
           />
         </label>
+        {/* The floor, stated. It is usually a notional minimum rather than a
+            quantity one, so it differs per instrument and moves with the price:
+            BTCUSDT allows 0.001 but demands 115 USDT, which at 84,000 is 0.002,
+            while oil needs 0.07. Better said here than discovered by a rejection. */}
+        {smallest > 0 && (
+          <p className={tooSmall ? "tnote bad" : "tnote"}>
+            Smallest the venue takes: {smallest}
+            {instrument?.min_notional ? ` (${instrument.min_notional} ${quoteCurrency} minimum)` : ""}
+          </p>
+        )}
 
         <label>
           <small>Leverage</small>
-          {/* No default: a default here is a decision about risk taken quietly. */}
-          <input
-            type="number"
-            step={1}
-            value={leverage}
-            placeholder="required"
-            onChange={(e) => setLeverage(e.target.value)}
-          />
+          <select value={leverage} onChange={(e) => setLeverage(Number(e.target.value))}>
+            {steps.map((x) => (
+              <option key={x} value={x}>
+                {x}×
+              </option>
+            ))}
+          </select>
         </label>
+        {ceiling > 0 && (
+          <p className="tnote">This contract allows up to {ceiling}×.</p>
+        )}
 
         <label>
           <small>Type</small>
@@ -156,6 +182,13 @@ export function PerpsTicket({
             )}
           </b>
         </div>
+        <div className="tnotional">
+          <small>Margin</small>
+          <b>
+            {margin === null ? "—" : `${num(margin, 2)} ${quoteCurrency}`}
+            <span className="dim"> at {lev}×</span>
+          </b>
+        </div>
 
         <button className="xbtn place" disabled={!ready || busy} onClick={() => void submit()}>
           {busy ? "Checking…" : "Review and place"}
@@ -168,12 +201,10 @@ export function PerpsTicket({
         <div className="outcome">
           {/* Held back and refused are different things, and a screen that blurs
               them teaches you to ignore it. */}
-          <p className={result.sent ? "sent" : result.reasons.length ? "err" : "empty warnish"}>
+          <p className={result.sent ? "sent" : "err"}>
             {result.sent
               ? `Sent. Venue reference ${result.venue_order_id ?? "—"}.`
-              : result.reasons.length
-                ? "Refused. Nothing was sent."
-                : "Checks passed, and nothing was sent: the desk is in dry-run mode."}
+              : "Not sent. Nothing reached the venue."}
           </p>
           <table className="lim tight">
             <tbody>

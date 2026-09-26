@@ -34,17 +34,23 @@ price the venue closes it at, as a percentage rather than in points so gold at
 handed to the exchange to hold, which is the only kind that fires with this app
 closed.
 
-Orders can be placed from that desk, and **`SHARK_DRY_RUN` is on unless you set it
-to exactly `false`**. With it on, an order is formed, checked, shown to you in full
-and written to the order log - and never sent. Turn it off deliberately, once you
-have watched the desk decide a few times and agreed with what it wanted to do.
+**Orders placed from that desk are real.** Five checks run server-side before
+anything leaves, and every attempt is recorded whether it was sent or refused,
+because the question after a surprise is what it tried to do.
 
-Four checks run server-side before anything leaves: quantity, notional, leverage,
-and how far a new position would start from liquidation. They are caps on what
-this program may do rather than opinions about a good trade - a cap too tight
-costs a retyped order, a cap too loose costs whatever the bug was - so the
-defaults are small. Every attempt is recorded whether it was sent, refused or
-rehearsed, because the question after a surprise is what it tried to do. Prices there arrive on a stream rather
+Two of those checks are the venue's own rules, read from it rather than written
+down here: the leverage ceiling for that contract, and the smallest order it will
+accept. Both differ sharply per instrument - 150x on BTCUSDT against 50x on oil -
+and the size floor moves with the price, because it is usually a notional minimum
+rather than a quantity one. BTCUSDT allows 0.001 but demands 115 USDT, so at
+84,000 the smallest real order is 0.002, while oil needs 0.07. The ticket shows
+both, along with the margin the position will demand, rather than leaving them to
+be discovered by a rejection.
+
+The other three are caps on what this program may do by mistake, not opinions
+about a good trade: quantity, notional, and how far a new position would start
+from liquidation. A cap too tight costs a retyped order and a cap too loose costs
+whatever the bug was, so the defaults are small. Prices there arrive on a stream rather
 than being polled: the venue allows 60 requests a minute against Fyers' ~200, and
 it pushes. Note that prices are quoted in USDT while the account margins in INR,
 so those two figures are deliberately labelled in different units.
@@ -242,11 +248,6 @@ one situation reading as two is worse than a wrong figure.
 - **Calendars and diagonals get no payoff curve.** The maths assumes one
   expiry, and applying it across two reports the whole debit as a certain loss,
   so it is suppressed rather than shown wrong.
-- **Write access to Shark is unproven.** Every read works. The first write - a
-  request to attach a stop, aimed at a position id that does not exist - came back
-  "Access denied", which could mean the position is not there or could mean the
-  API key has no trading permission. The two are indistinguishable from the
-  response, and it matters before anything places an order.
 - **One shape in the Shark integration is unverified.** An open perpetual
   position's unrealised-P&L field name is guessed, because the account had no
   open position to capture and a closed one reports realised profit instead. When

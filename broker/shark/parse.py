@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from broker.models import Candle, Position, Quote
-from broker.shark.models import PerpPosition
+from broker.shark.models import ContractSpec, PerpPosition
 
 
 class SharkParseError(ValueError):
@@ -244,3 +244,36 @@ def parse_perp_positions(rows: list[dict[str, Any]]) -> list[PerpPosition]:
         if str(row.get("positionStatus", "OPEN")).upper() == "OPEN"
         and (_opt_num(row.get("positionAmount")) or _opt_num(row.get("quantity")) or 0.0)
     ]
+
+
+def parse_contracts(payload: dict[str, Any]) -> dict[str, ContractSpec]:
+    """Every contract the venue lists, keyed by symbol.
+
+    The quantity and notional floors live in a `filters` array rather than as
+    fields, with one entry per kind of rule. Market and limit orders can have
+    different quantity floors; the stricter of the two is used, since a desk that
+    offers a size one order type rejects is worse than one that asks for slightly
+    more.
+    """
+    out: dict[str, ContractSpec] = {}
+    for row in payload.get("contracts", []):
+        if not isinstance(row, dict) or "name" not in row:
+            continue
+        filters = {
+            f.get("filterType"): f for f in row.get("filters", []) if isinstance(f, dict)
+        }
+        mins = [
+            _opt_num(filters.get(kind, {}).get("minQty"))
+            for kind in ("MARKET_QTY_SIZE", "LIMIT_QTY_SIZE")
+        ]
+        present = [m for m in mins if m is not None]
+        out[str(row["name"])] = ContractSpec(
+            symbol=str(row["name"]),
+            max_leverage=_opt_num(row.get("maxLeverage")) or 1.0,
+            min_quantity=max(present) if present else 0.0,
+            min_notional=_opt_num(filters.get("MIN_NOTIONAL", {}).get("notional")) or 0.0,
+            price_dp=int(_opt_num(row.get("pricePrecision")) or 2),
+            quantity_dp=int(_opt_num(row.get("quantityPrecision")) or 3),
+            maintenance_margin_pct=_opt_num(row.get("maintenanceMarginPercentage")) or 0.0,
+        )
+    return out

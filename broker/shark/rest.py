@@ -17,14 +17,18 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, date, datetime, time
+
+# Imported by name: `time` above is datetime.time, which shadows the module.
+from time import monotonic
 from typing import Any
 
 import requests
 
 from broker.errors import BrokerError, BrokerUnreachable, classify_status
 from broker.models import Candle, OrderRequest, OrderResult, Position, Quote
-from broker.shark.models import PerpPosition
+from broker.shark.models import ContractSpec, PerpPosition
 from broker.shark.parse import (
+    parse_contracts,
     parse_klines,
     parse_perp_positions,
     parse_positions,
@@ -36,6 +40,14 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.sharkexchange.in"
 TIMEOUT = 20.0
+
+#: Contract definitions change rarely, and the catalogue is 400KB.
+CONTRACTS_TTL = 24 * 3600.0
+
+#: What the venue will margin a position in. The account settles in rupees even
+#: for a USDT-quoted contract, so that is the default.
+MARGIN_ASSETS = frozenset({"INR", "USDT"})
+DEFAULT_MARGIN_ASSET = "INR"
 
 #: Candle sizes the venue accepts, mapped from the resolutions the desk asks for.
 #: The options broker speaks in minutes ("1", "60", "D"); this one in Binance
@@ -72,6 +84,8 @@ class SharkBroker:
         self._secret = api_secret
         self._base = base_url.rstrip("/")
         self._session = session or requests.Session()
+        self._contracts: dict[str, ContractSpec] | None = None
+        self._contracts_at = 0.0
 
     # ---------------------------------------------------------------- plumbing
 
@@ -188,6 +202,23 @@ class SharkBroker:
             raise BrokerError("Shark returned no position list")
         return parse_positions(rows)
 
+    def get_contracts(self) -> dict[str, ContractSpec]:
+        """What the venue will accept, per contract.
+
+        Public and unsigned. Cached for a day: these are contract definitions, not
+        prices, and re-fetching a 400KB catalogue to learn a leverage ceiling that
+        has not moved in months is a waste of a 60-per-minute budget.
+        """
+        now = monotonic()
+        if self._contracts is not None and now - self._contracts_at < CONTRACTS_TTL:
+            return self._contracts
+        payload = self._request("GET", "/v1/exchange/exchangeInfo")
+        if not isinstance(payload, dict):
+            raise BrokerError("Shark returned no contract list")
+        self._contracts = parse_contracts(payload)
+        self._contracts_at = now
+        return self._contracts
+
     def get_perp_positions(self) -> list[PerpPosition]:
         """Open positions with their leverage, margin and liquidation price.
 
@@ -244,6 +275,12 @@ class SharkBroker:
         for a USDT-quoted contract: the account is margined in rupees and the
         venue converts at a rate it reports on the position.
 
+        That field is not `product_type`, which is the shared model's options
+        concept and defaults to "MARGIN" - a value this venue has never heard of.
+        Sending it produced an order the venue refused, which is the right outcome
+        for the wrong reason: it would have kept failing until someone read the
+        body. Only a real margin asset is passed through.
+
         Callers must have run the risk checks first. Nothing here second-guesses
         the quantity beyond what the venue itself rejects.
         """
@@ -254,7 +291,9 @@ class SharkBroker:
             "type": order.order_type.upper(),
             "quantity": order.quantity,
             "reduceOnly": False,
-            "marginAsset": order.product_type or "INR",
+            "marginAsset": (
+                order.product_type if order.product_type in MARGIN_ASSETS else DEFAULT_MARGIN_ASSET
+            ),
         }
         if order.order_type.upper() in {"LIMIT", "STOP_LIMIT"}:
             if order.limit_price <= 0:

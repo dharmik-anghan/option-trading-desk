@@ -37,7 +37,7 @@ from broker.models import (
     Quote,
     Tick,
 )
-from broker.shark.models import PerpPosition
+from broker.shark.models import ContractSpec, PerpPosition
 
 
 @runtime_checkable
@@ -109,6 +109,17 @@ class PerpetualsData(Protocol):
     those, and an options desk has no use for them, so they are their own
     protocol rather than nullable fields on the shared one.
     """
+
+    def get_contracts(self) -> dict[str, ContractSpec]:
+        """What the venue will accept per contract: leverage ceiling, size floors.
+
+        On the protocol rather than the adapter, so the endpoints that need these
+        limits can ask for the capability instead of narrowing on a concrete class.
+        They did narrow, and the effect was that anything other than the real
+        adapter skipped the venue's own limits entirely - which is the opposite of
+        what a check is for.
+        """
+        ...
 
     def get_perp_positions(self) -> list[PerpPosition]:
         """Open positions, with their leverage, margin and liquidation price."""

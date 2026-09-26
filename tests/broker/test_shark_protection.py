@@ -133,3 +133,54 @@ class TestRefusals:
         rec = Recorder(status=400, body={"message": "position not found"})
         with pytest.raises(BrokerError, match="position not found"):
             _broker(rec).set_protection("p-1", quantity=0.01, stop_loss=1)
+
+
+class TestTheOrderBody:
+    """What actually goes on the wire for an order. Recorded, never sent."""
+
+    def _order(self, **over: object) -> Any:
+        from broker.models import OrderRequest
+
+        fields: dict[str, Any] = {
+            "symbol": "BTCUSDT",
+            "quantity": 0.002,
+            "side": "BUY",
+            "order_type": "MARKET",
+        }
+        fields.update(over)
+        return OrderRequest(**fields)
+
+    def test_the_margin_asset_is_a_margin_asset(self) -> None:
+        # The shared model's product_type defaults to "MARGIN" - an options concept
+        # this venue has never heard of. Sending it produced a refused order, which
+        # was the right outcome for the wrong reason.
+        rec = Recorder(body={"clientOrderId": "x", "status": "OPEN"})
+        _broker(rec).place_order(self._order())
+        body = json.loads(rec.calls[0]["data"])
+        assert body["marginAsset"] == "INR"
+
+    def test_a_real_margin_asset_is_passed_through(self) -> None:
+        rec = Recorder(body={"clientOrderId": "x"})
+        _broker(rec).place_order(self._order(product_type="USDT"))
+        assert json.loads(rec.calls[0]["data"])["marginAsset"] == "USDT"
+
+    def test_the_venues_own_fields_are_present(self) -> None:
+        rec = Recorder(body={"clientOrderId": "x"})
+        _broker(rec).place_order(self._order())
+        body = json.loads(rec.calls[0]["data"])
+        assert body["placeType"] == "ORDER_FORM"
+        assert body["side"] == "BUY"
+        assert body["type"] == "MARKET"
+        assert body["quantity"] == 0.002
+        assert body["reduceOnly"] is False
+
+    def test_a_limit_order_carries_its_price(self) -> None:
+        rec = Recorder(body={"clientOrderId": "x"})
+        _broker(rec).place_order(self._order(order_type="LIMIT", limit_price=80_000))
+        assert json.loads(rec.calls[0]["data"])["price"] == 80_000
+
+    def test_a_limit_order_without_a_price_never_reaches_the_venue(self) -> None:
+        rec = Recorder()
+        with pytest.raises(BrokerError, match="needs a price"):
+            _broker(rec).place_order(self._order(order_type="LIMIT"))
+        assert rec.calls == []

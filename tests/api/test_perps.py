@@ -14,8 +14,9 @@ from fastapi.testclient import TestClient
 
 from api.routers import perps as perps_router
 from broker.errors import BrokerError
-from broker.models import Tick
-from broker.shark.models import PerpPosition
+from broker.models import OrderRequest as BrokerOrderRequest
+from broker.models import OrderResult, Tick
+from broker.shark.models import ContractSpec, PerpPosition
 from streaming import TickHub
 
 
@@ -78,6 +79,37 @@ class TestCandles:
         assert response.status_code in {200, 502}
 
 
+SPECS = {
+    "BTCUSDT": ContractSpec(
+        symbol="BTCUSDT",
+        max_leverage=150.0,
+        min_quantity=0.001,
+        min_notional=115.0,
+        price_dp=1,
+        quantity_dp=3,
+        maintenance_margin_pct=15.0,
+    ),
+    "XAUUSDT": ContractSpec(
+        symbol="XAUUSDT",
+        max_leverage=75.0,
+        min_quantity=0.001,
+        min_notional=5.75,
+        price_dp=2,
+        quantity_dp=3,
+        maintenance_margin_pct=15.0,
+    ),
+    "CLUSDT": ContractSpec(
+        symbol="CLUSDT",
+        max_leverage=50.0,
+        min_quantity=0.01,
+        min_notional=5.75,
+        price_dp=2,
+        quantity_dp=2,
+        maintenance_margin_pct=35.0,
+    ),
+}
+
+
 class Stub:
     """A venue with one open position, since the real account has none.
 
@@ -91,6 +123,23 @@ class Stub:
         self._position = position
         self._fail = fail
         self.protection: list[tuple[str, float, float | None, float | None]] = []
+        #: Orders this stub was asked to send. Nothing leaves the process.
+        self.orders: list[BrokerOrderRequest] = []
+        self.refuse_order: str | None = None
+
+    def get_contracts(self) -> dict[str, ContractSpec]:
+        """The real venue's published limits, copied once into SPECS above."""
+        return SPECS
+
+    def get_history(self, symbol: str, resolution: str, date_from: object, date_to: object) -> list:  # type: ignore[type-arg]
+        """No candles from a stub; the parsers are tested against real ones."""
+        return []
+
+    def place_order(self, order: BrokerOrderRequest) -> OrderResult:
+        if self.refuse_order is not None:
+            raise BrokerError(self.refuse_order)
+        self.orders.append(order)
+        return OrderResult(order_id="stub-order-1", message="OPEN")
 
     def get_perp_positions(self) -> list[PerpPosition]:
         if self._fail:
@@ -111,6 +160,18 @@ class Stub:
         if self._fail:
             raise BrokerError("Shark: signature rejected")
         self.protection.append((position_id, quantity, take_profit, stop_loss))
+
+
+@pytest.fixture(autouse=True)
+def stub_venue(monkeypatch: pytest.MonkeyPatch) -> Stub:
+    """Every test here gets a venue that records instead of trading.
+
+    Autouse because forgetting is the failure mode that matters: without it a
+    sound order reaches the real account, which is exactly what happened once.
+    """
+    stub = Stub()
+    monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+    return stub
 
 
 def _position(**over: object) -> PerpPosition:
@@ -309,17 +370,66 @@ class TestPlacingAnOrder:
         # order is the thing the caps exist to prevent.
         assert client.post("/api/perps/orders", json=self._order()).status_code == 503
 
-    def test_a_sound_order_passes_and_is_held_back(self, client: TestClient) -> None:
+    def test_a_sound_order_passes_every_check_and_is_sent(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
         from api.app import app
 
         app.state.tick_hub = self._priced()
         try:
             body = client.post("/api/perps/orders", json=self._order()).json()
-            assert body["dry_run"] is True
-            assert body["sent"] is False, "dry run must not send"
-            assert body["reasons"] == [], "held back is not refused"
+            assert body["reasons"] == []
+            assert all(c["passed"] for c in body["checks"]), body["checks"]
+            assert body["sent"] is True
             assert body["notional"] == pytest.approx(0.002 * 84_000)
-            assert all(c["passed"] for c in body["checks"])
+            assert body["venue_order_id"] == "stub-order-1"
+            # and it reached the venue exactly once
+            assert len(stub_venue.orders) == 1
+            assert stub_venue.orders[0].quantity == 0.002
+        finally:
+            app.state.tick_hub = None
+
+    def test_a_refused_order_never_reaches_the_venue(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        # The caps are what stands between a mistake in this program and a
+        # position, so a failed check must stop the request rather than colour the
+        # result afterwards.
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order(quantity=5))
+        finally:
+            app.state.tick_hub = None
+        assert stub_venue.orders == []
+
+    def test_a_venue_refusal_is_recorded_as_unsent(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        from api.app import app
+
+        stub_venue.refuse_order = "Insufficient margin"
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order()).json()
+        finally:
+            app.state.tick_hub = None
+        assert body["sent"] is False
+        (row,) = client.get("/api/perps/orders").json()
+        assert row["sent"] is False
+        assert "Insufficient margin" in row["reason"]
+
+    def test_a_size_under_the_venues_minimum_is_refused(self, client: TestClient) -> None:
+        # BTCUSDT allows 0.001 but demands 115 USDT, so at 84,000 the floor is
+        # 0.002 - and the desk should say so rather than let the venue say "failed".
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order(quantity=0.001)).json()
+            assert body["sent"] is False
+            assert any("minimum" in r for r in body["reasons"])
         finally:
             app.state.tick_hub = None
 
@@ -335,13 +445,26 @@ class TestPlacingAnOrder:
         finally:
             app.state.tick_hub = None
 
-    def test_leverage_past_the_cap_is_refused(self, client: TestClient) -> None:
+    def test_leverage_past_the_venues_own_maximum_is_refused(self, client: TestClient) -> None:
+        # BTCUSDT allows 150x, so 151 is the venue's own line rather than ours.
         from api.app import app
 
         app.state.tick_hub = self._priced()
         try:
-            body = client.post("/api/perps/orders", json=self._order(leverage=150)).json()
+            body = client.post("/api/perps/orders", json=self._order(leverage=151)).json()
             assert any("Leverage" in r for r in body["reasons"])
+        finally:
+            app.state.tick_hub = None
+
+    def test_leverage_the_venue_allows_is_not_refused(self, client: TestClient) -> None:
+        # 100x on BTCUSDT is within the venue's 150x. Whether it is wise is not
+        # this program's opinion to hold - it caps what it might do by mistake.
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order(leverage=100)).json()
+            assert not any("Leverage" in r for r in body["reasons"])
         finally:
             app.state.tick_hub = None
 
@@ -383,15 +506,5 @@ class TestPlacingAnOrder:
         # newest first, and the refusal carries its reason
         assert log[0]["quantity"] == 5
         assert "Quantity" in log[0]["reason"]
-        assert all(row["sent"] is False for row in log)
-
-    def test_the_log_says_a_rehearsal_was_a_rehearsal(self, client: TestClient) -> None:
-        from api.app import app
-
-        app.state.tick_hub = self._priced()
-        try:
-            client.post("/api/perps/orders", json=self._order())
-        finally:
-            app.state.tick_hub = None
-        (row,) = client.get("/api/perps/orders").json()
-        assert "dry run" in row["reason"].lower()
+        assert log[0]["sent"] is False
+        assert log[1]["sent"] is True, "the sound one was sent"

@@ -503,6 +503,12 @@ export interface PerpInstrument {
   symbol: string;
   name: string;
   quote_asset: string;
+  /** The venue's own ceiling for this contract — 150× on BTC, 75× gold, 50× oil. */
+  max_leverage: number;
+  /** Smallest order the venue accepts at the current price. Usually set by a
+      notional floor, so it moves with the price. */
+  min_quantity: number;
+  min_notional: number;
   /** Decimal places the venue prices in, so a tile does not invent precision. */
   price_dp: number;
   quantity_dp: number;
@@ -570,10 +576,8 @@ export interface OrderCheck {
 }
 
 export interface PerpOrderResult {
-  /** Whether it actually left. False for a refusal and false for a rehearsal —
-      `dry_run` says which, and they must not be read as the same thing. */
+  /** Whether it actually left. False means refused, and `reasons` says why. */
   sent: boolean;
-  dry_run: boolean;
   checks: OrderCheck[];
   reasons: string[];
   notional: number;
