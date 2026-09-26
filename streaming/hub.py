@@ -84,6 +84,10 @@ class TickHub:
         """Every price currently known, for a caller that wants them all."""
         return {symbol: tick.price for symbol, tick in self._latest.items()}
 
+    def tick(self, symbol: str) -> Tick | None:
+        """The last tick in full, for a caller that needs more than the price."""
+        return self._latest.get(symbol)
+
     def age_seconds(self, symbol: str) -> float | None:
         """How long since this symbol last moved, by our clock.
 

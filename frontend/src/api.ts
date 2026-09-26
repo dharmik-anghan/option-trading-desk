@@ -445,6 +445,88 @@ export function getHealth(): Promise<Health> {
 }
 
 /* -------------------------------------------------------------------------
+ * Venues and the perpetuals desk
+ *
+ * Two desks, not one desk with a filter: index options and perpetual futures
+ * share almost no vocabulary. A chain means nothing on one, leverage and a
+ * liquidation price mean nothing on the other, and half the fields would be null
+ * either way.
+ * ---------------------------------------------------------------------- */
+
+export interface Venue {
+  id: string;
+  name: string;
+  asset_class: "index_options" | "perpetuals";
+  quote_currency: string;
+  session: string;
+  capabilities: string[];
+}
+
+export interface PerpInstrument {
+  symbol: string;
+  name: string;
+  quote_asset: string;
+  /** Decimal places the venue prices in, so a tile does not invent precision. */
+  price_dp: number;
+  quantity_dp: number;
+  open: boolean;
+}
+
+export interface PerpPrice {
+  symbol: string;
+  /** Null until the stream has carried it. Never zero, which would be a market
+      at nothing. */
+  price: number | null;
+  /** Seconds since it arrived, so a dead stream reads as stale rather than current. */
+  age_seconds: number | null;
+  /** The venue's own 24-hour change, as a percentage. A market with no close has
+      no yesterday of ours to measure against. */
+  change_pct: number | null;
+}
+
+export interface StreamStatus {
+  connected: boolean;
+  ticks: number;
+  dropped: number;
+  subscribers: number;
+}
+
+export interface PerpsDesk {
+  venue: string;
+  name: string;
+  /** Prices and charts are in this. */
+  quote_currency: string;
+  /** Balances and P&L are in this, which is not the same on this venue. */
+  money_currency: string;
+  instruments: PerpInstrument[];
+  prices: PerpPrice[];
+  stream: StreamStatus;
+}
+
+export interface Candle {
+  at: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export function getVenues(): Promise<Venue[]> {
+  return getJson<Venue[]>("/api/venues");
+}
+
+export function getPerpsDesk(): Promise<PerpsDesk> {
+  return getJson<PerpsDesk>("/api/perps");
+}
+
+export function getPerpCandles(symbol: string, resolution: string, days: number): Promise<Candle[]> {
+  return getJson<Candle[]>(
+    `/api/perps/candles/${encodeURIComponent(symbol)}?resolution=${resolution}&days=${days}`,
+  );
+}
+
+/* -------------------------------------------------------------------------
  * Alerts
  *
  * Raised by the backend, not here. The engine used to run in this tab, which

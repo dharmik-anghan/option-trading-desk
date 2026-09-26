@@ -70,7 +70,12 @@ def parse_tick(payload: dict[str, Any]) -> Tick | None:
         if isinstance(event_ms, (int, float))
         else datetime.now(UTC)
     )
-    return Tick(symbol=str(symbol), price=price, at=at)
+    change = payload.get("P")
+    try:
+        change_pct = float(change) if change is not None else None
+    except (TypeError, ValueError):
+        change_pct = None
+    return Tick(symbol=str(symbol), price=price, at=at, change_pct=change_pct)
 
 
 class SharkStream:

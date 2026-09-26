@@ -1,6 +1,14 @@
 import { UNDERLYINGS } from "../api";
-import type { CalendarEvent, Health, MarketContext, PortfolioResponse } from "../api";
+import type {
+  CalendarEvent,
+  Health,
+  MarketContext,
+  PerpsDesk,
+  PortfolioResponse,
+  Venue,
+} from "../api";
 import { ContextStrip } from "./ContextStrip";
+import { VenueSwitch } from "./VenueSwitch";
 import { dayIST, dir, num, pct, signed } from "../format";
 
 interface Props {
@@ -22,6 +30,12 @@ interface Props {
   theme: "dark" | "light";
   onTheme: () => void;
   context: MarketContext | null;
+  venues: readonly Venue[];
+  venueId: string;
+  onVenue: (id: string) => void;
+  /** Set only on the perpetuals desk, whose headline is a different shape: no
+      booked P&L to read, and prices in a different currency from the account. */
+  perps: PerpsDesk | null;
 }
 
 export function Toolbar({
@@ -40,6 +54,10 @@ export function Toolbar({
   theme,
   onTheme,
   context,
+  venues,
+  venueId,
+  onVenue,
+  perps,
 }: Props) {
   const name = UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol;
   const net = portfolio?.total_pnl ?? null;
@@ -66,7 +84,10 @@ export function Toolbar({
   return (
     <header className="topbar">
       <div className="tb">
-      <div className="brand">Option Desk</div>
+      {/* First thing in the bar, because it reframes everything to the right of
+          it: the instruments, the panels, and the currency the numbers are in. */}
+      <VenueSwitch venues={venues} selected={venueId} onSelect={onVenue} />
+      <div className="brand">{perps ? perps.name : "Option Desk"}</div>
 
       <div className="tbk spot">
         <small>{name} spot</small>

@@ -1282,3 +1282,172 @@ a.nitem:hover .nhead {
 .empty.warnish {
   color: var(--mkt);
 }
+
+/* ===========================================================================
+   The perpetuals desk
+   =========================================================================== */
+
+/* The chart takes the whole middle column: with no chain and no baskets there is
+   nothing to share it with, and a price chart is the one thing on this desk that
+   rewards the space. */
+.a-chart {
+  grid-area: baskets / baskets / chain / chain;
+}
+.a-watch {
+  min-height: 0;
+}
+
+/* ---------- venue switch ----------
+   Two words in the top-left corner. Bordered as one control rather than two
+   buttons, because it is one choice with two positions. */
+.venuesw {
+  display: flex;
+  align-self: center;
+  margin-right: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.venuesw button {
+  font: inherit;
+  font-family: var(--u);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: transparent;
+  border: 0;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.venuesw button + button {
+  border-left: 1px solid var(--line);
+}
+.venuesw button:hover {
+  color: var(--fg);
+}
+/* The selected desk uses the selection hue, the same one a chosen row and a
+   picked strike use. It is a choice of yours, not a market fact. */
+.venuesw button.on {
+  background: var(--you);
+  color: var(--you-fg);
+}
+.venuesw button:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: -2px;
+}
+
+/* ---------- instrument rail ---------- */
+.a-watch tr {
+  cursor: pointer;
+}
+.a-watch tr.sel td {
+  background: var(--selbg);
+}
+.a-watch tr.sel td.l {
+  box-shadow: inset 3px 0 0 var(--you);
+}
+.a-watch .wname {
+  font-family: var(--n);
+  font-weight: 500;
+}
+.a-watch .wsym {
+  font-family: var(--u);
+  font-size: 10.5px;
+  margin-left: 6px;
+  letter-spacing: 0.02em;
+}
+.a-watch .wpx,
+.a-watch .wchg {
+  text-align: right;
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.a-watch .wpx {
+  font-weight: 600;
+}
+/* A price with no recent tick behind it is not a live price, and on a desk that
+   runs overnight that is the failure worth seeing. */
+.a-watch .wstale {
+  color: var(--mkt);
+  margin-left: 4px;
+  font-weight: 700;
+}
+
+/* ---------- candles ---------- */
+.chartpb {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 4px 2px 0;
+}
+.candles {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.cgrid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.caxis {
+  fill: var(--dim);
+  font-family: var(--n);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+/* Direction reads with the same two hues as P&L: up and down mean the same
+   thing to a reader here as they do on a position. */
+.candles g.up .cbody,
+.candles g.up .cwick {
+  fill: var(--up);
+  stroke: var(--up);
+}
+.candles g.dn .cbody,
+.candles g.dn .cwick {
+  fill: var(--dn);
+  stroke: var(--dn);
+}
+.cwick {
+  stroke-width: 1;
+}
+/* The live price, which is the only line here that moves between fetches. */
+.clast {
+  stroke: var(--you);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.clastbg {
+  fill: var(--you);
+}
+.clasttext {
+  fill: var(--you-fg);
+  font-family: var(--n);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chartfoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px 6px;
+  font-family: var(--u);
+  font-size: 10.5px;
+  border-top: 1px solid var(--grid);
+}
+/* A stream that has stopped means every price on screen is a memory. */
+.streamdown {
+  color: var(--dn);
+}
+.frames {
+  display: flex;
+  gap: 3px;
+}
+.frames .xbtn.on {
+  background: var(--you);
+  color: var(--you-fg);
+  border-color: var(--you);
+}

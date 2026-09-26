@@ -146,3 +146,8 @@ class Tick(BaseModel):
     price: float
     #: When the venue says it happened, not when we received it.
     at: datetime
+    #: The venue's own 24-hour change, as a percentage. Taken rather than derived:
+    #: on a market with no close there is no "yesterday" to compare against, and
+    #: the figure the venue publishes is the one its users are quoting at each
+    #: other. None when the frame does not carry it.
+    change_pct: float | None = None

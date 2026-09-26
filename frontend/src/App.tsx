@@ -21,6 +21,8 @@ import { PositionsRail } from "./components/PositionsRail";
 import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
+import { PerpsChart } from "./components/PerpsChart";
+import { PerpsWatch } from "./components/PerpsWatch";
 import {
   UNDERLYINGS,
   addWatch,
@@ -28,6 +30,8 @@ import {
   clearAlerts,
   deleteWatch,
   getAlerts,
+  getPerpsDesk,
+  getVenues,
   saveLimits,
   setWatchEnabled,
 } from "./api";
@@ -51,6 +55,9 @@ const NEWS_MS = 120000;
 // The backend judges about once a minute, so polling faster only repeats an
 // answer. Slower than that and a fired alert sits unseen on screen.
 const ALERTS_MS = 20000;
+// Faster than the rest: this one reads prices the stream already delivered, so a
+// poll costs the backend a dictionary lookup rather than a venue request.
+const PERPS_MS = 2000;
 
 /** Shown only until the first /api/alerts answer lands, so the threshold inputs
     have numbers rather than blanks. The backend's stored values are the real
@@ -94,6 +101,25 @@ export default function App() {
   const [paused, setPaused] = useState(false);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [basketNonce, setBasketNonce] = useState(0);
+  // Which desk is on screen. Remembered, because it is the frame everything else
+  // is read in and having it reset on reload is a small daily annoyance.
+  const [venueId, setVenueId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("optiondesk-venue") ?? "fyers";
+    } catch {
+      return "fyers";
+    }
+  });
+  const [perpSymbol, setPerpSymbol] = useState("BTCUSDT");
+  const onPerps = venueId !== "fyers";
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("optiondesk-venue", venueId);
+    } catch {
+      // forgetting which desk was open is not worth failing over
+    }
+  }, [venueId]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -105,8 +131,21 @@ export default function App() {
   }, [theme]);
 
   const health = useLive(getHealth, HEALTH_MS, [], paused, 0);
+  const venues = useLive(getVenues, 0, [], paused, 50);
   const portfolio = useLive(getPortfolio, PORTFOLIO_MS, [], paused, 150);
-  const quotes = useLive(() => getQuotes(WATCHLIST), QUOTES_MS, [], paused, 600);
+  // The options polls stop while the perpetuals desk is open, and vice versa.
+  // Two desks' worth of requests for one desk on screen is how a rate limit gets
+  // spent on panels nobody is looking at.
+  const quotes = useLive(
+    () => getQuotes(WATCHLIST),
+    QUOTES_MS,
+    [],
+    paused || onPerps,
+    600,
+  );
+  // Cheap: it reads the price hub in memory rather than calling the venue, which
+  // is the point of the stream.
+  const perps = useLive(getPerpsDesk, PERPS_MS, [], paused || !onPerps, 100);
   // no request at all while the chain is hidden
   const chain = useLive(
     () => getOptionChain(symbol, depth, expiry),
@@ -115,11 +154,23 @@ export default function App() {
     paused || !chainOpen,
     1050,
   );
-  const baskets = useLive(() => getBaskets(true), BASKETS_MS, [basketNonce], paused, 300);
-  const context = useLive(() => getMarketContext(symbol), CONTEXT_MS, [symbol], paused, 850);
+  const baskets = useLive(() => getBaskets(true), BASKETS_MS, [basketNonce], paused || onPerps, 300);
+  const context = useLive(
+    () => getMarketContext(symbol),
+    CONTEXT_MS,
+    [symbol],
+    paused || onPerps,
+    850,
+  );
   const news = useLive(() => getNews(40), NEWS_MS, [], paused, 1900);
   const events = useLive(() => getEvents(45, "HM"), EVENTS_MS, [], paused, 2400);
-  const history = useLive(() => getPortfolioHistory(7), BASKETS_MS, [basketNonce], paused, 1500);
+  const history = useLive(
+    () => getPortfolioHistory(7),
+    BASKETS_MS,
+    [basketNonce],
+    paused || onPerps,
+    1500,
+  );
 
   const now = useNow(!paused);
   const lastAt = useMemo(
@@ -251,20 +302,38 @@ export default function App() {
         theme={theme}
         onTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         context={context.data}
+        venues={venues.data ?? []}
+        venueId={venueId}
+        onVenue={setVenueId}
+        perps={onPerps ? (perps.data ?? null) : null}
       />
 
       <div id="left">
-        <MarketWatch
-          symbol={symbol}
-          onSymbol={pickSymbol}
-          quotes={quotes.data}
-          error={blockingOnly(quotes.error)}
-        />
-        <PositionsRail
-          portfolio={portfolio.data}
-          portfolioError={blockingOnly(portfolio.error)}
-          history={history.data}
-        />
+        {onPerps ? (
+          <PerpsWatch
+            instruments={perps.data?.instruments ?? []}
+            prices={perps.data?.prices ?? []}
+            selected={perpSymbol}
+            onSelect={setPerpSymbol}
+            quoteAsset={perps.data?.quote_currency ?? "USDT"}
+          />
+        ) : (
+          <MarketWatch
+            symbol={symbol}
+            onSymbol={pickSymbol}
+            quotes={quotes.data}
+            error={blockingOnly(quotes.error)}
+          />
+        )}
+        {!onPerps && (
+          <PositionsRail
+            portfolio={portfolio.data}
+            portfolioError={blockingOnly(portfolio.error)}
+            history={history.data}
+          />
+        )}
+        {/* The calendar is shared: a release moves an index and a gold
+            perpetual alike, so both desks read one feed. */}
         <NewsPanel news={news.data} events={events.data} expiryDays={expiryDays} />
       </div>
 
@@ -273,7 +342,11 @@ export default function App() {
         activeCount={alerts.data?.active.length ?? 0}
         limits={alerts.data?.limits ?? FALLBACK_LIMITS}
         watches={alerts.data?.watches ?? []}
-        symbols={UNDERLYINGS}
+        symbols={
+          onPerps
+            ? (perps.data?.instruments ?? []).map((i) => ({ id: i.symbol, name: i.name }))
+            : UNDERLYINGS
+        }
         telegram={alerts.data?.watcher.telegram ?? false}
         watching={alerts.data?.watcher.running ?? false}
         trouble={alerts.data?.watcher.last_error ?? null}
@@ -284,30 +357,40 @@ export default function App() {
         onDeleteWatch={onDeleteWatch}
       />
 
-      <OptionChainPanel
-        chain={chain.data}
-        error={blockingOnly(chain.error)}
-        loading={chain.loading}
-        view={view}
-        onView={setView}
-        positions={portfolio.data?.positions ?? []}
-        open={chainOpen}
-        onOpen={setChainOpen}
-        expiry={expiry}
-        onExpiry={setExpiry}
-        depth={depth}
-        onDepth={setDepth}
-      />
+      {onPerps ? (
+        <PerpsChart
+          desk={perps.data}
+          selected={perpSymbol}
+          last={perps.data?.prices.find((p) => p.symbol === perpSymbol)?.price ?? null}
+        />
+      ) : (
+        <OptionChainPanel
+          chain={chain.data}
+          error={blockingOnly(chain.error)}
+          loading={chain.loading}
+          view={view}
+          onView={setView}
+          positions={portfolio.data?.positions ?? []}
+          open={chainOpen}
+          onOpen={setChainOpen}
+          expiry={expiry}
+          onExpiry={setExpiry}
+          depth={depth}
+          onDepth={setDepth}
+        />
+      )}
 
-      <BasketsPanel
-        baskets={baskets.data}
-        error={blockingOnly(baskets.error)}
-        loading={baskets.loading}
-        positions={portfolio.data?.positions ?? []}
-        symbol={symbol}
-        quotes={quotes.data}
-        onChanged={onBasketChanged}
-      />
+      {!onPerps && (
+        <BasketsPanel
+          baskets={baskets.data}
+          error={blockingOnly(baskets.error)}
+          loading={baskets.loading}
+          positions={portfolio.data?.positions ?? []}
+          symbol={symbol}
+          quotes={quotes.data}
+          onChanged={onBasketChanged}
+        />
+      )}
 
     </div>
   );

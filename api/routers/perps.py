@@ -48,6 +48,9 @@ class PriceResponse(BaseModel):
     #: Seconds since this price arrived, by our clock, so a dead stream shows as
     #: a stale price rather than a current one.
     age_seconds: float | None
+    #: The venue's own 24-hour change, as a percentage. Its figure, not ours: a
+    #: market with no close has no yesterday to measure against.
+    change_pct: float | None
 
 
 class StreamStatus(BaseModel):
@@ -105,14 +108,17 @@ def desk(request: Request) -> DeskResponse:
         )
         for i in for_venue(VENUE_ID)
     ]
-    prices = [
-        PriceResponse(
-            symbol=i.symbol,
-            price=hub.price(i.symbol) if hub is not None else None,
-            age_seconds=hub.age_seconds(i.symbol) if hub is not None else None,
+    prices = []
+    for i in for_venue(VENUE_ID):
+        tick = hub.tick(i.symbol) if hub is not None else None
+        prices.append(
+            PriceResponse(
+                symbol=i.symbol,
+                price=tick.price if tick is not None else None,
+                age_seconds=hub.age_seconds(i.symbol) if hub is not None else None,
+                change_pct=tick.change_pct if tick is not None else None,
+            )
         )
-        for i in for_venue(VENUE_ID)
-    ]
     return DeskResponse(
         venue=spec.id,
         name=spec.name,
