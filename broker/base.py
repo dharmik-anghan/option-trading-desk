@@ -125,6 +125,17 @@ class PerpetualsData(Protocol):
         """Open positions, with their leverage, margin and liquidation price."""
         ...
 
+    def set_leverage(self, symbol: str, leverage: float) -> None:
+        """Set the standing leverage for one contract.
+
+        Separate from placing because the venue makes it separate: its order
+        endpoint has no leverage field and applies whatever the symbol was last
+        configured with. An order placed without setting this first runs at
+        whatever the account happens to hold, which is not what the person who
+        chose a number meant.
+        """
+        ...
+
     def set_protection(
         self,
         position_id: str,

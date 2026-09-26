@@ -126,6 +126,9 @@ class Stub:
         #: Orders this stub was asked to send. Nothing leaves the process.
         self.orders: list[BrokerOrderRequest] = []
         self.refuse_order: str | None = None
+        #: (symbol, leverage) pairs this stub was asked to configure.
+        self.leverage_set: list[tuple[str, float]] = []
+        self.refuse_leverage: str | None = None
 
     def get_contracts(self) -> dict[str, ContractSpec]:
         """The real venue's published limits, copied once into SPECS above."""
@@ -145,6 +148,14 @@ class Stub:
         if self._fail:
             raise BrokerError("Shark: signature rejected")
         return [self._position] if self._position is not None else []
+
+    def set_leverage(self, symbol: str, leverage: float) -> None:
+        """Recorded, and required by the protocol - so a stub that omits it stops
+        satisfying PerpetualsData, which is how the order path's new step gets
+        noticed here rather than in production."""
+        if self.refuse_leverage is not None:
+            raise BrokerError(self.refuse_leverage)
+        self.leverage_set.append((symbol, leverage))
 
     def set_protection(
         self,
@@ -370,6 +381,39 @@ class TestPlacingAnOrder:
         # The notional cap cannot be applied without one, and an uncapped market
         # order is the thing the caps exist to prevent.
         assert client.post("/api/perps/orders", json=self._order()).status_code == 503
+
+    def test_leverage_is_set_before_the_order(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        # The venue's order endpoint has no leverage field and applies whatever the
+        # symbol was last configured with. Ours sent none, so an order placed at a
+        # chosen 10x actually ran at the account's standing 150x - the maximum -
+        # with liquidation 0.42% from entry.
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order(leverage=10))
+        finally:
+            app.state.tick_hub = None
+        assert stub_venue.leverage_set == [("BTCUSDT", 10.0)]
+        assert len(stub_venue.orders) == 1
+
+    def test_a_failed_leverage_change_abandons_the_order(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        # An order at 150x when 10x was asked for is worse than no order.
+        from api.app import app
+
+        stub_venue.refuse_leverage = "Leverage not allowed"
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order(leverage=10)).json()
+        finally:
+            app.state.tick_hub = None
+        assert body["sent"] is False
+        assert stub_venue.orders == [], "nothing may be placed at unknown leverage"
+        assert "Leverage not allowed" in body["outcome"]
 
     def test_a_sound_order_passes_every_check_and_is_sent(
         self, client: TestClient, stub_venue: Stub

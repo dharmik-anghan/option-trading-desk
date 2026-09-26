@@ -207,25 +207,33 @@ export function PerpsTicket({
               different fix. */}
           <p className={result.sent ? "sent" : "err"}>
             {result.sent
-              ? `Sent. Venue reference ${result.venue_order_id ?? "—"}.`
+              ? `Sent at ${lev}×. Reference ${result.venue_order_id ?? "—"}.`
               : result.reasons.length
                 ? "Refused here. Nothing reached the venue."
                 : `The venue refused it. ${result.outcome}`}
           </p>
-          <table className="lim tight">
-            <tbody>
-              {result.checks.map((c) => (
-                <tr key={c.reason}>
-                  <td className="l">
-                    <span className={c.passed ? "ok" : "bad"}>{c.passed ? "✓" : "✕"}</span>
-                  </td>
-                  <td className="l">{c.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* Only what failed. A list of ticks saying a cap was not breached is
+              read once and skipped forever, and a screen people skip is one that
+              hides the line that matters. What passed is in the order log if it is
+              ever needed. */}
+          {result.reasons.length > 0 && (
+            <table className="lim tight">
+              <tbody>
+                {result.checks
+                  .filter((c) => !c.passed)
+                  .map((c) => (
+                    <tr key={c.reason}>
+                      <td className="l">
+                        <span className="bad">✕</span>
+                      </td>
+                      <td className="l">{c.reason}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
           <p className="dim" style={{ margin: 0, padding: "2px 9px 8px" }}>
-            Recorded as #{result.record_id}, whether or not it was sent.
+            Recorded as #{result.record_id}.
           </p>
         </div>
       )}

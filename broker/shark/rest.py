@@ -34,7 +34,7 @@ from broker.shark.parse import (
     parse_positions,
     parse_ticker,
 )
-from broker.shark.signing import headers, signed_body, signed_query
+from broker.shark.signing import headers, signed_body, signed_query, timestamp_ms
 
 log = logging.getLogger(__name__)
 
@@ -278,6 +278,32 @@ class SharkBroker:
 
         self._request("POST", "/v2/order/split-tp-sl", body=body, signed=True)
 
+    def set_leverage(self, symbol: str, leverage: float) -> None:
+        """Set the standing leverage for one contract.
+
+        This has to happen before the order, and that is the venue's design rather
+        than a convenience: `place-order` has no leverage field, and the docs are
+        explicit that an order executes with whatever was previously set for the
+        symbol. Ours sent none, so every order ran at whatever the account already
+        had - which on this account was 150x, the maximum, while the ticket showed
+        the 10x that had been chosen. A 0.42% move would have closed it.
+
+        A PUT, not a POST, and the timestamp goes in the body as a string in the
+        venue's own example - so it is sent as one.
+        """
+        if leverage <= 0:
+            raise BrokerError(f"{leverage} is not a leverage")
+        self._request(
+            "PUT",
+            "/v1/exchange/update/leverage",
+            body={
+                "leverage": leverage,
+                "contractName": symbol,
+                "timestamp": str(timestamp_ms()),
+            },
+            signed=True,
+        )
+
     def place_order(self, order: OrderRequest) -> OrderResult:
         """Place a real order, with real money, on leverage.
 
@@ -292,8 +318,9 @@ class SharkBroker:
         for the wrong reason: it would have kept failing until someone read the
         body. Only a real margin asset is passed through.
 
-        Callers must have run the risk checks first. Nothing here second-guesses
-        the quantity beyond what the venue itself rejects.
+        Callers must have run the risk checks first, and must have set the leverage
+        they want - see `set_leverage`. There is no leverage field here to pass it
+        in; the venue applies whatever the symbol was last configured with.
         """
         body: dict[str, Any] = {
             "placeType": "ORDER_FORM",

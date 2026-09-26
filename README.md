@@ -252,6 +252,11 @@ one situation reading as two is worse than a wrong figure.
 - **Calendars and diagonals get no payoff curve.** The maths assumes one
   expiry, and applying it across two reports the whole debit as a certain loss,
   so it is suppressed rather than shown wrong.
+- **Leverage is a standing per-symbol setting on Shark, not part of an order.**
+  Its order endpoint has no leverage field and applies whatever the symbol was last
+  configured with, so the desk sets it (`PUT /v1/exchange/update/leverage`) before
+  placing and abandons the order if that fails. Before this, an order chosen at 10x
+  ran at the account's standing 150x with liquidation 0.42% from entry.
 - **Shark signs its own rendering of the body, not the bytes you send.** It parses
   the JSON and re-serialises it with JavaScript before hashing, so the body has to
   be written the way JavaScript writes it: compact separators, and whole numbers

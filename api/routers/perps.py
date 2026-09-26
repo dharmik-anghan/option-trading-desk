@@ -468,6 +468,13 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
         venue_order_id: str | None = None
         if outcome.passed:
             try:
+                # Before the order, and the order is abandoned if it fails. The
+                # venue has no leverage field on an order and applies whatever the
+                # symbol was last set to, so skipping this does not mean "default
+                # leverage" - it means whatever the account happens to hold, which
+                # on this one was the maximum of 150x against a chosen 10x.
+                if isinstance(broker, PerpetualsData):
+                    broker.set_leverage(body.symbol, body.leverage)
                 result = broker.place_order(
                     BrokerOrderRequest(
                         symbol=body.symbol,
@@ -481,6 +488,9 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
                 venue_order_id = result.order_id
                 reason = result.message or "Accepted"
             except BrokerError as exc:
+                # Covers both steps. If the leverage did not take, nothing is
+                # placed: an order at 150x when 10x was asked for is worse than no
+                # order at all.
                 reason = f"Venue refused it: {exc.message}"
             note_outcome(
                 conn, record_id, sent=sent, reason=reason, venue_order_id=venue_order_id
