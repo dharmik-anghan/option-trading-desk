@@ -14,24 +14,66 @@ risk/        (position sizing, max loss, margin checks, portfolio greeks)
      |
 analytics/   (Black-Scholes, Greeks, IV, payoff diagrams)
      |
-broker/      (abstract Broker interface  ->  FyersBroker adapter)
+broker/      (capability protocols  ->  FyersBroker adapter)
      |
 storage/     (SQLite: trades, positions, option-chain snapshots)
 ```
 
-`strategies/`, `risk/`, and `execution/` depend on the abstract `Broker`
-protocol in `broker/base.py`, never on a concrete adapter like
+`strategies/`, `risk/`, and `execution/` depend on the abstract broker
+protocols in `broker/base.py`, never on a concrete adapter like
 `broker/fyers.py`. `execution/` (the `ExecutionManager`) is the only code
 that is allowed to call into `broker/` — strategies emit signals, they never
 place orders directly.
 
-## The `Broker` contract
+`venues/` sits beside all of it as a catalogue rather than a layer: it
+describes what can be traded and where, and deliberately holds no credentials
+and does no I/O, so importing it is free.
 
-Defined once in `broker/base.py` as a `Protocol`. Every adapter (starting
-with `FyersBroker`) must implement it in full, and contract tests in
+## The broker contract, split by capability
+
+`broker/base.py` defines several `Protocol`s rather than one, because venues
+are not the same shape. An option chain is meaningless on a perpetual futures
+venue; leverage, funding and a liquidation price are meaningless on an options
+one. One fat protocol forces every adapter to implement both and raise for
+half, which moves "can this venue do that?" out of the type system and into a
+runtime `NotImplementedError`.
+
+- `MarketData` — quotes and candles. Every venue has this.
+- `Trading` — funds, positions, placing orders.
+- `OptionsData` — option chains. Options venues only.
+- `Streaming` — pushed updates.
+- `Broker` — `MarketData` + `Trading`, the core any venue provides.
+- `OptionsBroker` — what the index options desk needs.
+
+Callers ask for the narrowest protocol they need, so a function that reads
+prices works on any venue and one that reads a chain will not typecheck
+against a venue that has none. Contract tests in
 `tests/broker/test_contract.py` run against *any* implementation — including
-a `FakeBroker` test double — so a new broker adapter is verified against the
-same behavior Fyers is, before it's ever wired into strategies.
+the `FakeBroker` test double — so a new adapter is verified against the same
+behaviour Fyers is before it is wired into anything.
+
+A venue declares its capabilities as data in `venues/registry.py` so the API
+can report them without building an adapter (which would need a credential).
+`tests/venues/test_registry.py` asserts each declaration against the protocols
+the adapter actually satisfies, so the claim cannot quietly rot into a lie.
+
+## The API is routers, not one module
+
+`api/app.py` is composition only: the app, middleware, the broker error
+handler, the routers, and the built frontend. Endpoints live in
+`api/routers/`, one module per area (`system`, `portfolio`, `market`, `feeds`,
+`strategies`, `orders`, `baskets`). Three modules are shared between them:
+`api/deps.py` (dependency annotations), `api/pricing.py` (marks and payoff
+curves, so two routers cannot come to disagree about what a position is
+worth), and `api/store.py` (opening the database, schema included).
+
+## Schema changes
+
+`storage/migrations.py` holds an append-only list of numbered steps, with the
+current version in SQLite's own `user_version` pragma. `init_schema` creates
+anything missing and then applies whatever is pending, so every entry point
+that opens the database gets a current schema. A step that raises leaves the
+version where it was, so it is retried rather than skipped.
 
 ## Why this shape
 
@@ -136,7 +178,7 @@ confirm-and-place flow (`scripts/place_strategy_order.py`,
 ```
 frontend/  (React + Vite + TS - fetches from / posts to the API below)
      |
-api/app.py  (FastAPI - GET for data, POST /api/orders/place to place orders)
+api/        (FastAPI: app.py composes, routers/ holds the endpoints)
      |
 (same broker/analytics/risk/strategies/storage/execution stack as everything else)
 ```

@@ -1,0 +1,240 @@
+"""Open structures: recording them, pricing them, and taking them apart.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import replace
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, HTTPException
+
+from analytics.payoff import (
+    payoff_curve_points,
+)
+from api.deps import BrokerDep, DbPathDep
+from api.pricing import (
+    basket_live_curve,
+)
+from api.schemas import (
+    BasketLegResponse,
+    BasketResponse,
+    CloseLegRequest,
+    CreateBasketRequest,
+    PayoffPoint,
+)
+from api.store import open_db
+from broker.models import OptionChain, OptionChainRow
+from broker.symbols import series_prefix
+from execution.basket_status import get_basket_payoff
+from storage.basket_repo import Basket, BasketLeg, NewBasketLeg, create_basket, get_basket
+from storage.basket_repo import close_leg as repo_close_leg
+from storage.basket_repo import delete_basket as repo_delete_basket
+from storage.basket_repo import delete_leg as repo_delete_leg
+from storage.basket_repo import list_baskets as repo_list_baskets
+
+router = APIRouter()
+
+
+def _spans_expiries(basket: Basket) -> bool:
+    """Whether the open legs sit in more than one expiry.
+
+    Read from the symbols rather than asked of the broker, so it holds even
+    without a live chain. A leg whose symbol cannot be read is ignored: better
+    to treat an unrecognised shape as single-expiry, which is the common case,
+    than to blank a payoff over a parsing miss.
+    """
+    prefixes = {
+        prefix
+        for leg in basket.legs
+        if leg.is_open
+        for prefix in [series_prefix(leg.symbol, leg.strike)]
+        if prefix is not None
+    }
+    return len(prefixes) > 1
+
+def _leg_response(leg: BasketLeg, row: OptionChainRow | None) -> BasketLegResponse:
+    """One basket leg, with its live figures when a chain row was available."""
+    greeks = row.greeks if row is not None else None
+    return BasketLegResponse(
+        id=leg.id,
+        symbol=leg.symbol,
+        option_type=leg.option_type,
+        strike=leg.strike,
+        side=leg.side,
+        quantity=leg.quantity,
+        entry_price=leg.entry_price,
+        entry_at=leg.entry_at.isoformat(),
+        exit_price=leg.exit_price,
+        exit_at=leg.exit_at.isoformat() if leg.exit_at else None,
+        is_open=leg.is_open,
+        ltp=row.ltp if row is not None else None,
+        delta=greeks.delta if greeks is not None else None,
+        gamma=greeks.gamma if greeks is not None else None,
+        theta=greeks.theta if greeks is not None else None,
+        vega=greeks.vega if greeks is not None else None,
+        iv=greeks.iv if greeks is not None else None,
+        ltp_change=row.ltp_change if row is not None else None,
+        oi_change=row.oi_change if row is not None else None,
+    )
+
+def _basket_to_response(
+    basket: Basket,
+    live: tuple[list[PayoffPoint], float | None, str | None] = ([], None, None),
+    rows: dict[str, OptionChainRow] | None = None,
+    spot: float | None = None,
+) -> BasketResponse:
+    payoff = get_basket_payoff(basket)
+    today, days, expiry_date = live
+    rows = rows or {}
+    spans_expiries = _spans_expiries(basket)
+    if spans_expiries:
+        # Everything below is derived from intrinsic value at a single expiry.
+        # For a calendar that is not merely imprecise, it is wrong: the far leg
+        # still has months of time value the model prices at zero, so the whole
+        # net debit is reported as a certain loss. Better to show nothing.
+        payoff = replace(payoff, max_profit=0.0, max_loss=0.0, breakevens=[], legs=[])
+        today = []
+    return BasketResponse(
+        id=basket.id,
+        name=basket.name,
+        strategy=basket.strategy,
+        underlying_symbol=basket.underlying_symbol,
+        created_at=basket.created_at.isoformat(),
+        stop_loss=basket.stop_loss,
+        legs=[_leg_response(leg, rows.get(leg.symbol)) for leg in basket.legs],
+        max_profit=None if math.isinf(payoff.max_profit) else payoff.max_profit,
+        max_loss=None if math.isinf(payoff.max_loss) else payoff.max_loss,
+        breakevens=payoff.breakevens,
+        payoff_curve=[
+            PayoffPoint(spot=x, payoff=value) for x, value in payoff_curve_points(payoff, spot)
+        ],
+        payoff_curve_today=today,
+        days_to_expiry=days,
+        expiry_date=expiry_date,
+        single_expiry=not spans_expiries,
+    )
+
+@router.post("/api/baskets", response_model=BasketResponse)
+def create_basket_endpoint(request: CreateBasketRequest, db_path: DbPathDep) -> BasketResponse:
+    conn = open_db(db_path)
+    basket_id = create_basket(
+        conn,
+        name=request.name,
+        strategy=request.strategy,
+        underlying_symbol=request.underlying_symbol,
+        legs=[
+            NewBasketLeg(
+                symbol=leg.symbol,
+                option_type=leg.option_type,
+                strike=leg.strike,
+                side=leg.side,
+                quantity=leg.quantity,
+                entry_price=leg.entry_price,
+            )
+            for leg in request.legs
+        ],
+        created_at=datetime.now(UTC),
+        stop_loss=request.stop_loss,
+    )
+    basket = get_basket(conn, basket_id)
+    conn.close()
+    assert basket is not None
+    return _basket_to_response(basket)
+
+@router.get("/api/baskets", response_model=list[BasketResponse])
+def list_baskets_endpoint(
+    db_path: DbPathDep, broker: BrokerDep, live: bool = False
+) -> list[BasketResponse]:
+    """`live=true` also prices each basket where it stands now, not just at
+    expiry. That costs broker calls - one chain per distinct expiry held - so
+    it is opt-in rather than the default."""
+    conn = open_db(db_path)
+    baskets = repo_list_baskets(conn)
+    conn.close()
+    if not live:
+        return [_basket_to_response(b) for b in baskets]
+    # shared across baskets, so two structures on one expiry cost one request
+    chains: dict[tuple[str, str], OptionChain] = {}
+    out: list[BasketResponse] = []
+    for basket in baskets:
+        payoff = get_basket_payoff(basket)
+        try:
+            valued = basket_live_curve(basket, payoff, broker, chains)
+        except Exception:  # noqa: BLE001 - a live extra must never 500 the list
+            valued = ([], None, None)
+        out.append(
+            _basket_to_response(
+                basket,
+                valued,
+                _rows_for_basket(basket, chains),
+                _spot_for(basket, chains),
+            )
+        )
+    return out
+
+def _spot_for(
+    basket: Basket, chains: dict[tuple[str, str], OptionChain]
+) -> float | None:
+    """The underlying's price, from whichever chain was fetched for it."""
+    for (underlying, _token), chain in chains.items():
+        if underlying == basket.underlying_symbol:
+            return chain.underlying_ltp
+    return None
+
+def _rows_for_basket(
+    basket: Basket, chains: dict[tuple[str, str], OptionChain]
+) -> dict[str, OptionChainRow]:
+    """Chain rows keyed by contract symbol, from whichever chains were fetched."""
+    rows: dict[str, OptionChainRow] = {}
+    wanted = {leg.symbol for leg in basket.legs}
+    for (underlying, _token), chain in chains.items():
+        if underlying != basket.underlying_symbol:
+            continue
+        for row in chain.rows:
+            if row.symbol in wanted:
+                rows[row.symbol] = row
+    return rows
+
+@router.get("/api/baskets/{basket_id}", response_model=BasketResponse)
+def get_basket_endpoint(basket_id: int, db_path: DbPathDep) -> BasketResponse:
+    conn = open_db(db_path)
+    basket = get_basket(conn, basket_id)
+    conn.close()
+    if basket is None:
+        raise HTTPException(status_code=404, detail=f"Basket {basket_id} not found")
+    return _basket_to_response(basket)
+
+@router.post("/api/baskets/{basket_id}/legs/{leg_id}/close", response_model=BasketResponse)
+def close_leg_endpoint(
+    basket_id: int, leg_id: int, request: CloseLegRequest, db_path: DbPathDep
+) -> BasketResponse:
+    conn = open_db(db_path)
+    repo_close_leg(conn, leg_id, exit_price=request.exit_price, exit_at=datetime.now(UTC))
+    basket = get_basket(conn, basket_id)
+    conn.close()
+    if basket is None:
+        raise HTTPException(status_code=404, detail=f"Basket {basket_id} not found")
+    return _basket_to_response(basket)
+
+@router.delete("/api/baskets/{basket_id}", status_code=204)
+def delete_basket_endpoint(basket_id: int, db_path: DbPathDep) -> None:
+    """Forget a grouping. Does not touch the broker - nothing is squared off."""
+    conn = open_db(db_path)
+    existed = repo_delete_basket(conn, basket_id)
+    conn.close()
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"Basket {basket_id} not found")
+
+@router.delete("/api/baskets/{basket_id}/legs/{leg_id}", status_code=204)
+def delete_leg_endpoint(basket_id: int, leg_id: int, db_path: DbPathDep) -> None:
+    """Take a leg out of a basket it never belonged to.
+
+    Closing a leg that was genuinely exited is a different thing - that is
+    POST .../close, which keeps the leg and its exit price on the basket.
+    """
+    conn = open_db(db_path)
+    existed = repo_delete_leg(conn, basket_id, leg_id)
+    conn.close()
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"Leg {leg_id} not found in basket {basket_id}")

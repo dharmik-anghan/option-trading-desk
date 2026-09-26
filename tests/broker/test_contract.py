@@ -17,24 +17,24 @@ from datetime import date
 
 import pytest
 
-from broker.base import Broker
+from broker.base import OptionsBroker
 from broker.fake import FakeBroker
 from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
 
 
 @pytest.fixture(params=[FakeBroker])
-def broker_under_test(request: pytest.FixtureRequest) -> Broker:
+def broker_under_test(request: pytest.FixtureRequest) -> OptionsBroker:
     return request.param()  # type: ignore[no-any-return]
 
 
-def test_get_quote_returns_quote_per_symbol(broker_under_test: Broker) -> None:
+def test_get_quote_returns_quote_per_symbol(broker_under_test: OptionsBroker) -> None:
     result = broker_under_test.get_quote(["NSE:NIFTY50-INDEX"])
 
     assert set(result.keys()) == {"NSE:NIFTY50-INDEX"}
     assert isinstance(result["NSE:NIFTY50-INDEX"], Quote)
 
 
-def test_get_funds_returns_funds(broker_under_test: Broker) -> None:
+def test_get_funds_returns_funds(broker_under_test: OptionsBroker) -> None:
     funds = broker_under_test.get_funds()
 
     assert isinstance(funds, Funds)
@@ -42,7 +42,7 @@ def test_get_funds_returns_funds(broker_under_test: Broker) -> None:
 
 
 def test_get_option_chain_returns_rows_for_both_option_types(
-    broker_under_test: Broker,
+    broker_under_test: OptionsBroker,
 ) -> None:
     chain = broker_under_test.get_option_chain("NSE:NIFTY50-INDEX", strike_count=2)
 
@@ -54,7 +54,7 @@ def test_get_option_chain_returns_rows_for_both_option_types(
 
 
 def test_get_history_returns_candles_in_chronological_order(
-    broker_under_test: Broker,
+    broker_under_test: OptionsBroker,
 ) -> None:
     candles = broker_under_test.get_history(
         "NSE:NIFTY50-INDEX", "D", date(2026, 1, 1), date(2026, 1, 5)
@@ -65,7 +65,7 @@ def test_get_history_returns_candles_in_chronological_order(
     assert timestamps == sorted(timestamps)
 
 
-def test_subscribe_ticks_invokes_callback(broker_under_test: Broker) -> None:
+def test_subscribe_ticks_invokes_callback(broker_under_test: OptionsBroker) -> None:
     received: list[Quote] = []
 
     broker_under_test.subscribe_ticks(["NSE:NIFTY50-INDEX"], received.append)
@@ -74,13 +74,13 @@ def test_subscribe_ticks_invokes_callback(broker_under_test: Broker) -> None:
     assert received[0].symbol == "NSE:NIFTY50-INDEX"
 
 
-def test_get_positions_returns_positions(broker_under_test: Broker) -> None:
+def test_get_positions_returns_positions(broker_under_test: OptionsBroker) -> None:
     positions = broker_under_test.get_positions()
 
     assert all(isinstance(p, Position) for p in positions)
 
 
-def test_place_order_returns_order_result(broker_under_test: Broker) -> None:
+def test_place_order_returns_order_result(broker_under_test: OptionsBroker) -> None:
     order = OrderRequest(symbol="NSE:NIFTY50-INDEX", quantity=1, side="BUY")
 
     result = broker_under_test.place_order(order)

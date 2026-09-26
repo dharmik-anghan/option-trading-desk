@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from storage.migrations import migrate
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS option_chain_snapshot (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,5 +96,13 @@ def connect(path: str) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
+    """Create anything missing, then apply any schema changes still pending.
+
+    Both halves, because `IF NOT EXISTS` brings a new database up to date but
+    cannot alter one that already exists - see `storage/migrations.py`. Running
+    them together means every entry point that opens the database gets a
+    current schema without having to remember a second call.
+    """
     conn.executescript(SCHEMA)
     conn.commit()
+    migrate(conn)

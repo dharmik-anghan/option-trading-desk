@@ -111,7 +111,8 @@ Restoring is a file copy: stop the desk, replace `data/trading.db`, start it.
 Dependencies point downward; nothing below knows about anything above it.
 
 ```
-api/         HTTP surface. Owns wire shapes, nothing else.
+api/         HTTP surface. app.py composes; routers/ holds the endpoints.
+venues/      What can be traded and where. No credentials, no I/O.
 feeds/       Economic calendar and news. Parsing kept apart from fetching.
 execution/   Portfolio and basket status.
 strategies/  Strike selection and structure construction.
@@ -121,8 +122,10 @@ storage/     SQLite persistence.
 broker/      The broker seam: one protocol, one adapter per broker.
 ```
 
-`broker/base.py` is the interface every adapter implements, so adding a second
-broker is a new file rather than a change everywhere. `broker/cache.py` sits in
+`broker/base.py` holds one protocol per capability - prices, trading, option
+chains, streaming - so an adapter implements what its venue actually does
+instead of raising for the rest, and adding a venue is a new file rather than
+a change everywhere. `broker/cache.py` sits in
 front of it and holds reads for a few seconds — without it, four panels polling
 together breach Fyers' ten-per-second limit and the desk silently goes stale.
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,42 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from api.dependencies import get_broker, get_db_path
+from api.dependencies import get_broker
 from broker.fake import FakeBroker
-from broker.models import Position
 from storage.db import connect, init_schema
 from storage.portfolio_repo import save_portfolio_snapshot
-
-
-@pytest.fixture
-def fake_broker() -> FakeBroker:
-    return FakeBroker(
-        underlying_ltp=100.0,
-        positions=[
-            Position(
-                symbol="X-100-CE",
-                net_quantity=-1,
-                average_price=5.0,
-                ltp=4.0,
-                unrealized_pnl=100.0,
-                product_type="MARGIN",
-            )
-        ],
-        realized_pnl=50.0,
-    )
-
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "test.db"
-
-
-@pytest.fixture
-def client(fake_broker: FakeBroker, db_path: Path) -> Iterator[TestClient]:
-    app.dependency_overrides[get_broker] = lambda: fake_broker
-    app.dependency_overrides[get_db_path] = lambda: db_path
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 def test_health(client: TestClient) -> None:
@@ -326,7 +293,8 @@ def test_close_leg_endpoint_empty_curve_when_fully_closed(client: TestClient) ->
 @pytest.fixture
 def market_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pretend the exchange is trading, whatever day the suite runs on."""
-    import api.app as app_module
+    # the snapshot clock and the session gate live in the portfolio router now
+    import api.routers.portfolio as app_module
 
     monkeypatch.setattr(app_module, "in_session", lambda *_a, **_k: True)
     app_module._last_snapshot = None
@@ -357,7 +325,8 @@ def test_nothing_is_recorded_while_the_exchange_is_shut(
 ) -> None:
     """Overnight, at weekends and on holidays the P&L cannot move, so a
     snapshot then is a duplicate of the close."""
-    import api.app as app_module
+    # the snapshot clock and the session gate live in the portfolio router now
+    import api.routers.portfolio as app_module
 
     monkeypatch.setattr(app_module, "in_session", lambda *_a, **_k: False)
     app_module._last_snapshot = None
@@ -373,7 +342,8 @@ def test_a_snapshot_failure_does_not_fail_the_request(
 ) -> None:
     import sqlite3
 
-    import api.app as app_module
+    # the snapshot clock and the session gate live in the portfolio router now
+    import api.routers.portfolio as app_module
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise sqlite3.OperationalError("disk is full")

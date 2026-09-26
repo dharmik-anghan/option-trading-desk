@@ -31,6 +31,13 @@ pythonpath = ["."]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# Two conftest.py files (tests/api, tests/strategies) are the same module name
+# to mypy unless it is told to derive package names from the directory layout.
+# The alternative is __init__.py files in every test directory, which changes
+# how pytest imports them for no benefit.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
 files = [
     "broker",
     "analytics",

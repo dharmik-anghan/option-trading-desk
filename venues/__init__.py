@@ -1,0 +1,27 @@
+"""What the desk can trade, and where.
+
+A venue is one place with one account, one set of instruments and one trading
+calendar. The desk started with exactly one, so "the broker" and "the market"
+were the same thing everywhere; this package is where that assumption is
+undone, before a second venue makes it expensive.
+
+Deliberately free of credentials and adapter construction: this package only
+describes venues. Building a broker for one is `api/dependencies.py`'s job, so
+that importing the catalogue never needs a key and never touches the network.
+"""
+
+from venues.calendar import Session, is_open
+from venues.models import AssetClass, Capability, VenueSpec
+from venues.registry import FYERS, VENUES, get, listed
+
+__all__ = [
+    "FYERS",
+    "VENUES",
+    "AssetClass",
+    "Capability",
+    "Session",
+    "VenueSpec",
+    "get",
+    "is_open",
+    "listed",
+]

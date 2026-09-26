@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, TypeVar
 
-from broker.base import Broker
+from broker.base import OptionsBroker
 from broker.errors import RateLimited
 from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
 
@@ -48,10 +48,10 @@ class _Entry:
     at: float
 
 
-class CachedBroker(Broker):
+class CachedBroker(OptionsBroker):
     """Wraps a broker, serving repeated reads from memory for a short while."""
 
-    def __init__(self, inner: Broker, *, now: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, inner: OptionsBroker, *, now: Callable[[], float] = time.monotonic) -> None:
         self._inner = inner
         self._now = now
         self._entries: dict[tuple[str, Any], _Entry] = {}
@@ -60,7 +60,7 @@ class CachedBroker(Broker):
         self._lock = threading.Lock()
         self._rate_limited_at: float | None = None
 
-    def rebind(self, inner: Broker) -> None:
+    def rebind(self, inner: OptionsBroker) -> None:
         """Point at a freshly built adapter, keeping what is already cached.
 
         The adapter is rebuilt per request so an expired token is refreshed;
