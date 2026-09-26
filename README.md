@@ -48,9 +48,13 @@ both, along with the margin the position will demand, rather than leaving them t
 be discovered by a rejection.
 
 The other three are caps on what this program may do by mistake, not opinions
-about a good trade: quantity, notional, and how far a new position would start
-from liquidation. A cap too tight costs a retyped order and a cap too loose costs
-whatever the bug was, so the defaults are small. Prices there arrive on a stream rather
+about a good trade. Notional is the one that matters: it is in money, so a single
+figure covers every instrument and it catches a fat finger - 0.002 typed as 2 is
+168,000 of notional and refused. A quantity cap is available and off, because a
+quantity cannot be compared across these contracts: 0.01 BTCUSDT is about 840 USDT
+where 0.01 CLUSDT is 94 cents, and a figure tight enough for Bitcoin blocked oil's
+smallest legal order. The third is how far a new position would start from
+liquidation. Prices there arrive on a stream rather
 than being polled: the venue allows 60 requests a minute against Fyers' ~200, and
 it pushes. Note that prices are quoted in USDT while the account margins in INR,
 so those two figures are deliberately labelled in different units.

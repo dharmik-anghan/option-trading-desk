@@ -433,15 +433,18 @@ class TestPlacingAnOrder:
         finally:
             app.state.tick_hub = None
 
-    def test_past_the_quantity_cap_is_refused_with_a_reason(self, client: TestClient) -> None:
+    def test_a_fat_finger_is_caught_by_the_notional_cap(self, client: TestClient) -> None:
+        # 0.002 typed as 2 is 168,000 of notional. Caught in money rather than in
+        # contracts, because a quantity cap cannot be compared across instruments
+        # worth 840 USDT and 94 cents apiece - one tight enough for Bitcoin blocks
+        # the smallest legal order in oil.
         from api.app import app
 
         app.state.tick_hub = self._priced()
         try:
-            body = client.post("/api/perps/orders", json=self._order(quantity=5)).json()
+            body = client.post("/api/perps/orders", json=self._order(quantity=2)).json()
             assert body["sent"] is False
-            assert body["reasons"], "a refusal must say why"
-            assert any("Quantity" in r for r in body["reasons"])
+            assert any("Notional" in r for r in body["reasons"]), body["reasons"]
         finally:
             app.state.tick_hub = None
 
@@ -498,13 +501,13 @@ class TestPlacingAnOrder:
         app.state.tick_hub = self._priced()
         try:
             client.post("/api/perps/orders", json=self._order())
-            client.post("/api/perps/orders", json=self._order(quantity=5))
+            client.post("/api/perps/orders", json=self._order(quantity=2))
         finally:
             app.state.tick_hub = None
         log = client.get("/api/perps/orders").json()
         assert len(log) == 2
         # newest first, and the refusal carries its reason
-        assert log[0]["quantity"] == 5
-        assert "Quantity" in log[0]["reason"]
+        assert log[0]["quantity"] == 2
+        assert "Notional" in log[0]["reason"]
         assert log[0]["sent"] is False
         assert log[1]["sent"] is True, "the sound one was sent"

@@ -34,10 +34,21 @@ class PerpLimits:
     loose is unbounded.
     """
 
-    #: Largest quantity in one order, in contracts.
-    max_quantity: float
     #: Largest notional in one order, quantity times price, in the quote asset.
+    #:
+    #: The cap that means something. It is in money, so one number applies to
+    #: every instrument, and it catches the mistake a quantity cap is meant to
+    #: catch - 0.002 typed as 2 is 168,000 of notional and refused here.
     max_notional: float
+    #: Largest quantity in one order, in contracts. Off by default, and it should
+    #: usually stay off.
+    #:
+    #: A quantity cannot be compared across these instruments: 0.01 BTCUSDT is
+    #: about 840 USDT while 0.01 CLUSDT is 94 cents, three orders of magnitude
+    #: apart. A single figure tight enough to be useful on Bitcoin blocks the
+    #: smallest legal order in oil, which is what happened - oil's minimum is 0.07
+    #: against a cap of 0.01, so the contract was untradeable. Zero means no cap.
+    max_quantity: float = 0.0
     #: An optional ceiling of your own, on top of the venue's per-contract
     #: maximum. Zero means "no ceiling of ours" - the venue's limit still applies,
     #: since it is the one that would reject the order.
@@ -45,8 +56,11 @@ class PerpLimits:
 
 
 def check_quantity(quantity: float, limit: float) -> RiskCheckResult:
+    """A cap in contracts, if one is set at all. See `PerpLimits.max_quantity`."""
     if quantity <= 0:
         return RiskCheckResult(False, f"Quantity {quantity} is not a size")
+    if limit <= 0:
+        return RiskCheckResult(True, "No quantity cap set; notional is the cap")
     if quantity > limit:
         return RiskCheckResult(
             False, f"Quantity {quantity:g} is past the {limit:g} cap for one order"

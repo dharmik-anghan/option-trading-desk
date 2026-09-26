@@ -48,7 +48,11 @@ class Settings(BaseSettings):
     # publishes and which differs sharply - 150x on BTCUSDT, 75x on gold, 50x on
     # oil. SHARK_MAX_LEVERAGE is an optional ceiling of your own on top of that;
     # zero means you are not imposing one.
-    shark_max_quantity: float = 0.01
+    # Notional is the cap that means something: it is in money, so one figure
+    # covers every instrument, and it catches a fat finger - 0.002 typed as 2 is
+    # 168,000 of notional. A quantity cap cannot be compared across contracts
+    # worth 840 USDT and 94 cents apiece, so it is off unless you set one.
+    shark_max_quantity: float = 0.0
     shark_max_notional: float = 2000.0
     shark_max_leverage: float = 0.0
 

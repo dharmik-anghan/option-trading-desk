@@ -18,12 +18,23 @@ from risk.perps import (
     check_quantity,
 )
 
-CAPS = PerpLimits(max_quantity=0.01, max_notional=2000.0, max_leverage=10.0)
+CAPS = PerpLimits(max_notional=2000.0, max_leverage=10.0, max_quantity=0.01)
 #: What the venue itself allows on BTCUSDT, for the checks that ask.
 VENUE_MAX = 150.0
 
 
 class TestQuantity:
+    def test_no_cap_set_means_no_cap(self) -> None:
+        # Off by default, and it should usually stay off: a quantity cannot be
+        # compared across instruments worth 840 USDT and 94 cents apiece. A cap of
+        # 0.01 - tight enough to be useful on Bitcoin - blocked oil's smallest
+        # legal order of 0.07, making the contract untradeable.
+        assert check_quantity(0.07, 0.0).passed
+
+    def test_a_size_is_still_a_size(self) -> None:
+        assert not check_quantity(0, 0.0).passed
+        assert not check_quantity(-1, 0.0).passed
+
     def test_within_the_cap_passes(self) -> None:
         assert check_quantity(0.005, 0.01).passed
 
