@@ -149,6 +149,8 @@ Dependencies point downward; nothing below knows about anything above it.
 ```
 api/         HTTP surface. app.py composes; routers/ holds the endpoints.
 alerting/    The alert engine: rules, edge triggering, the watcher loop.
+marketdata/  Historical bars, kept so a source is asked once. Venue candles
+             accumulate here; other sources add depth the venue lacks.
 streaming/   Live prices, held once and shared with whoever is listening.
 notify/      Getting an alert to someone who is not at the screen.
 venues/      What can be traded and where. No credentials, no I/O.
@@ -167,6 +169,27 @@ instead of raising for the rest, and adding a venue is a new file rather than
 a change everywhere. `broker/cache.py` sits in
 front of it and holds reads for a few seconds — without it, four panels polling
 together breach Fyers' ten-per-second limit and the desk silently goes stale.
+
+## Historical bars
+
+A venue serves a short window - Shark gives a few hundred candles - so what it sends
+is stored and the history accumulates from the venue itself: a few hundred today, a
+few hundred overlapping tomorrow, and after a month a month of the exact instrument
+a position is in. That is deliberate. The chart on a trading desk has an order ticket
+beside it, so it shows the venue's own candles and says so; Yahoo's gold is a dated
+futures contract quoted 0.8% away from Shark's perpetual, and Binance's Bitcoin is
+spot where Shark's carries funding.
+
+The other sources are for depth the venue does not have, and for context. Binance is
+the better one where it applies - a documented API, 1,200 weight a minute, a thousand
+bars a request - and Yahoo covers gold and oil, which Binance does not. Yahoo refuses
+after roughly ten requests in two minutes, so the store is what makes it usable at
+all, and its intraday windows are finite: a one-minute bar older than seven days
+cannot be fetched again at any price.
+
+Bars live in `data/bars.duckdb`, which is gitignored and rebuildable. DuckDB permits
+one writer, so a second copy of the app cannot open it - that is survivable by
+design, and a desk that cannot open the store asks the venue each time instead.
 
 ## Alerts
 

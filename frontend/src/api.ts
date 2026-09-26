@@ -681,8 +681,21 @@ export function getPerpsDesk(): Promise<PerpsDesk> {
   return getJson<PerpsDesk>("/api/perps");
 }
 
-export function getPerpCandles(symbol: string, resolution: string, days: number): Promise<Candle[]> {
-  return getJson<Candle[]>(
+export interface CandlesResponse {
+  /** Whose candles these are. On a chart with an order ticket beside it this is not
+      decoration: a price from a source you are not trading is the wrong price. */
+  source: string;
+  /** Why the series may be short or stale, when there is a reason worth saying. */
+  note: string;
+  candles: Candle[];
+}
+
+export function getPerpCandles(
+  symbol: string,
+  resolution: string,
+  days: number,
+): Promise<CandlesResponse> {
+  return getJson<CandlesResponse>(
     `/api/perps/candles/${encodeURIComponent(symbol)}?resolution=${resolution}&days=${days}`,
   );
 }

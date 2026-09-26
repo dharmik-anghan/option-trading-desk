@@ -51,7 +51,7 @@ export function PerpsChart({ desk, selected, last }: Props) {
     CANDLES_MS,
     [selected, frame.resolution, frame.days],
   );
-  const rows = candles.data ?? [];
+  const rows = candles.data?.candles ?? [];
 
   const instrument = desk?.instruments.find((i) => i.symbol === selected);
   const dp = instrument?.price_dp ?? 2;
@@ -83,6 +83,9 @@ export function PerpsChart({ desk, selected, last }: Props) {
         {candles.error && !rows.length && (
           <p className="err">Candles unavailable: {candles.error.message}</p>
         )}
+        {candles.data?.note && !candles.error && (
+          <p className="empty warnish">{candles.data.note}</p>
+        )}
         {!candles.error && !rows.length && candles.loading && (
           <p className="empty">Loading candles…</p>
         )}
@@ -97,8 +100,12 @@ export function PerpsChart({ desk, selected, last }: Props) {
       </div>
 
       <div className="chartfoot">
+        {/* Whose price this is. The ticket beside this chart places an order at
+            the venue, so a chart drawn from anywhere else would be the wrong
+            instrument - Yahoo's gold sits 0.8% from this one. */}
         <span className="dim">
           {rows.length} bars · {frame.label}
+          {candles.data?.source ? ` · ${candles.data.source}` : ""}
         </span>
         <span className="sp" />
         {desk && (

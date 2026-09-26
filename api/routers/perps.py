@@ -30,6 +30,7 @@ from broker.errors import BrokerError
 from broker.models import OrderRequest as BrokerOrderRequest
 from broker.models import Tick
 from broker.shark.models import ContractSpec
+from marketdata import BarService, Interval
 from risk.perps import check_perp_order
 from settings import load_settings
 from storage.perp_order_repo import note_outcome, recent_orders, record_order
@@ -77,6 +78,15 @@ class PriceResponse(BaseModel):
     #: The venue's own 24-hour change, as a percentage. Its figure, not ours: a
     #: market with no close has no yesterday to measure against.
     change_pct: float | None
+
+
+class CandlesResponse(BaseModel):
+    #: Whose candles these are. On a chart with an order ticket beside it, this is
+    #: not decoration: a price from a source you are not trading is the wrong price.
+    source: str
+    #: Why the series may be short or stale, when there is a reason worth saying.
+    note: str
+    candles: list[CandleResponse]
 
 
 class StreamStatus(BaseModel):
@@ -136,6 +146,11 @@ class DeskResponse(BaseModel):
     stream: StreamStatus
 
 
+#: Desk resolutions against the store's interval names.
+_INTERVAL_FOR = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "240": "4h",
+                 "D": "1d", "1D": "1d"}
+
+
 class CandleResponse(BaseModel):
     at: str
     open: float
@@ -143,6 +158,12 @@ class CandleResponse(BaseModel):
     low: float
     close: float
     volume: float
+
+
+def _bars(request: Request) -> BarService | None:
+    """The bar store's service, or None before the lifespan has built one."""
+    service = getattr(request.app.state, "bar_service", None)
+    return service if isinstance(service, BarService) else None
 
 
 def _hub(request: Request) -> TickHub | None:
@@ -262,36 +283,80 @@ def desk(request: Request) -> DeskResponse:
     )
 
 
-@router.get("/candles/{symbol}", response_model=list[CandleResponse])
-def candles(symbol: str, resolution: str = "60", days: int = 5) -> list[CandleResponse]:
-    """Candles for one instrument.
+@router.get("/candles/{symbol}", response_model=CandlesResponse)
+def candles(
+    request: Request, symbol: str, resolution: str = "60", days: int = 5
+) -> CandlesResponse:
+    """Candles for one instrument, from this venue, through the bar store.
 
-    Polled rather than streamed: a chart is redrawn on a timeframe change, not on
-    every tick, and the last candle is kept current from the tick stream on the
-    client side.
+    The venue's own candles, deliberately. This chart has an order ticket beside it,
+    so it has to show the instrument the order would be in - Yahoo's gold is a dated
+    contract quoted 0.8% away from the perpetual here, and Binance's Bitcoin is spot
+    where this one carries funding.
+
+    Read through the store, which does two things. The venue serves a short window,
+    so keeping what it sends accumulates a longer history of the exact instrument
+    traded - a few hundred bars today, a few hundred overlapping tomorrow. And a
+    chart redrawn on a timeframe change stops spending a 60-per-minute budget on
+    candles already on disk.
+
+    Polled rather than streamed: a bar does not move until it closes, and the live
+    price is drawn over the top from the tick stream.
     """
     if instrument(symbol) is None:
         raise HTTPException(status_code=404, detail=f"{symbol} is not on this desk")
     spec = get_venue(VENUE_ID)
     if not spec.can(Capability.HISTORY):
         raise HTTPException(status_code=501, detail="this venue serves no history")
-    broker = broker_for(spec)
-    today = date.today()
+
     try:
-        rows = broker.get_history(symbol, resolution, today - timedelta(days=days), today)
-    except BrokerError as exc:
-        raise HTTPException(status_code=502, detail=exc.message) from exc
-    return [
-        CandleResponse(
-            at=c.timestamp.isoformat(),
-            open=c.open,
-            high=c.high,
-            low=c.low,
-            close=c.close,
-            volume=c.volume,
+        interval = Interval(_INTERVAL_FOR.get(resolution, resolution))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{resolution} is not a bar size") from None
+
+    service = _bars(request)
+    if service is None:
+        # No store: fall back to asking the venue directly, so a desk without one
+        # still draws a chart.
+        broker = broker_for(spec)
+        try:
+            rows = broker.get_history(
+                symbol, resolution, date.today() - timedelta(days=days), date.today()
+            )
+        except BrokerError as exc:
+            raise HTTPException(status_code=502, detail=exc.message) from exc
+        return CandlesResponse(
+            source=VENUE_ID,
+            note="",
+            candles=[
+                CandleResponse(
+                    at=c.timestamp.isoformat(),
+                    open=c.open,
+                    high=c.high,
+                    low=c.low,
+                    close=c.close,
+                    volume=c.volume,
+                )
+                for c in rows
+            ],
         )
-        for c in rows
-    ]
+
+    result = service.bars(symbol, interval, days, source=VENUE_ID)
+    return CandlesResponse(
+        source=result.series.source,
+        note=result.note,
+        candles=[
+            CandleResponse(
+                at=b.ts.isoformat(),
+                open=b.open,
+                high=b.high,
+                low=b.low,
+                close=b.close,
+                volume=b.volume,
+            )
+            for b in result.bars
+        ],
+    )
 
 
 class ProtectionRequest(BaseModel):

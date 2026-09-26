@@ -1,4 +1,20 @@
-"""Bars, from the store when possible and the source when necessary.
+"""Bars, from the store when possible and a source when necessary.
+
+Two different jobs, and conflating them would be a real mistake.
+
+The bars you trade from are the venue's own. If a position is open on Shark then
+Shark's candles are the instrument that position is in - Yahoo's gold is a dated
+futures contract quoted 0.8% away from Shark's perpetual, and Binance's BTCUSDT is
+spot where Shark's carries funding and basis. A chart drawn from either, with an
+order ticket beside it, is a chart of something you are not trading.
+
+What the venue lacks is depth: Shark serves a few hundred bars. So its candles are
+stored as they are fetched, and the history accumulates from the venue itself -
+today's few hundred, tomorrow's few hundred overlapping, and after a month a month.
+That is the fix for short history, and it needs no other source at all.
+
+The other sources are for context and for seeding a history that does not exist yet,
+and anything drawn from them should say whose price it is.
 
 The rule: never ask a source for what is already held, and never ask it twice in
 quick succession. Yahoo answers 429 after about ten requests in two minutes, so a
@@ -72,8 +88,35 @@ class BarService:
         self._yahoo = source or YahooBars()
         self._binance = binance or BinanceBars()
         self._now = now
+        #: Sources added at runtime, keyed by name. A venue's adapter lives here
+        #: rather than being imported, because it needs credentials.
+        self._extra: dict[str, tuple[BarSource, dict[str, str]]] = {}
 
-    def _route(self, symbol: str) -> tuple[str, str, BarSource] | None:
+    def register(self, name: str, source: BarSource, symbols: dict[str, str]) -> None:
+        """Add a source, with what it calls the desk's symbols.
+
+        Used for a venue, whose adapter needs credentials this package must not
+        know about. The mapping is explicit for the same reason the others are: a
+        symbol a source does not list should draw nothing rather than something
+        else.
+        """
+        self._extra[name] = (source, symbols)
+
+    def _route(self, symbol: str, prefer: str | None = None) -> tuple[str, str, BarSource] | None:
+        """Which source serves this symbol, and what it calls it.
+
+        `prefer` names one explicitly, which is what a trading chart does: the venue
+        you hold a position on is not interchangeable with a source that happens to
+        quote something similar.
+        """
+        if prefer is not None:
+            registered = self._extra.get(prefer)
+            if registered is not None:
+                source, symbols = registered
+                mapped = symbols.get(symbol)
+                if mapped is not None:
+                    return prefer, mapped, source
+            return None
         """Which source serves this symbol, and what it calls it.
 
         Binance first where it has the pair: it is a documented API with a
@@ -114,22 +157,35 @@ class BarService:
         return True, ""
 
     def bars(
-        self, symbol: str, interval: Interval, days: int, *, refresh: bool = True
+        self,
+        symbol: str,
+        interval: Interval,
+        days: int,
+        *,
+        refresh: bool = True,
+        source: str | None = None,
     ) -> BarsResult:
-        """Bars for a desk symbol, filling from the source when due.
+        """Bars for a desk symbol, filling from a source when due.
+
+        `source` names one rather than taking the best available, which is what a
+        chart you trade from wants: the venue holding the position, not whichever
+        source has the longest history.
 
         Returns what is held even when the source refuses, because a chart drawn
         from yesterday's bars with a note saying so is more use than an error.
         """
-        route = self._route(symbol)
+        route = self._route(symbol, prefer=source)
         if route is None:
+            named = f"{source} has no bars for" if source else "No source is mapped to"
             return BarsResult(
-                series=Series("none", symbol, interval),
+                series=Series(source or "none", symbol, interval),
                 bars=[],
                 fetched=False,
-                note=f"No source is mapped to {symbol}",
+                note=f"{named} {symbol}",
             )
-        source_name, mapped, source = route
+        # `provider` rather than `source`: the parameter above is a source *name*,
+        # and mypy caught the two sharing one name as a string with no fetch method.
+        source_name, mapped, provider = route
         series = Series(source_name, mapped, interval)
 
         note = ""
@@ -138,7 +194,7 @@ class BarService:
         due, why = self._due(series, interval) if refresh else (False, "not asked")
         if due:
             try:
-                got = source.fetch(mapped, interval, days)
+                got = provider.fetch(mapped, interval, days)
                 self._store.write(series, got.bars)
                 self._store.note_fetch(
                     series, ok=True, note=f"{len(got.bars)} bars", at=self._now()

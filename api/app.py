@@ -44,6 +44,8 @@ from api.routers import (
 from api.store import open_db
 from broker.errors import BrokerError
 from broker.shark.stream import SharkStream
+from marketdata import BarService, BarStore
+from marketdata.venue import VenueBars
 from notify import Telegram, TelegramConfig
 from settings import load_settings
 from streaming import TickHub
@@ -94,6 +96,35 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # the reader. That hung a reload with a desk open, and would hang `docker stop`.
     shutting_down = asyncio.Event()
     application.state.shutting_down = shutting_down
+
+    # The bar store, and the venue registered as a source under its own name. The
+    # venue's candles are what a trading chart shows - the instrument an order would
+    # be in - and storing them is what turns a few hundred bars into a history.
+    # Non-fatal. DuckDB permits one writer, so a second copy of this app - a stray
+    # reloader, a container beside a local run - cannot open the file, and a desk
+    # that refuses to start because a chart cache is busy is a bad trade. The
+    # candles endpoint asks the venue directly when there is no store.
+    bar_store: BarStore | None = None
+    bar_service: BarService | None = None
+    try:
+        bar_store = BarStore(get_db_path().parent / "bars.duckdb")
+        bar_service = BarService(bar_store)
+    except Exception:  # noqa: BLE001 - see above
+        log.warning(
+            "could not open the bar store; charts will ask the venue each time",
+            exc_info=True,
+        )
+    if bar_service is not None and settings.has_shark:
+        try:
+            shark = broker_for(get_venue("shark"))
+            bar_service.register(
+                "shark",
+                VenueBars(shark),
+                {i.symbol: i.symbol for i in for_venue("shark")},
+            )
+        except Exception:  # noqa: BLE001 - a desk without a venue still draws charts
+            log.warning("could not register the perpetuals venue as a bar source")
+    application.state.bar_service = bar_service
 
     def perps_broker() -> object | None:
         """The perpetuals adapter, or None when that venue is not configured.
@@ -147,6 +178,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await task
         if stream is not None:
             await stream.stop()
+        if bar_store is not None:
+            bar_store.close()
         log.info("alert watcher stopped")
 
 
