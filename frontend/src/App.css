@@ -1451,3 +1451,54 @@ a.nitem:hover .nhead {
   color: var(--you-fg);
   border-color: var(--you);
 }
+
+/* The desk title doubles as the switch, so it has to look pressable without
+   turning the top-left corner into a button. */
+.deskswitch {
+  font: inherit;
+  font-family: var(--u);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  gap: 6px;
+}
+.deskswitch:hover {
+  color: var(--you);
+}
+.deskswitch:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.swapmark {
+  font-size: 11px;
+  opacity: 0.55;
+}
+.deskswitch:hover .swapmark {
+  opacity: 1;
+}
+
+/* ---------- candle pan and zoom ---------- */
+.candlewrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.candlewrap .candles {
+  flex: 1;
+  /* Grabbable, because it is: dragging pans the window. */
+  cursor: grab;
+  touch-action: none;
+}
+.candlewrap .candles.dragging {
+  cursor: grabbing;
+}
+.candlewrap .zoom {
+  padding: 2px 6px 4px;
+}

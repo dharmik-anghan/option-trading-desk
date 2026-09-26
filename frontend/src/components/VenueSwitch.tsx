@@ -6,39 +6,52 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
-/** What to call each desk. The venue's own name is what it trades, which is the
-    useful label once there is more than one. */
-const SHORT: Record<string, string> = {
-  index_options: "Options",
-  perpetuals: "Crypto",
+/** What to call each desk. */
+const TITLE: Record<string, string> = {
+  index_options: "Option Desk",
+  perpetuals: "Crypto Desk",
 };
 
+function deskTitle(venue: Venue | undefined): string {
+  if (venue === undefined) return "Option Desk";
+  return TITLE[venue.asset_class] ?? venue.name;
+}
+
 /**
- * Which desk is on screen.
+ * The desk's name, which is also how you change desks.
  *
- * Top left, before the brand, because it changes everything to the right of it:
- * the instruments, the panels, and the currency the numbers are in. A control
- * that reframes the whole screen should be the first thing read, not something
- * found later in a toolbar.
+ * One label rather than a two-position control: the title already says which
+ * desk you are on, so a separate switch beside it says it twice. Clicking moves
+ * to the next desk, and with two that reads as a toggle.
  *
- * Nothing is rendered for a single venue — a switch with one position is furniture.
+ * It has to look pressable or it is a trap, so it carries a hover state, a real
+ * button's focus ring, and the name of where it goes in its tooltip. With one
+ * venue it renders as plain text, because then it goes nowhere.
  */
 export function VenueSwitch({ venues, selected, onSelect }: Props) {
-  if (venues.length < 2) return null;
+  const current = venues.find((v) => v.id === selected);
+  const label = deskTitle(current);
+
+  if (venues.length < 2) {
+    return <div className="brand">{label}</div>;
+  }
+
+  const index = venues.findIndex((v) => v.id === selected);
+  const next = venues[(Math.max(0, index) + 1) % venues.length];
+
   return (
-    <div className="venuesw" role="tablist" aria-label="Desk">
-      {venues.map((v) => (
-        <button
-          key={v.id}
-          role="tab"
-          aria-selected={v.id === selected}
-          className={v.id === selected ? "on" : undefined}
-          title={`${v.name} · priced in ${v.quote_currency}`}
-          onClick={() => onSelect(v.id)}
-        >
-          {SHORT[v.asset_class] ?? v.name}
-        </button>
-      ))}
-    </div>
+    <button
+      className="brand deskswitch"
+      onClick={() => onSelect(next.id)}
+      title={`Switch to ${deskTitle(next)} · ${next.name}, priced in ${next.quote_currency}`}
+      aria-label={`${label}. Click to switch to ${deskTitle(next)}`}
+    >
+      {label}
+      {/* Two arrows rather than one: this swaps between desks, it does not go
+          forward through them. */}
+      <span className="swapmark" aria-hidden="true">
+        ⇄
+      </span>
+    </button>
   );
 }

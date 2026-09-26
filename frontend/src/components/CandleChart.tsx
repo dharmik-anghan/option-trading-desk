@@ -1,8 +1,12 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Candle } from "../api";
 
 interface Props {
   candles: readonly Candle[];
+  /** Identifies the series. The pan/zoom window resets when this changes and
+      survives when it does not - so a refresh that adds a bar leaves the view
+      where you put it, while switching symbol or timeframe starts fresh. */
+  seriesId: string;
   /** Live price, drawn as the current level so the chart agrees with the tile. */
   last: number | null;
   /** Decimal places the venue quotes in, so the axis invents no precision. */
@@ -11,6 +15,9 @@ interface Props {
 }
 
 const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
+
+/** Fewest bars worth showing. Below this the chart is a magnifying glass. */
+const MIN_BARS = 12;
 
 /**
  * Candles, drawn as candles.
@@ -24,11 +31,98 @@ const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
  * reader here as they do on a position, and inventing a third pair for price
  * would make the screen say that they are different ideas.
  */
-export function CandleChart({ candles, last, dp, height = 260 }: Props) {
+export function CandleChart({ candles, seriesId, last, dp, height = 260 }: Props) {
+  // The window, as a count of bars and where it ends. Held as an end index so
+  // that new bars arriving keep the view pinned to the right, which is what
+  // anyone watching a live chart expects - anchoring on the start would have the
+  // latest price walk off the edge.
+  const [bars, setBars] = useState<number | null>(null);
+  const [end, setEnd] = useState<number | null>(null);
+  const drag = useRef<{ x: number; end: number } | null>(null);
+  // Mirrored in state because the cursor depends on it and a ref must not be
+  // read during render.
+  const [dragging, setDragging] = useState(false);
+
+  const total = candles.length;
+  const showing = Math.min(bars ?? total, total);
+  const endIndex = Math.min(end ?? total, total);
+  const startIndex = Math.max(0, endIndex - showing);
+  const shown = useMemo(
+    () => candles.slice(startIndex, endIndex),
+    [candles, startIndex, endIndex],
+  );
+  const fitted = bars === null && end === null;
+
+  // A changed series - new symbol, new timeframe - resets the window: keeping a
+  // 20-bar window across a switch from 1d to 5m shows twenty of the wrong bars.
+  // Adjusted during render rather than in an effect, so there is no frame drawn
+  // with the old window against the new data. Keyed on the series and not on the
+  // bar count, because the count changes every time a bar closes and that would
+  // throw away a pan the moment the chart refreshed.
+  const [shownSeries, setShownSeries] = useState(seriesId);
+  if (shownSeries !== seriesId) {
+    setShownSeries(seriesId);
+    setBars(null);
+    setEnd(null);
+  }
+
+  const zoom = useCallback(
+    (factor: number, anchorRatio = 1) => {
+      setBars((current) => {
+        const from = current ?? total;
+        const next = Math.max(MIN_BARS, Math.min(total, Math.round(from * factor)));
+        // Keep the bar under the cursor where it is, so zooming reads as moving
+        // closer rather than jumping somewhere else.
+        setEnd((currentEnd) => {
+          const e = currentEnd ?? total;
+          const anchor = e - from + from * anchorRatio;
+          return Math.max(MIN_BARS, Math.min(total, Math.round(anchor + next * (1 - anchorRatio))));
+        });
+        return next;
+      });
+    },
+    [total],
+  );
+
+  const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
+    if (!total) return;
+    event.preventDefault();
+    const box = event.currentTarget.getBoundingClientRect();
+    const ratio = box.width ? (event.clientX - box.left) / box.width : 1;
+    zoom(event.deltaY > 0 ? 1.25 : 0.8, Math.min(1, Math.max(0, ratio)));
+  };
+
+  const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!total) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, end: endIndex };
+    setDragging(true);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const held = drag.current;
+    if (held === null) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    if (!box.width) return;
+    // Bars per pixel, so a drag moves the chart by what is under the finger
+    // rather than by an arbitrary step.
+    const moved = ((held.x - event.clientX) / box.width) * showing;
+    setBars(showing);
+    setEnd(Math.max(MIN_BARS, Math.min(total, Math.round(held.end + moved))));
+  };
+
+  const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
+    drag.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const view = useMemo(() => {
-    if (!candles.length) return null;
-    const lows = candles.map((c) => c.low);
-    const highs = candles.map((c) => c.high);
+    if (!shown.length) return null;
+    const lows = shown.map((c) => c.low);
+    const highs = shown.map((c) => c.high);
     let min = Math.min(...lows, last ?? Infinity);
     let max = Math.max(...highs, last ?? -Infinity);
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
@@ -39,7 +133,7 @@ export function CandleChart({ candles, last, dp, height = 260 }: Props) {
     }
     const pad = (max - min) * 0.06;
     return { min: min - pad, max: max + pad };
-  }, [candles, last]);
+  }, [shown, last]);
 
   if (view === null) {
     return <p className="empty">No candles yet.</p>;
@@ -53,14 +147,60 @@ export function CandleChart({ candles, last, dp, height = 260 }: Props) {
     PAD.top + plotH - ((price - view.min) / (view.max - view.min)) * plotH;
   // Bars share the width; a gap of a fifth keeps them readable when there are
   // few, and disappears when there are many.
-  const step = plotW / candles.length;
+  const step = plotW / shown.length;
   const bodyW = Math.max(1, step * 0.8);
 
   // Four gridlines: enough to read a level off, few enough not to be a net.
   const ticks = [0, 1, 2, 3, 4].map((i) => view.min + ((view.max - view.min) * i) / 4);
 
   return (
-    <svg className="candles" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Price candles">
+    <div className="candlewrap">
+      <div className="zoom">
+        <button
+          className="xbtn"
+          onClick={() => zoom(1.25)}
+          disabled={showing >= total}
+          aria-label="Show more bars"
+          title="Show more bars"
+        >
+          &minus;
+        </button>
+        <button
+          className="xbtn"
+          onClick={() => zoom(0.8)}
+          disabled={showing <= MIN_BARS}
+          aria-label="Show fewer bars"
+          title="Show fewer bars"
+        >
+          +
+        </button>
+        <button
+          className="xbtn"
+          onClick={() => {
+            setBars(null);
+            setEnd(null);
+          }}
+          disabled={fitted}
+        >
+          Fit
+        </button>
+        <span className="dim">
+          {fitted ? `all ${total} bars` : `${showing} of ${total} bars`}
+        </span>
+        <span className="sp" />
+        <span className="dim">drag to pan · scroll to zoom</span>
+      </div>
+      <svg
+      className={dragging ? "candles dragging" : "candles"}
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label="Price candles"
+      onWheel={onWheel}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
       {ticks.map((price) => (
         <g key={price}>
           <line x1={PAD.left} x2={PAD.left + plotW} y1={y(price)} y2={y(price)} className="cgrid" />
@@ -70,7 +210,7 @@ export function CandleChart({ candles, last, dp, height = 260 }: Props) {
         </g>
       ))}
 
-      {candles.map((c, i) => {
+      {shown.map((c, i) => {
         const cx = PAD.left + i * step + step / 2;
         const rising = c.close >= c.open;
         const top = y(Math.max(c.open, c.close));
@@ -111,6 +251,7 @@ export function CandleChart({ candles, last, dp, height = 260 }: Props) {
           </text>
         </g>
       )}
-    </svg>
+      </svg>
+    </div>
   );
 }

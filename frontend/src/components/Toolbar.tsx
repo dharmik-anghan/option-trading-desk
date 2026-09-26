@@ -84,11 +84,12 @@ export function Toolbar({
   return (
     <header className="topbar">
       <div className="tb">
-      {/* First thing in the bar, because it reframes everything to the right of
-          it: the instruments, the panels, and the currency the numbers are in. */}
+      {/* The title is the switch. First thing in the bar, because it reframes
+          everything to the right of it: the instruments, the panels, and the
+          currency the numbers are in. */}
       <VenueSwitch venues={venues} selected={venueId} onSelect={onVenue} />
-      <div className="brand">{perps ? perps.name : "Option Desk"}</div>
 
+      {!perps && (
       <div className="tbk spot">
         <small>{name} spot</small>
         <b>
@@ -100,6 +101,29 @@ export function Toolbar({
           )}
         </b>
       </div>
+      )}
+
+      {/* On the perpetuals desk the two currencies have to be said out loud.
+          Prices are in USDT and the account margins in INR, so a figure here
+          without its unit is a figure that could be read as either. */}
+      {perps && (
+        <div className="tbk">
+          <small>Quoted in</small>
+          <b>
+            {perps.quote_currency}
+            <span className="chg dim"> account {perps.money_currency}</span>
+          </b>
+        </div>
+      )}
+      {perps && (
+        <div className="tbk">
+          <small>Stream</small>
+          <b className={perps.stream.connected ? undefined : "dn"}>
+            {perps.stream.connected ? "live" : "down"}
+            <span className="chg dim"> {perps.stream.ticks.toLocaleString("en-IN")} ticks</span>
+          </b>
+        </div>
+      )}
 
       {/* The next scheduled release goes in the middle, which was otherwise a
           few hundred pixels of nothing on a wide screen. It is also the one
@@ -117,6 +141,7 @@ export function Toolbar({
 
       {/* Booked + MTM = Net, so they read as one cluster: no dividers between
           the two parts, one divider before the sum. */}
+      {!perps && (
       <div className="tbgroup">
         <div className="tbk">
           <small>Booked</small>
@@ -135,6 +160,7 @@ export function Toolbar({
           <b className={net !== null ? dir(net) : undefined}>{net !== null ? signed(net) : "—"}</b>
         </div>
       </div>
+      )}
 
       <div className="tbtools">
         <div className={`feed${blocking ? " bad" : ""}`} title={feedText}>
@@ -153,7 +179,7 @@ export function Toolbar({
         </button>
       </div>
       </div>
-      <ContextStrip context={context} />
+      {!perps && <ContextStrip context={context} />}
     </header>
   );
 }

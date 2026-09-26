@@ -86,7 +86,14 @@ export function PerpsChart({ desk, selected, last }: Props) {
         {!candles.error && !rows.length && candles.loading && (
           <p className="empty">Loading candles…</p>
         )}
-        {rows.length > 0 && <CandleChart candles={rows} last={last} dp={dp} />}
+        {rows.length > 0 && (
+          <CandleChart
+            candles={rows}
+            seriesId={`${selected}:${frame.resolution}`}
+            last={last}
+            dp={dp}
+          />
+        )}
       </div>
 
       <div className="chartfoot">
