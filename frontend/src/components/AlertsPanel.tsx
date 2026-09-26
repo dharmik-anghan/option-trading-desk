@@ -39,10 +39,14 @@ export function AlertsPanel({ alerts, activeCount, limits, onLimits, onClear }: 
       </div>
 
       <div className="pb">
+        {/* The empty state has to agree with the count beside the heading. It
+            once read "Nothing yet" while the header said several were live,
+            which is the panel calling itself a liar. */}
         {!alerts.length && (
           <p className="empty">
-            Nothing yet. An alert is written the moment a condition below becomes true, and not
-            again while it stays true.
+            {activeCount
+              ? `${activeCount} ${activeCount === 1 ? "condition is" : "conditions are"} live, but the log was cleared. Each is written again on the next refresh.`
+              : "Nothing yet. An alert is written the moment a condition below becomes true, and not again while it stays true."}
           </p>
         )}
         {/* A list, not a table: in a rail this narrow a message column is

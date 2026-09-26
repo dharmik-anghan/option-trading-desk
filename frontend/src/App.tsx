@@ -346,10 +346,16 @@ export default function App() {
         limits={limits}
         onLimits={setLimits}
         onClear={() => {
-          // the active set is kept, so clearing the log does not re-fire
-          // everything that is still true on the next tick
+          // The active set goes too. Keeping it meant every condition that was
+          // still true stayed marked as already-alerted, so nothing re-fired and
+          // the panel sat on "Nothing yet" while the header said several were
+          // live. Clearing is an explicit "show me where things stand", not a
+          // mute, so what is true now is written again on the next pass - which
+          // is a re-list, not the spurious repeat the active set guards against.
           logRef.current = [];
           setAlertLog([]);
+          activeKeys.current = new Set();
+          setSticky(new Set());
           persistAlerts([], activeKeys.current);
         }}
       />
