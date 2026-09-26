@@ -427,3 +427,29 @@ def test_a_vertical_in_one_expiry_still_gets_its_payoff(client: TestClient) -> N
     assert created["payoff_curve"]
     # the structure label is stored as given, not matched against a known list
     assert created["strategy"] == "Whatever I want to call it"
+
+
+# The mounted frontend is only present after a build, so these skip rather than
+# fail in a checkout that has never run `npm run build`.
+_UI_BUILT = (Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html").is_file()
+
+
+@pytest.mark.skipif(not _UI_BUILT, reason="frontend/dist is not built")
+@pytest.mark.parametrize("path", ["/", "/options", "/crypto", "/backtesting"])
+def test_every_frontend_route_survives_a_reload(client: TestClient, path: str) -> None:
+    """A deep link and a refresh both land on the app.
+
+    Worth a test because the obvious spelling does not work: `StaticFiles(html=True)`
+    serves index.html for a directory and 404s for everything else, so /crypto
+    answered 404 on a reload while working perfectly when navigated to.
+    """
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+
+
+@pytest.mark.skipif(not _UI_BUILT, reason="frontend/dist is not built")
+def test_a_missing_asset_is_still_a_404(client: TestClient) -> None:
+    """Falling back to the page for a missing script would hide a broken build."""
+    assert client.get("/assets/not-a-real-bundle.js").status_code == 404

@@ -853,3 +853,17 @@ export function describeError(error: Error | null): { text: string; transient: b
   }
   return { text: error.message, transient: false };
 }
+
+export interface BarSeries {
+  source: string;
+  symbol: string;
+  interval: string;
+  bars: number;
+  first: string | null;
+  last: string | null;
+}
+
+/** Every bar series the store holds. What a backtest can honestly be run over. */
+export function getBarSeries(): Promise<BarSeries[]> {
+  return getJson<BarSeries[]>("/api/bars/series");
+}

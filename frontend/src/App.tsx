@@ -13,6 +13,7 @@ import {
   getNews,
   describeError,
 } from "./api";
+import type { Theme } from "./useTheme";
 import { useLive, useNow } from "./useLive";
 import { usePerpPrices } from "./usePerpPrices";
 import { Toolbar } from "./components/Toolbar";
@@ -40,7 +41,6 @@ import {
 import type { NewWatch } from "./api";
 
 type View = "trading" | "oi" | "greeks";
-type Theme = "dark" | "light";
 
 // Intervals, and a stagger so the panels do not all call at the same instant.
 // The broker allows about 10 requests a second and 200 a minute; the earlier
@@ -66,17 +66,7 @@ const ALERTS_MS = 20000;
 // scale of an order being placed, not a tick.
 const PERPS_MS = 15000;
 
-function initialTheme(): Theme {
-  try {
-    const saved = localStorage.getItem("optiondesk-theme");
-    if (saved === "dark" || saved === "light") return saved;
-  } catch {
-    // storage can throw in a private window; fall through to the media query
-  }
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-}
-
-export default function App() {
+export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props) {
   const [symbol, setSymbol] = useState("NSE:NIFTY50-INDEX");
   const [view, setView] = useState<View>("trading");
   // "" means whichever expiry the broker considers nearest
@@ -86,17 +76,7 @@ export default function App() {
   // the chain is reference material here, not the main view, so it starts shut
   const [chainOpen, setChainOpen] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [theme, setTheme] = useState<Theme>(initialTheme);
   const [basketNonce, setBasketNonce] = useState(0);
-  // Which desk is on screen. Remembered, because it is the frame everything else
-  // is read in and having it reset on reload is a small daily annoyance.
-  const [venueId, setVenueId] = useState<string>(() => {
-    try {
-      return localStorage.getItem("optiondesk-venue") ?? "fyers";
-    } catch {
-      return "fyers";
-    }
-  });
   const [perpSymbol, setPerpSymbol] = useState("BTCUSDT");
   const onPerps = venueId !== "fyers";
   // Which news topics are showing. Null means "follow the desk", which is what
@@ -108,23 +88,6 @@ export default function App() {
   // would not save is most of what makes it feel broken.
   const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
   const shownTopics = newsTopics ?? (onPerps ? ["crypto", "commodities"] : ["india"]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("optiondesk-venue", venueId);
-    } catch {
-      // forgetting which desk was open is not worth failing over
-    }
-  }, [venueId]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("optiondesk-theme", theme);
-    } catch {
-      // not being able to remember the theme is not worth failing over
-    }
-  }, [theme]);
 
   const health = useLive(getHealth, HEALTH_MS, [], paused, 0);
   const venues = useLive(getVenues, 0, [], paused, 50);
@@ -325,11 +288,12 @@ export default function App() {
         paused={paused}
         onPause={() => setPaused((p) => !p)}
         theme={theme}
-        onTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        onTheme={onTheme}
         context={context.data}
         venues={venues.data ?? []}
         venueId={venueId}
-        onVenue={setVenueId}
+        onVenue={onVenue}
+        onHome={onHome}
         perps={onPerps ? (perps.data ?? null) : null}
         pushing={streamed.connected}
       />

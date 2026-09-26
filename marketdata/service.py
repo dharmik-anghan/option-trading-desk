@@ -225,3 +225,30 @@ class BarService:
 
     def held(self) -> list[tuple[Series, int]]:
         return self._store.series_held()
+
+    def span(self, series: Series) -> tuple[datetime, datetime] | None:
+        """The window a series covers, for saying what a backtest can ask about."""
+        return self._store.span(series)
+
+    def stored(
+        self,
+        source: str,
+        symbol: str,
+        interval: Interval,
+        *,
+        days: int = 365,
+        refresh: bool = False,
+    ) -> BarsResult:
+        """Bars for a series named exactly, straight from the store.
+
+        No symbol mapping and no routing: the caller has a source and the source's
+        own symbol, which is what `held()` reports. A backtest reads this rather
+        than `bars()` because it should be asking about data that exists rather than
+        provoking a fetch mid-run - a run whose data changes underneath it cannot be
+        reproduced.
+        """
+        series = Series(source, symbol, interval)
+        start = self._now() - timedelta(days=days)
+        bars = self._store.read(series, start=start)
+        note = "" if bars else "Nothing stored for this series yet"
+        return BarsResult(series=series, bars=bars, fetched=False, note=note)

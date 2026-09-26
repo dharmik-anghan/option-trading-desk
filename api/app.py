@@ -25,6 +25,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from alerting.watcher import Watcher
 from api.alert_inputs import gather
@@ -32,6 +35,7 @@ from api.dependencies import broker_for, get_broker, get_db_path, get_feeds
 from api.errors import broker_error_handler
 from api.routers import (
     alerts,
+    bars,
     baskets,
     feeds,
     market,
@@ -208,6 +212,7 @@ app.add_exception_handler(BrokerError, broker_error_handler)
 for _router in (
     system.router,
     alerts.router,
+    bars.router,
     portfolio.router,
     market.router,
     perps.router,
@@ -226,7 +231,34 @@ for _router in (
 # on its own port and CORS above lets it through - so this is a no-op then, and
 # the two setups need no switch between them.
 _UI_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
+class SinglePage(StaticFiles):
+    """Static files, with the app's own index.html for any path that is not a file.
+
+    Needed because `html=True` alone does not do this: it serves index.html for a
+    directory and 404s for everything else, so /options and /crypto answered 404 on
+    a reload even though the app knows both routes. A single-page app has no files
+    at its routes by definition, so the fallback has to be here.
+
+    Only for reads: a POST to a path that does not exist is a mistake worth
+    reporting, not a page to render.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as missing:
+            wants_a_file = "." in path.rsplit("/", 1)[-1]
+            if missing.status_code != 404 or wants_a_file:
+                # A missing script or stylesheet is a broken build, and answering
+                # it with a page of HTML turns that into a baffling parse error
+                # in the console instead of an honest 404.
+                raise
+            return await super().get_response("index.html", scope)
+
+
 if _UI_DIR.is_dir():
-    # html=True serves index.html for unknown paths, which a single-page app
-    # needs to survive a reload on any route.
-    app.mount("/", StaticFiles(directory=_UI_DIR, html=True), name="ui")
+    # Mounted last so every /api route above is matched first; a mount at "/"
+    # would otherwise swallow them.
+    app.mount("/", SinglePage(directory=_UI_DIR, html=True), name="ui")

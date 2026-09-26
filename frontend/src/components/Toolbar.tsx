@@ -33,6 +33,8 @@ interface Props {
   venues: readonly Venue[];
   venueId: string;
   onVenue: (id: string) => void;
+  /** Back to the three desks. */
+  onHome: () => void;
   /** Set only on the perpetuals desk, whose headline is a different shape: no
       booked P&L to read, and prices in a different currency from the account. */
   perps: PerpsDesk | null;
@@ -59,6 +61,7 @@ export function Toolbar({
   venues,
   venueId,
   onVenue,
+  onHome,
   perps,
   pushing,
 }: Props) {
@@ -87,6 +90,12 @@ export function Toolbar({
   return (
     <header className="topbar">
       <div className="tb">
+      {/* Out of this desk. Small and first, in the place a page's way back
+          normally is, because it is not part of reading the market. */}
+      <button className="uphome" onClick={onHome} title="Back to the three desks">
+        ←
+      </button>
+
       {/* The title is the switch. First thing in the bar, because it reframes
           everything to the right of it: the instruments, the panels, and the
           currency the numbers are in. */}
