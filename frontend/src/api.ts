@@ -567,6 +567,9 @@ export interface PerpOrder {
   order_type: "MARKET" | "LIMIT";
   quantity: number;
   leverage: number;
+  /** ISOLATED risks only the margin behind the position; CROSS puts the rest of
+      the account behind it. */
+  margin_mode: "ISOLATED" | "CROSS";
   limit_price?: number | null;
 }
 
@@ -609,6 +612,21 @@ export interface PerpOrderRecord {
 
 export function getPerpOrders(limit = 50): Promise<PerpOrderRecord[]> {
   return getJson<PerpOrderRecord[]>(`/api/perps/orders?limit=${limit}`);
+}
+
+export interface CloseResult {
+  closed: boolean;
+  outcome: string;
+  venue_order_id: string | null;
+  record_id: number;
+}
+
+/** Close a position at the market, for its full size. Reduce-only at the venue. */
+export function closePerpPosition(positionId: string): Promise<CloseResult> {
+  return postJson<Record<string, never>, CloseResult>(
+    `/api/perps/positions/${encodeURIComponent(positionId)}/close`,
+    {},
+  );
 }
 
 export interface Protection {

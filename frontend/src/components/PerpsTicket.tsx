@@ -45,6 +45,10 @@ export function PerpsTicket({
   const [quantity, setQuantity] = useState("");
   const [leverage, setLeverage] = useState(10);
   const [limitPrice, setLimitPrice] = useState("");
+  // Isolated by default: it risks only the margin behind this position, where
+  // cross puts the rest of the account behind it. Inheriting the account's setting
+  // is how leverage went wrong, so this is chosen here and sent every time.
+  const [marginMode, setMarginMode] = useState<"ISOLATED" | "CROSS">("ISOLATED");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PerpOrderResult | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -80,6 +84,7 @@ export function PerpsTicket({
         order_type: type,
         quantity: qty,
         leverage: lev,
+        margin_mode: marginMode,
         limit_price: type === "LIMIT" ? Number(limitPrice) : null,
       });
       setResult(outcome);
@@ -154,6 +159,22 @@ export function PerpsTicket({
         )}
 
         <label>
+          <small>Margin</small>
+          <select
+            value={marginMode}
+            onChange={(e) => setMarginMode(e.target.value as "ISOLATED" | "CROSS")}
+          >
+            <option value="ISOLATED">Isolated</option>
+            <option value="CROSS">Cross</option>
+          </select>
+        </label>
+        {marginMode === "CROSS" && (
+          <p className="tnote bad">
+            Cross puts the rest of your balance behind this position.
+          </p>
+        )}
+
+        <label>
           <small>Type</small>
           <select value={type} onChange={(e) => setType(e.target.value as "MARKET" | "LIMIT")}>
             <option value="MARKET">Market</option>
@@ -207,7 +228,7 @@ export function PerpsTicket({
               different fix. */}
           <p className={result.sent ? "sent" : "err"}>
             {result.sent
-              ? `Sent at ${lev}×. Reference ${result.venue_order_id ?? "—"}.`
+              ? `Sent at ${lev}× ${marginMode.toLowerCase()}. Reference ${result.venue_order_id ?? "—"}.`
               : result.reasons.length
                 ? "Refused here. Nothing reached the venue."
                 : `The venue refused it. ${result.outcome}`}

@@ -355,6 +355,10 @@ class OrderRequest(BaseModel):
     order_type: Literal["MARKET", "LIMIT"] = "MARKET"
     quantity: float = Field(gt=0)
     leverage: float = Field(gt=0)
+    #: ISOLATED risks only the margin behind this position; CROSS puts the rest of
+    #: the account behind it. Defaulted to the safer one rather than inherited,
+    #: because inheriting it is how an order ends up on settings nobody chose.
+    margin_mode: Literal["ISOLATED", "CROSS"] = "ISOLATED"
     #: Required for a limit order, ignored for a market one.
     limit_price: float | None = Field(default=None, gt=0)
 
@@ -473,12 +477,15 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
         if outcome.passed:
             try:
                 # Before the order, and the order is abandoned if it fails. The
-                # venue has no leverage field on an order and applies whatever the
-                # symbol was last set to, so skipping this does not mean "default
-                # leverage" - it means whatever the account happens to hold, which
-                # on this one was the maximum of 150x against a chosen 10x.
+                # venue has no leverage or margin-mode field on an order and applies
+                # whatever the symbol was last set to, so skipping this does not
+                # mean "defaults" - it means whatever the account happens to hold,
+                # which on this one was the maximum of 150x against a chosen 10x.
                 if isinstance(broker, PerpetualsData):
-                    broker.set_leverage(body.symbol, body.leverage)
+                    # Leverage and margin mode together: an order carries neither,
+                    # so both would otherwise be whatever the symbol was last set
+                    # to. Leverage was already this bug once.
+                    broker.set_preference(body.symbol, body.leverage, body.margin_mode)
                 result = broker.place_order(
                     BrokerOrderRequest(
                         symbol=body.symbol,
@@ -622,4 +629,83 @@ async def stream(request: Request) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+class CloseResponse(BaseModel):
+    closed: bool
+    #: What happened, in the venue's words when it decided.
+    outcome: str
+    venue_order_id: str | None
+    record_id: int
+
+
+@router.post("/positions/{position_id}/close", response_model=CloseResponse)
+def close_position(position_id: str, db_path: DbPathDep) -> CloseResponse:
+    """Close one position at the market, for its full size.
+
+    The desk could open a position and not close one, which is the wrong way round:
+    if something has gone wrong, this should be where you get out rather than where
+    you watch it happen.
+
+    The size and side come from the venue's own view of the position, read now
+    rather than sent by the client. A stale quantity from a page that has not
+    refreshed would either leave a remainder open or - without reduce-only - open a
+    position the other way. The order is reduce-only regardless, so the worst
+    outcome of a race is that nothing happens.
+
+    No risk checks. Every one of them exists to stop a position being opened by
+    mistake, and none of them should be able to stop one being closed.
+    """
+    spec = get_venue(VENUE_ID)
+    broker = broker_for(spec)
+    if not isinstance(broker, PerpetualsData):
+        raise HTTPException(status_code=501, detail="this venue holds no positions")
+
+    try:
+        position = next(
+            (p for p in broker.get_perp_positions() if p.position_id == position_id), None
+        )
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+    if position is None:
+        # Already gone, by a stop firing or a close elsewhere. Not an error worth
+        # alarming anyone with, but not a success either.
+        raise HTTPException(status_code=404, detail="That position is no longer open")
+
+    conn = open_db(db_path)
+    try:
+        record_id = record_order(
+            conn,
+            at=datetime.now(UTC).isoformat(),
+            symbol=position.symbol,
+            side="SELL" if position.is_long else "BUY",
+            order_type="MARKET",
+            quantity=position.quantity,
+            price=position.mark_price,
+            leverage=position.leverage,
+            notional=position.quantity * (position.mark_price or position.entry_price),
+            sent=False,
+            reason="Closing",
+        )
+        try:
+            result = broker.close_position(position)
+        except BrokerError as exc:
+            note_outcome(
+                conn, record_id, sent=False, reason=f"Venue refused it: {exc.message}",
+                venue_order_id=None,
+            )
+            raise HTTPException(status_code=502, detail=exc.message) from exc
+        note_outcome(
+            conn, record_id, sent=True, reason=result.message or "closed",
+            venue_order_id=result.order_id,
+        )
+    finally:
+        conn.close()
+
+    return CloseResponse(
+        closed=True,
+        outcome=result.message or "closed",
+        venue_order_id=result.order_id or None,
+        record_id=record_id,
     )

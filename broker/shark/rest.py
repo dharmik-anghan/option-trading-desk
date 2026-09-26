@@ -49,6 +49,11 @@ CONTRACTS_TTL = 24 * 3600.0
 MARGIN_ASSETS = frozenset({"INR", "USDT"})
 DEFAULT_MARGIN_ASSET = "INR"
 
+#: ISOLATED risks only the margin posted against a position; CROSS puts the rest
+#: of the account behind it. Isolated is the default here for that reason.
+MARGIN_MODES = frozenset({"ISOLATED", "CROSS"})
+DEFAULT_MARGIN_MODE = "ISOLATED"
+
 #: Candle sizes the venue accepts, mapped from the resolutions the desk asks for.
 #: The options broker speaks in minutes ("1", "60", "D"); this one in Binance
 #: intervals. Kept as a table so a caller does not need to know which venue it is
@@ -244,6 +249,40 @@ class SharkBroker:
             raise BrokerError("Shark returned no position list")
         return parse_perp_positions(rows)
 
+    def close_position(self, position: PerpPosition) -> OrderResult:
+        """Close a position at the market, for its full size.
+
+        A reduce-only market order on the opposite side, which is how this venue
+        closes: there is no "close" verb, and an ordinary order would open a second
+        position in the other direction if the size were ever wrong.
+
+        `reduceOnly` is the whole safety of it. It tells the venue this order may
+        only shrink an existing position, so the worst outcome of a stale size or a
+        double click is nothing happening rather than a reversed position.
+
+        The side is taken from the position rather than passed in. A caller that
+        has to work out which way closes a short is a caller that can get it
+        backwards, and getting it backwards doubles the position.
+        """
+        if position.quantity <= 0:
+            raise BrokerError("nothing to close")
+        body: dict[str, Any] = {
+            "placeType": "ORDER_FORM",
+            "symbol": position.symbol,
+            "side": "SELL" if position.is_long else "BUY",
+            "type": "MARKET",
+            "quantity": position.quantity,
+            "reduceOnly": True,
+            "marginAsset": position.margin_asset or DEFAULT_MARGIN_ASSET,
+        }
+        payload = self._request("POST", "/v1/order/place-order", body=body, signed=True)
+        if not isinstance(payload, dict):
+            raise BrokerError("Shark accepted the close but said nothing useful")
+        return OrderResult(
+            order_id=str(payload.get("clientOrderId") or payload.get("id") or ""),
+            message=str(payload.get("status") or "accepted"),
+        )
+
     def set_protection(
         self,
         position_id: str,
@@ -277,6 +316,35 @@ class SharkBroker:
             body["splitStopLossOrders"] = [{"quantity": quantity, "price": stop_loss}]
 
         self._request("POST", "/v2/order/split-tp-sl", body=body, signed=True)
+
+    def set_preference(self, symbol: str, leverage: float, margin_mode: str) -> None:
+        """Set both standing settings for one contract in one call.
+
+        Margin mode has the same shape of trap leverage had: an order carries
+        neither, so both come from whatever the symbol was last configured with.
+        The difference between them is what happens when a position goes wrong -
+        ISOLATED risks the margin posted against that position, CROSS risks the
+        rest of the account behind it - so inheriting it silently is not a detail.
+
+        One call rather than two because the venue offers one, and two would leave
+        a window where the leverage had changed and the margin mode had not.
+        """
+        mode = margin_mode.upper()
+        if mode not in MARGIN_MODES:
+            raise BrokerError(f"{margin_mode!r} is not a margin mode")
+        if leverage <= 0:
+            raise BrokerError(f"{leverage} is not a leverage")
+        self._request(
+            "POST",
+            "/v1/exchange/update/preference",
+            body={
+                "leverage": leverage,
+                "marginMode": mode,
+                "contractName": symbol,
+                "timestamp": str(timestamp_ms()),
+            },
+            signed=True,
+        )
 
     def set_leverage(self, symbol: str, leverage: float) -> None:
         """Set the standing leverage for one contract.

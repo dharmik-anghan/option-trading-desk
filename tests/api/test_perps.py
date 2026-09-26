@@ -132,7 +132,12 @@ class Stub:
         self.refuse_order: str | None = None
         #: (symbol, leverage) pairs this stub was asked to configure.
         self.leverage_set: list[tuple[str, float]] = []
+        #: (symbol, leverage, margin mode) for each preference call.
+        self.preference_set: list[tuple[str, float, str]] = []
         self.refuse_leverage: str | None = None
+        #: (symbol, side, quantity) for each close asked of this stub.
+        self.closed: list[tuple[str, str, float]] = []
+        self.refuse_close: str | None = None
 
     def get_contracts(self) -> dict[str, ContractSpec]:
         """The real venue's published limits, copied once into SPECS above."""
@@ -153,10 +158,21 @@ class Stub:
             raise BrokerError("Shark: signature rejected")
         return [self._position] if self._position is not None else []
 
-    def set_leverage(self, symbol: str, leverage: float) -> None:
+    def close_position(self, position: PerpPosition) -> OrderResult:
+        if self.refuse_close is not None:
+            raise BrokerError(self.refuse_close)
+        self.closed.append((position.symbol, position.side, position.quantity))
+        return OrderResult(order_id="stub-close-1", message="closed")
+
+    def set_preference(self, symbol: str, leverage: float, margin_mode: str) -> None:
         """Recorded, and required by the protocol - so a stub that omits it stops
-        satisfying PerpetualsData, which is how the order path's new step gets
+        satisfying PerpetualsData, which is how a new step in the order path gets
         noticed here rather than in production."""
+        if self.refuse_leverage is not None:
+            raise BrokerError(self.refuse_leverage)
+        self.preference_set.append((symbol, leverage, margin_mode))
+
+    def set_leverage(self, symbol: str, leverage: float) -> None:
         if self.refuse_leverage is not None:
             raise BrokerError(self.refuse_leverage)
         self.leverage_set.append((symbol, leverage))
@@ -400,8 +416,39 @@ class TestPlacingAnOrder:
             client.post("/api/perps/orders", json=self._order(leverage=10))
         finally:
             app.state.tick_hub = None
-        assert stub_venue.leverage_set == [("BTCUSDT", 10.0)]
+        assert stub_venue.preference_set == [("BTCUSDT", 10.0, "ISOLATED")]
         assert len(stub_venue.orders) == 1
+
+    def test_margin_mode_defaults_to_isolated_rather_than_inherited(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        # Same trap leverage had: an order carries neither, so both come from
+        # whatever the symbol was last set to. ISOLATED risks only the margin
+        # behind the position; CROSS puts the rest of the account behind it.
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order())
+        finally:
+            app.state.tick_hub = None
+        assert stub_venue.preference_set[0][2] == "ISOLATED"
+
+    def test_cross_can_be_asked_for_explicitly(
+        self, client: TestClient, stub_venue: Stub
+    ) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order(margin_mode="CROSS"))
+        finally:
+            app.state.tick_hub = None
+        assert stub_venue.preference_set[0][2] == "CROSS"
+
+    def test_a_nonsense_margin_mode_is_refused(self, client: TestClient) -> None:
+        response = client.post("/api/perps/orders", json=self._order(margin_mode="WHATEVER"))
+        assert response.status_code == 422
 
     def test_a_failed_leverage_change_abandons_the_order(
         self, client: TestClient, stub_venue: Stub
@@ -641,3 +688,54 @@ class TestTheStream:
 
         asyncio.run(read_then_close())
         assert hub.subscriber_count == 0
+
+
+class TestClosingAPosition:
+    """Closing, which the desk could not do - you had to go to the venue's website.
+
+    The asymmetry mattered: a desk that can open and not close is a desk you watch
+    a problem from rather than act on.
+    """
+
+    def test_it_closes_with_the_venues_own_view_of_the_size(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Read now, not sent by the client: a stale quantity from a page that has
+        # not refreshed would leave a remainder open.
+        stub = Stub(_position(quantity=0.002, side="LONG"))
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        body = client.post("/api/perps/positions/p-1/close").json()
+        assert body["closed"] is True
+        assert stub.closed == [("XAUUSDT", "LONG", 0.002)]
+
+    def test_a_position_that_has_gone_is_a_404_not_a_success(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A stop may have fired, or it was closed elsewhere. Not alarming, but not
+        # something to report as done either.
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        assert client.post("/api/perps/positions/not-open/close").status_code == 404
+
+    def test_a_venue_refusal_is_reported_and_recorded(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position())
+        stub.refuse_close = "Insufficient margin"
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        response = client.post("/api/perps/positions/p-1/close")
+        assert response.status_code == 502
+        (row,) = client.get("/api/perps/orders").json()
+        assert row["sent"] is False
+        assert "Insufficient margin" in row["reason"]
+
+    def test_a_close_is_in_the_order_log(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position(quantity=0.002, side="SHORT"))
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        client.post("/api/perps/positions/p-1/close")
+        (row,) = client.get("/api/perps/orders").json()
+        assert row["sent"] is True
+        # a short closes by buying
+        assert row["side"] == "BUY"
+        assert row["quantity"] == 0.002

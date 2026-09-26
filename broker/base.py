@@ -125,6 +125,24 @@ class PerpetualsData(Protocol):
         """Open positions, with their leverage, margin and liquidation price."""
         ...
 
+    def close_position(self, position: PerpPosition) -> OrderResult:
+        """Close a position at the market, for its full size.
+
+        Takes the position rather than a symbol and a side, because a caller that
+        works out which way closes a short is a caller that can get it backwards -
+        and getting it backwards doubles the position instead of ending it.
+        """
+        ...
+
+    def set_preference(self, symbol: str, leverage: float, margin_mode: str) -> None:
+        """Set the standing leverage and margin mode for one contract.
+
+        Both, in one call, because an order carries neither and both are inherited
+        from whatever the symbol was last set to. Margin mode decides whether a
+        losing position can reach the rest of the account.
+        """
+        ...
+
     def set_leverage(self, symbol: str, leverage: float) -> None:
         """Set the standing leverage for one contract.
 

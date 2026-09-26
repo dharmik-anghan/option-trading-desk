@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { PerpPosition } from "../api";
-import { setProtection } from "../api";
+import { closePerpPosition, setProtection } from "../api";
 import { dir, num, pct, signed } from "../format";
 
 interface Props {
@@ -39,6 +39,9 @@ export function PerpsPositions({
   const [stop, setStop] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  // Confirmed rather than a single click. It spends money and cannot be undone,
+  // and the row it sits in is narrow enough to mis-tap.
+  const [closing, setClosing] = useState<PerpPosition | null>(null);
 
   const open = (p: PerpPosition) => {
     setEditing(p.position_id);
@@ -64,6 +67,20 @@ export function PerpsPositions({
     } catch (e) {
       // Shown, never swallowed: believing a stop is attached when it is not is
       // worse than knowing there is none.
+      setFailed(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const close = async (p: PerpPosition) => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await closePerpPosition(p.position_id);
+      setClosing(null);
+      onChanged();
+    } catch (e) {
       setFailed(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -101,6 +118,7 @@ export function PerpsPositions({
                 <th>P&amp;L</th>
                 <th>To liq.</th>
                 <th>Stop</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -162,6 +180,15 @@ export function PerpsPositions({
                         </button>
                       )}
                     </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        className="xbtn danger"
+                        onClick={() => setClosing(p)}
+                        title="Close this position at the market"
+                      >
+                        Close
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -169,6 +196,28 @@ export function PerpsPositions({
           </table>
         )}
       </div>
+
+      {/* The size comes from the venue when the close is sent, not from this row,
+          so a stale figure here cannot leave a remainder open. It is shown because
+          it is what you are agreeing to. */}
+      {closing !== null && (
+        <div className="protform">
+          <span>
+            Close {closing.side === "LONG" ? "long" : "short"} {closing.quantity}{" "}
+            {closing.name} at the market?
+          </span>
+          <button
+            className="xbtn danger"
+            disabled={busy}
+            onClick={() => void close(closing)}
+          >
+            {busy ? "Closing…" : "Yes, close it"}
+          </button>
+          <button className="xbtn" disabled={busy} onClick={() => setClosing(null)}>
+            Keep it
+          </button>
+        </div>
+      )}
 
       {editing !== null && (
         <div className="protform">
