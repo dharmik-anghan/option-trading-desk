@@ -1587,3 +1587,114 @@ a.nitem:hover .nhead {
   outline: 2px solid var(--you);
   outline-offset: 1px;
 }
+
+/* ---------- order ticket ----------
+   A column of labelled fields rather than a grid: it is read top to bottom once,
+   and every row is a decision rather than a value to compare with its neighbour. */
+.ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+}
+.ticket label {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.ticket label small {
+  font-family: var(--u);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.ticket input,
+.ticket select {
+  font: inherit;
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 5px;
+  min-width: 0;
+}
+.ticket input:focus-visible,
+.ticket select:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: 1px;
+}
+
+/* Side is the most expensive thing to get wrong here, so it is two large targets
+   rather than a dropdown, in the hues the desk already uses for buy and sell. */
+.tside {
+  display: flex;
+  gap: 4px;
+}
+.tside button {
+  flex: 1;
+  font: inherit;
+  font-family: var(--u);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.tside button.on.buy {
+  background: var(--you);
+  color: var(--you-fg);
+  border-color: var(--you);
+}
+.tside button.on.sell {
+  background: var(--sell);
+  color: var(--sell-fg);
+  border-color: var(--sell);
+}
+.tside button:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: -2px;
+}
+
+/* What the order is worth, shown while typing rather than after committing:
+   "0.002" means nothing and "168 USDT" means something. */
+.tnotional {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--grid);
+}
+.tnotional small {
+  font-family: var(--u);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.tnotional b {
+  font-family: var(--n);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.xbtn.place {
+  padding: 5px 0;
+  font-family: var(--u);
+  letter-spacing: 0.03em;
+}
+
+.outcome .ok {
+  color: var(--up);
+}
+.outcome .bad {
+  color: var(--dn);
+}
+.outcome .sent {
+  padding: 6px 9px;
+  margin: 0;
+  color: var(--up);
+}

@@ -30,7 +30,21 @@ A second desk covers perpetual futures on Shark Exchange - Bitcoin, gold and
 crude - reached through `GET /api/perps`. It lists what is open with the figures
 leverage makes matter: the margin behind a position, and how far it is from the
 price the venue closes it at, as a percentage rather than in points so gold at
-4,300 and Bitcoin at 84,000 can be read side by side. Prices there arrive on a stream rather
+4,300 and Bitcoin at 84,000 can be read side by side. A stop or a target can be
+handed to the exchange to hold, which is the only kind that fires with this app
+closed.
+
+Orders can be placed from that desk, and **`SHARK_DRY_RUN` is on unless you set it
+to exactly `false`**. With it on, an order is formed, checked, shown to you in full
+and written to the order log - and never sent. Turn it off deliberately, once you
+have watched the desk decide a few times and agreed with what it wanted to do.
+
+Four checks run server-side before anything leaves: quantity, notional, leverage,
+and how far a new position would start from liquidation. They are caps on what
+this program may do rather than opinions about a good trade - a cap too tight
+costs a retyped order, a cap too loose costs whatever the bug was - so the
+defaults are small. Every attempt is recorded whether it was sent, refused or
+rehearsed, because the question after a surprise is what it tried to do. Prices there arrive on a stream rather
 than being polled: the venue allows 60 requests a minute against Fyers' ~200, and
 it pushes. Note that prices are quoted in USDT while the account margins in INR,
 so those two figures are deliberately labelled in different units.

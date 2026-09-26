@@ -555,6 +555,56 @@ export interface PerpPosition {
   stop_loss_orders: number;
 }
 
+export interface PerpOrder {
+  symbol: string;
+  side: "BUY" | "SELL";
+  order_type: "MARKET" | "LIMIT";
+  quantity: number;
+  leverage: number;
+  limit_price?: number | null;
+}
+
+export interface OrderCheck {
+  passed: boolean;
+  reason: string;
+}
+
+export interface PerpOrderResult {
+  /** Whether it actually left. False for a refusal and false for a rehearsal —
+      `dry_run` says which, and they must not be read as the same thing. */
+  sent: boolean;
+  dry_run: boolean;
+  checks: OrderCheck[];
+  reasons: string[];
+  notional: number;
+  price: number | null;
+  venue_order_id: string | null;
+  record_id: number;
+}
+
+export function placePerpOrder(order: PerpOrder): Promise<PerpOrderResult> {
+  return postJson<PerpOrder, PerpOrderResult>("/api/perps/orders", order);
+}
+
+export interface PerpOrderRecord {
+  id: number;
+  at: string;
+  symbol: string;
+  side: string;
+  order_type: string;
+  quantity: number;
+  price: number | null;
+  leverage: number;
+  notional: number;
+  sent: boolean;
+  reason: string;
+  venue_order_id: string | null;
+}
+
+export function getPerpOrders(limit = 50): Promise<PerpOrderRecord[]> {
+  return getJson<PerpOrderRecord[]>(`/api/perps/orders?limit=${limit}`);
+}
+
 export interface Protection {
   quantity: number;
   take_profit?: number | null;

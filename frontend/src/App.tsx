@@ -23,6 +23,7 @@ import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { PerpsChart } from "./components/PerpsChart";
 import { PerpsPositions } from "./components/PerpsPositions";
+import { PerpsTicket } from "./components/PerpsTicket";
 import { PerpsWatch } from "./components/PerpsWatch";
 import {
   UNDERLYINGS,
@@ -320,6 +321,17 @@ export default function App() {
             onSymbol={pickSymbol}
             quotes={quotes.data}
             error={blockingOnly(quotes.error)}
+          />
+        )}
+        {onPerps && (
+          <PerpsTicket
+            instruments={perps.data?.instruments ?? []}
+            prices={Object.fromEntries(
+              (perps.data?.prices ?? []).map((p) => [p.symbol, p.price]),
+            )}
+            symbol={perpSymbol}
+            quoteCurrency={perps.data?.quote_currency ?? "USDT"}
+            onPlaced={perps.refresh}
           />
         )}
         {onPerps && (
