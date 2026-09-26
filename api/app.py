@@ -87,6 +87,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # Built before the watcher so price watches on streamed instruments read from
     # it rather than asking a broker that does not list them.
     hub = TickHub()
+
+    # Set when the app is going down, so a long-lived response can end itself. An
+    # SSE stream loops until its reader leaves, and on shutdown the reader has not
+    # left - uvicorn waits for the response to finish while the response waits for
+    # the reader. That hung a reload with a desk open, and would hang `docker stop`.
+    shutting_down = asyncio.Event()
+    application.state.shutting_down = shutting_down
+
     def perps_broker() -> object | None:
         """The perpetuals adapter, or None when that venue is not configured.
 
@@ -133,6 +141,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        shutting_down.set()
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task

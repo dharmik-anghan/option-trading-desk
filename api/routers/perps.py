@@ -28,6 +28,7 @@ from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
 from broker.models import OrderRequest as BrokerOrderRequest
+from broker.models import Tick
 from broker.shark.models import ContractSpec
 from risk.perps import check_perp_order
 from settings import load_settings
@@ -568,6 +569,37 @@ def order_log(db_path: DbPathDep, limit: int = 50) -> list[OrderRecordResponse]:
 STREAM_HEARTBEAT = 15.0
 
 
+async def _next_tick(
+    queue: asyncio.Queue[Tick], closing: asyncio.Event | None
+) -> Tick | None:
+    """The next tick, or None if the app is going down first.
+
+    Raises TimeoutError when neither happens within the heartbeat, which is the
+    normal case for an instrument nobody is trading at three in the morning.
+    """
+    if closing is None:
+        return await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT)
+
+    waits = [asyncio.create_task(queue.get()), asyncio.create_task(closing.wait())]
+    try:
+        done, _ = await asyncio.wait(
+            waits, timeout=STREAM_HEARTBEAT, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            raise TimeoutError
+        for task in waits:
+            if task.done() and not task.cancelled():
+                result = task.result()
+                if isinstance(result, Tick):
+                    return result
+        return None
+    finally:
+        # A tick pulled from the queue by a task nobody read is a lost tick, but
+        # this only happens on shutdown or a heartbeat, where losing one is fine.
+        for task in waits:
+            task.cancel()
+
+
 @router.get("/stream")
 async def stream(request: Request) -> StreamingResponse:
     """Prices as they arrive, rather than the browser asking every two seconds.
@@ -587,6 +619,11 @@ async def stream(request: Request) -> StreamingResponse:
 
     async def events() -> AsyncIterator[str]:
         hub = _hub(request)
+        # The app's shutdown flag, when there is one. Without it this generator
+        # loops until its reader disconnects, and on shutdown the reader has not
+        # disconnected - so uvicorn waits for the response and the response waits
+        # for the reader.
+        closing: asyncio.Event | None = getattr(request.app.state, "shutting_down", None)
         if hub is None:
             # Said once, rather than holding a connection open that will never
             # carry anything: the stream never started.
@@ -600,13 +637,18 @@ async def stream(request: Request) -> StreamingResponse:
             while True:
                 if await request.is_disconnected():
                     return
+                if closing is not None and closing.is_set():
+                    return
                 try:
-                    tick = await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT)
+                    tick = await _next_tick(queue, closing)
                 except TimeoutError:
                     # A comment, which SSE ignores: it keeps the connection open
                     # without the client having to filter a fake price.
                     yield ": keep-alive\n\n"
                     continue
+                if tick is None:
+                    # Shutting down.
+                    return
                 yield (
                     "data: "
                     + json.dumps(
