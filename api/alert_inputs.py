@@ -13,13 +13,14 @@ runs this on a worker thread rather than pretending otherwise.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
-from alerting.models import WatchKind
+from alerting.models import PositionView, WatchKind
 from alerting.watcher import Inputs
 from api.pricing import basket_live_curve
 from api.store import open_db
-from broker.base import OptionsBroker
+from broker.base import OptionsBroker, PerpetualsData
 from broker.models import OptionChain
 from execution.basket_status import get_basket_payoff
 from execution.portfolio_status import get_portfolio_status
@@ -32,11 +33,31 @@ from venues.instruments import instrument
 log = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _PositionView:
+    """A leveraged position, flattened to what the rules read.
+
+    A small copy rather than passing the adapter's model through, because the rules
+    want a liquidation *distance* and the model offers a method that needs a price.
+    Working that out once here is better than the rules knowing where prices live.
+    """
+
+    symbol: str
+    name: str
+    side: str
+    quantity: float
+    leverage: float
+    liquidation_distance: float | None
+    protected: bool
+    position_id: str
+
+
 def gather(
     db_path: Path,
     broker: OptionsBroker,
     feeds: Feeds,
     hub: TickHub | None = None,
+    perps: object | None = None,
 ) -> Inputs:
     """One pass's worth of data, with partial failure preferred over none.
 
@@ -85,7 +106,9 @@ def gather(
         # Free and already live: the stream delivered these, so there is nothing
         # to request. A symbol the stream has not carried yet is absent rather
         # than zero, which is what keeps a "below" watch from firing on startup.
-        quotes.update({s: p for s in streamed if (p := hub.price(s)) is not None})
+        # Named `mark` rather than `p`: a walrus here once shadowed a loop
+        # variable further down and mypy caught it as a float with no position id.
+        quotes.update({s: mark for s in streamed if (mark := hub.price(s)) is not None})
 
     # Only what something is actually watching. A quote request costs budget, and
     # watching nothing should cost nothing.
@@ -111,6 +134,34 @@ def gather(
             )
         )
 
+    # Leveraged positions, if that venue is configured. Priced from the stream,
+    # because the venue's position payload carries no mark price and the hub
+    # already has one.
+    positions: list[PositionView] = []
+    positions_loaded = perps is None
+    if isinstance(perps, PerpetualsData):
+        try:
+            for held in perps.get_perp_positions():
+                listed = instrument(held.symbol)
+                mark = held.mark_price or (
+                    hub.price(held.symbol) if hub is not None else None
+                )
+                positions.append(
+                    _PositionView(
+                        symbol=held.symbol,
+                        name=listed.name if listed else held.symbol,
+                        side=held.side,
+                        quantity=held.quantity,
+                        leverage=held.leverage,
+                        liquidation_distance=held.liquidation_distance(mark),
+                        protected=held.is_protected,
+                        position_id=held.position_id,
+                    )
+                )
+            positions_loaded = True
+        except Exception:  # noqa: BLE001 - one unavailable venue must not stop the pass
+            log.warning("alert pass could not read perpetual positions", exc_info=True)
+
     cached = feeds.events()
     # Answered at all? A calendar that has never been fetched, or whose last
     # fetch failed, cannot be judged - see Inputs.events_loaded.
@@ -122,4 +173,6 @@ def gather(
         events=cached.events,
         events_loaded=events_loaded,
         quotes=quotes,
+        positions=positions,
+        positions_loaded=positions_loaded,
     )

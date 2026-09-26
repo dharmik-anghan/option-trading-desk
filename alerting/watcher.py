@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from alerting.engine import reconcile
-from alerting.models import Alert, BasketView, EventView, Limits, Outcome
-from alerting.rules import evaluate, evaluate_watches
+from alerting.models import Alert, BasketView, EventView, Limits, Outcome, PositionView
+from alerting.rules import evaluate, evaluate_positions, evaluate_watches
 from storage.alert_repo import (
     append,
     list_watches,
@@ -66,6 +66,16 @@ class Inputs:
     #: Last price per symbol, for the price levels being watched. Only the
     #: symbols something is actually watching are fetched.
     quotes: Mapping[str, float] = field(default_factory=dict)
+    #: Open leveraged positions. Held apart from `baskets` because nothing about
+    #: one resembles an option structure: no expiry, no worst case, and the two
+    #: things worth saying are how close it is to liquidation and whether anything
+    #: is protecting it.
+    positions: Sequence[PositionView] = ()
+    #: Whether the perpetuals venue answered at all. An empty list because a
+    #: request failed means "we cannot see your positions", not "you have none" -
+    #: and treating the first as the second would silently clear every warning
+    #: about them.
+    positions_loaded: bool = True
 
 
 class Notifier(Protocol):
@@ -151,13 +161,20 @@ class Watcher:
                 *evaluate_watches(
                     list_watches(conn, enabled_only=True), inputs.quotes, inputs.total_pnl
                 ),
+                *evaluate_positions(list(inputs.positions), sticky=active),
             ]
             # An event key cannot be judged until the calendar has answered with
             # something. See Inputs.events_loaded.
             usable = inputs.events_loaded and bool(inputs.events)
 
             def evaluable(key: str) -> bool:
-                return usable if key.startswith("event:") else True
+                if key.startswith("event:"):
+                    return usable
+                # Same distinction: a venue that did not answer cannot clear a
+                # warning about a position it did not tell us about.
+                if key.startswith(("unprotected:", "liquidation:")):
+                    return inputs.positions_loaded
+                return True
 
             outcome = reconcile(
                 active,

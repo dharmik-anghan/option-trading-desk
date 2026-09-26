@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from alerting.watcher import Watcher
 from api.alert_inputs import gather
-from api.dependencies import get_broker, get_db_path, get_feeds
+from api.dependencies import broker_for, get_broker, get_db_path, get_feeds
 from api.errors import broker_error_handler
 from api.routers import (
     alerts,
@@ -48,6 +48,7 @@ from notify import Telegram, TelegramConfig
 from settings import load_settings
 from streaming import TickHub
 from venues import for_venue
+from venues import get as get_venue
 
 log = logging.getLogger(__name__)
 
@@ -86,8 +87,22 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # Built before the watcher so price watches on streamed instruments read from
     # it rather than asking a broker that does not list them.
     hub = TickHub()
+    def perps_broker() -> object | None:
+        """The perpetuals adapter, or None when that venue is not configured.
+
+        Built per pass rather than held, so a rotated key is picked up, and
+        returning None keeps the watcher working on an options-only setup.
+        """
+        if not settings.has_shark:
+            return None
+        try:
+            return broker_for(get_venue("shark"))
+        except Exception:  # noqa: BLE001 - a venue that cannot be built is not watched
+            log.warning("could not build the perpetuals adapter for the alert pass")
+            return None
+
     watcher = Watcher(
-        gather=lambda: gather(db_path, get_broker(), feeds_cache, hub),
+        gather=lambda: gather(db_path, get_broker(), feeds_cache, hub, perps_broker()),
         open_conn=lambda: open_db(db_path),
         notifier=notifier,
     )

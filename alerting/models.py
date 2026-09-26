@@ -184,6 +184,36 @@ class BasketView(Protocol):
 
 
 @runtime_checkable
+class PositionView(Protocol):
+    """A leveraged position, as far as the rules care.
+
+    Nothing here resembles an option structure, which is why it is its own view: a
+    perpetual has no expiry and no worst case, and the two things worth saying
+    about one are how close it is to being closed for you and whether anything is
+    protecting it.
+    """
+
+    @property
+    def symbol(self) -> str: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def side(self) -> str: ...
+    @property
+    def quantity(self) -> float: ...
+    @property
+    def leverage(self) -> float: ...
+    #: Fraction of price. None when the venue reported no liquidation price.
+    @property
+    def liquidation_distance(self) -> float | None: ...
+    #: Whether the venue is holding a stop for it.
+    @property
+    def protected(self) -> bool: ...
+    @property
+    def position_id(self) -> str: ...
+
+
+@runtime_checkable
 class EventView(Protocol):
     """A calendar entry, as far as the rules care.
 

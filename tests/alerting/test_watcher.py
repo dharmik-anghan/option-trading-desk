@@ -21,6 +21,7 @@ from alerting.watcher import Inputs, Watcher
 from storage.alert_repo import load_active, load_log, save_limits, undelivered
 from storage.db import connect, init_schema
 from tests.alerting.conftest import FakeBasket, FakeEvent, FakeLeg
+from tests.alerting.test_rules import FakePosition
 
 L = Limits()
 
@@ -248,3 +249,71 @@ class TestTheLoopSurvivesFailure:
         asyncio.run(w.tick())
         assert w.last_error is None
         assert w.last_run_at is not None
+
+
+class TestLeveragedPositionsInAPass:
+    """Positions reaching the watcher, and the distinction that protects them."""
+
+    def _unprotected(self, loaded: bool = True) -> Inputs:
+        held = FakePosition(protected=False, liquidation_distance=0.5)
+        return Inputs(
+            total_pnl=0.0,
+            baskets=[],
+            events=[],
+            events_loaded=True,
+            positions=[held],
+            positions_loaded=loaded,
+        )
+
+    def test_an_unprotected_position_is_recorded(self, db: Path) -> None:
+        w, _ = _watcher(db, self._unprotected)
+        assert [a.key for a in asyncio.run(w.tick()).fired] == ["unprotected:p-1"]
+
+    def test_it_is_said_once_not_every_minute(self, db: Path) -> None:
+        w, clock = _watcher(db, self._unprotected)
+        asyncio.run(w.tick())
+        clock["t"] += 60_000
+        asyncio.run(w.tick())
+        assert len(_log(db)) == 1
+
+    def test_attaching_a_stop_clears_it(self, db: Path) -> None:
+        state = {"protected": False}
+
+        def gather() -> Inputs:
+            held = FakePosition(protected=state["protected"], liquidation_distance=0.5)
+            return Inputs(0.0, [], [], True, positions=[held], positions_loaded=True)
+
+        w, clock = _watcher(db, gather)
+        asyncio.run(w.tick())
+        assert _active(db) == frozenset({"unprotected:p-1"})
+
+        state["protected"] = True
+        clock["t"] += 60_000
+        asyncio.run(w.tick())
+        assert _active(db) == frozenset()
+
+    def test_a_venue_that_did_not_answer_does_not_clear_the_warning(self, db: Path) -> None:
+        # An empty list because a request failed means "we cannot see your
+        # positions", not "you have none" - and treating the first as the second
+        # would silently clear every warning about them.
+        w, clock = _watcher(db, self._unprotected)
+        asyncio.run(w.tick())
+        before = _active(db)
+
+        def blind() -> Inputs:
+            return Inputs(0.0, [], [], True, positions=[], positions_loaded=False)
+
+        w2, _ = _watcher(db, blind, now=clock["t"] + 60_000)
+        asyncio.run(w2.tick())
+        assert _active(db) == before, "a blind pass cleared a position warning"
+
+    def test_a_venue_reporting_no_positions_does_clear_it(self, db: Path) -> None:
+        w, clock = _watcher(db, self._unprotected)
+        asyncio.run(w.tick())
+
+        def none_open() -> Inputs:
+            return Inputs(0.0, [], [], True, positions=[], positions_loaded=True)
+
+        w2, _ = _watcher(db, none_open, now=clock["t"] + 60_000)
+        asyncio.run(w2.tick())
+        assert _active(db) == frozenset()

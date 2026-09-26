@@ -7,11 +7,18 @@ usually recording a bug that reached the screen once.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date
 
 from alerting.models import Direction, Limits, Severity, Watch, WatchKind
-from alerting.rules import HYSTERESIS, affects_india, evaluate, evaluate_watches, events_before
+from alerting.rules import (
+    HYSTERESIS,
+    affects_india,
+    evaluate,
+    evaluate_positions,
+    evaluate_watches,
+    events_before,
+)
 from tests.alerting.conftest import FakeBasket, FakeEvent, FakeLeg
 
 L = Limits()
@@ -462,3 +469,80 @@ def test_the_limit_is_read_per_contract_not_weighted_by_lots() -> None:
     past = FakeBasket(id=8, delta_limit=0.15, net_delta_per_contract=0.20, net_delta=13.0)
     fired = next(c for c in evaluate(None, [past], L) if c.key.startswith("delta:"))
     assert "+0.20" in fired.message, "the message quotes the per-contract figure"
+
+
+@dataclass(frozen=True)
+class FakePosition:
+    """A leveraged position, as the rules see one."""
+
+    symbol: str = "XAUUSDT"
+    name: str = "Gold"
+    side: str = "LONG"
+    quantity: float = 0.002
+    leverage: float = 10.0
+    liquidation_distance: float | None = 0.5
+    protected: bool = True
+    position_id: str = "p-1"
+
+
+class TestLeveragedPositions:
+    """What is worth saying about a position that can be closed for you.
+
+    Neither of these has an options equivalent: a spread cannot be ended by a small
+    move, and nothing at a broker is holding a stop for it.
+    """
+
+    def test_an_unprotected_position_is_a_risk(self) -> None:
+        # A stop the venue holds fires while this program is closed and the machine
+        # asleep. Without one, nothing is between the position and the market, and
+        # this desk trades overnight.
+        on = evaluate_positions([FakePosition(protected=False)])
+        (alert,) = [c for c in on if c.key.startswith("unprotected:")]
+        assert alert.severity is Severity.RISK
+        assert alert.subject == "Gold"
+        assert "no stop" in alert.message
+
+    def test_a_protected_position_is_quiet(self) -> None:
+        assert not [
+            c for c in evaluate_positions([FakePosition(protected=True)])
+            if c.key.startswith("unprotected:")
+        ]
+
+    def test_nearing_liquidation_is_a_risk(self) -> None:
+        on = evaluate_positions([FakePosition(liquidation_distance=0.04)])
+        (alert,) = [c for c in on if c.key.startswith("liquidation:")]
+        assert alert.severity is Severity.RISK
+        assert "4.0%" in alert.message
+
+    def test_room_to_breathe_is_quiet(self) -> None:
+        assert not [
+            c for c in evaluate_positions([FakePosition(liquidation_distance=0.5)])
+            if c.key.startswith("liquidation:")
+        ]
+
+    def test_the_liquidation_warning_has_a_band(self) -> None:
+        # A position hovering at the threshold would otherwise announce itself each
+        # time the price crossed back, the same way a tested short did.
+        held = FakePosition(liquidation_distance=0.105)
+        cold = evaluate_positions([held])
+        warm = evaluate_positions([held], sticky=frozenset({"liquidation:p-1"}))
+        assert not [c for c in cold if c.key.startswith("liquidation:")]
+        assert [c for c in warm if c.key.startswith("liquidation:")]
+
+    def test_an_unknown_liquidation_price_raises_nothing(self) -> None:
+        # Rather than treating absence as nearness.
+        assert not [
+            c for c in evaluate_positions([FakePosition(liquidation_distance=None)])
+            if c.key.startswith("liquidation:")
+        ]
+
+    def test_a_closed_position_is_ignored(self) -> None:
+        assert evaluate_positions([FakePosition(quantity=0.0, protected=False)]) == []
+
+    def test_the_side_is_worded_not_signed(self) -> None:
+        on = evaluate_positions([FakePosition(side="SHORT", protected=False)])
+        assert "Short" in on[0].message
+
+    def test_both_can_fire_for_one_position(self) -> None:
+        on = evaluate_positions([FakePosition(protected=False, liquidation_distance=0.03)])
+        assert {c.key.split(":")[0] for c in on} == {"unprotected", "liquidation"}

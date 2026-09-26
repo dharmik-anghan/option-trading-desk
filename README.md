@@ -188,6 +188,11 @@ limit are set on each open structure rather than as account-wide settings, since
 one number shared across a condor and a calendar answers for neither. Blank means
 no level, and moving a level lets it fire again.
 
+On the perpetuals desk two more are raised without being asked for, because they
+have no options equivalent and no good moment to notice them yourself: a position
+with no stop held at the venue, and one that has drifted within a tenth of its
+liquidation price. Both go to Telegram like everything else.
+
 Besides those, you can ask about levels — "tell me if NIFTY goes above 24,000", or if net P&L drops through
 a number. Add them in the alerts panel, or `POST /api/alerts/watches`. A level
 can be paused without losing it, and moving one lets it fire again rather than

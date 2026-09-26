@@ -22,6 +22,7 @@ from alerting.models import (
     Direction,
     EventView,
     Limits,
+    PositionView,
     Severity,
     Watch,
     WatchKind,
@@ -35,6 +36,10 @@ from alerting.models import (
 #: including inflation prints from Thailand, Turkiye and Brazil. A warning list
 #: that long is one nobody reads, which defeats the point of having one.
 MOVES_INDIA = frozenset({"United States"})
+
+#: How close to liquidation is worth saying so. A tenth of the price away is not
+#: far on a leveraged position: at 20x it is two thirds of the margin gone.
+NEAR_LIQUIDATION = 0.1
 
 #: Fraction of a threshold at which an alert that is already on clears.
 #:
@@ -327,4 +332,65 @@ def evaluate_watches(
                 ),
             )
         )
+    return on
+
+
+def evaluate_positions(
+    positions: Sequence[PositionView],
+    near_liquidation: float = NEAR_LIQUIDATION,
+    sticky: frozenset[str] = frozenset(),
+) -> list[Condition]:
+    """What is worth saying about a leveraged position.
+
+    Two things, and neither has an options equivalent.
+
+    An unprotected position is the first. A stop the venue holds fires while this
+    program is closed and the machine asleep; without one, nothing stands between
+    the position and the market, and this desk trades through the night. It is
+    raised once per position rather than repeatedly - the engine's edge triggering
+    sees to that - and it clears the moment a stop is attached.
+
+    Distance to liquidation is the second, as a fraction of price so that gold at
+    4,300 and Bitcoin at 84,000 are comparable. A tenth away sounds like room and
+    is not: at 20x it is most of the margin.
+    """
+    on: list[Condition] = []
+    for p in positions:
+        if p.quantity <= 0:
+            continue
+        side = "long" if p.side.upper() == "LONG" else "short"
+
+        if not p.protected:
+            on.append(
+                Condition(
+                    key=f"unprotected:{p.position_id}",
+                    severity=Severity.RISK,
+                    subject=p.name,
+                    message=(
+                        f"{side.capitalize()} {p.quantity:g} at {p.leverage:g}x has no stop "
+                        f"at the venue"
+                    ),
+                )
+            )
+
+        distance = p.liquidation_distance
+        if distance is None:
+            continue
+        # A band, for the same reason the tested-short alert has one: a position
+        # hovering at the threshold would otherwise announce itself each time the
+        # price crossed back.
+        key = f"liquidation:{p.position_id}"
+        bound = near_liquidation / HYSTERESIS if key in sticky else near_liquidation
+        if distance <= bound:
+            on.append(
+                Condition(
+                    key=key,
+                    severity=Severity.RISK,
+                    subject=p.name,
+                    message=(
+                        f"{side.capitalize()} {p.quantity:g} at {p.leverage:g}x is "
+                        f"{distance:.1%} from liquidation"
+                    ),
+                )
+            )
     return on
