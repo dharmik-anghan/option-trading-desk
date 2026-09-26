@@ -49,3 +49,41 @@ def test_the_routers_are_all_registered(client: TestClient) -> None:
         "/api/baskets",
     ):
         assert client.get(path).status_code == 200, path
+
+
+def test_cors_allows_every_method_the_app_actually_routes(client: TestClient) -> None:
+    """The middleware's method list has to keep up with the routes.
+
+    It did not: the alert thresholds are edited with a PUT and PUT was missing,
+    which is invisible from the server's side. The endpoint works, curl works,
+    and only a browser fails - in the preflight, before the request is made, so
+    nothing appears in the server log and the page sees "Failed to fetch".
+    """
+    from api.app import app
+
+    routed = {
+        method
+        for route in app.routes
+        for method in (getattr(route, "methods", None) or set())
+        if method not in {"HEAD", "OPTIONS"}
+    }
+    # Routers are nested in this FastAPI version, so walk into them too.
+    for route in app.routes:
+        for nested in getattr(route, "routes", []) or []:
+            routed |= {
+                m for m in (getattr(nested, "methods", None) or set())
+                if m not in {"HEAD", "OPTIONS"}
+            }
+
+    allowed: set[str] = set()
+    for method in sorted(routed):
+        response = client.options(
+            "/api/alerts",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": method,
+            },
+        )
+        if response.status_code == 200:
+            allowed.add(method)
+    assert routed <= allowed, f"CORS blocks {sorted(routed - allowed)}, which the app routes"

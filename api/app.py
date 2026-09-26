@@ -134,7 +134,11 @@ app = FastAPI(title="Option Strategy Dashboard API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_methods=["GET", "POST", "DELETE"],
+    # PUT included because the alert thresholds are edited with one. Its absence
+    # was invisible from the server's side - the endpoint worked, and every
+    # request from the browser died in the preflight instead, which reaches the
+    # page as "Failed to fetch" with nothing in the server log.
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
