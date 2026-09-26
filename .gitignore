@@ -22,3 +22,7 @@ frontend/dist/
 logs/
 !logs/.gitkeep
 data/backups/
+
+# The bar store. Rebuildable from the sources, and large.
+*.duckdb
+*.duckdb.wal

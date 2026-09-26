@@ -30,6 +30,14 @@ dependencies = [
     # An explicit CA bundle for that stream: aiohttp's default SSL context could
     # not verify the venue's certificate on macOS.
     "certifi>=2024.2",
+    # Historical bars, kept so a chart does not re-ask a rate-limited source for
+    # candles it already has. Columnar, which is what a few million bars want, and
+    # its Parquet support is the escape hatch if this data outgrows the app.
+    #
+    # The largest dependency here after the AWS SDK the Fyers SDK drags in. SQLite
+    # would hold bars too; DuckDB earns the size on range scans over long
+    # histories, which is what every chart request is.
+    "duckdb>=1.1",
 ]
 
 [dependency-groups]

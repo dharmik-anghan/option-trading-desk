@@ -38,6 +38,8 @@ charset-normalizer==3.5.1
     # via requests
 click==8.5.0
     # via uvicorn
+duckdb==1.5.5
+    # via option-strategy
 fastapi==0.141.1
     # via option-strategy
 fastjsonschema==2.22.2
