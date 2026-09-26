@@ -202,6 +202,40 @@ class SharkBroker:
             raise BrokerError("Shark returned no position list")
         return parse_perp_positions(rows)
 
+    def set_protection(
+        self,
+        position_id: str,
+        *,
+        quantity: float,
+        take_profit: float | None = None,
+        stop_loss: float | None = None,
+    ) -> None:
+        """Ask the venue to hold a take-profit and a stop-loss for a position.
+
+        The point of doing this at the venue rather than here: an exchange-held
+        stop fires with this app closed and the machine asleep, which is the only
+        kind that means anything on a market that trades overnight. A stop this
+        desk watches for is a stop that stops working when a laptop lid shuts.
+
+        Both are optional and sent only when given, so setting one does not clear
+        the other by omission. Levels are prices, not distances - the venue wants
+        the price to trigger at.
+
+        This writes to a live account. Callers confirm first; nothing here does.
+        """
+        if take_profit is None and stop_loss is None:
+            raise BrokerError("nothing to set: give a take-profit, a stop, or both")
+        if quantity <= 0:
+            raise BrokerError("a protective order needs a quantity")
+
+        body: dict[str, Any] = {"positionId": position_id}
+        if take_profit is not None:
+            body["splitTakeProfitOrders"] = [{"quantity": quantity, "price": take_profit}]
+        if stop_loss is not None:
+            body["splitStopLossOrders"] = [{"quantity": quantity, "price": stop_loss}]
+
+        self._request("POST", "/v2/order/split-tp-sl", body=body, signed=True)
+
     def place_order(self, order: OrderRequest) -> OrderResult:
         """Place a real order, with real money, on leverage.
 

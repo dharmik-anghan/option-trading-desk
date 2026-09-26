@@ -230,6 +230,8 @@ def parse_perp_position(row: dict[str, Any]) -> PerpPosition:
         unrealized_pnl=unrealized,
         unrealized_pnl_in_margin_asset=unrealized_margin,
         position_id=str(row.get("positionId") or row.get("id") or ""),
+        take_profit_orders=int(_opt_num(row.get("takeProfitOrdersQty")) or 0),
+        stop_loss_orders=int(_opt_num(row.get("stopLossOrdersQty")) or 0),
     )
 
 

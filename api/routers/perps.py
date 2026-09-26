@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from api.dependencies import broker_for
 from broker.base import PerpetualsData
@@ -86,6 +86,12 @@ class PositionResponse(BaseModel):
     #: difference in points is not.
     liquidation_distance: float | None
     position_id: str
+    #: Whether the venue is holding a stop for this position. The thing worth
+    #: seeing first on a leveraged book: an exchange-held stop works with this app
+    #: closed, and its absence means nothing closes the position but the market.
+    protected: bool
+    take_profit_orders: int
+    stop_loss_orders: int
 
 
 class DeskResponse(BaseModel):
@@ -182,6 +188,9 @@ def desk(request: Request) -> DeskResponse:
                         liquidation_price=p.liquidation_price,
                         liquidation_distance=p.liquidation_distance(price),
                         position_id=p.position_id,
+                        protected=p.is_protected,
+                        take_profit_orders=p.take_profit_orders,
+                        stop_loss_orders=p.stop_loss_orders,
                     )
                 )
         except BrokerError as exc:
@@ -238,3 +247,52 @@ def candles(symbol: str, resolution: str = "60", days: int = 5) -> list[CandleRe
         )
         for c in rows
     ]
+
+
+class ProtectionRequest(BaseModel):
+    """Levels for the venue to hold. Prices, not distances.
+
+    At least one is required, and each is sent only when given - so setting a
+    stop does not clear a target by omission, which would remove protection while
+    appearing to add it.
+    """
+
+    quantity: float = Field(gt=0)
+    take_profit: float | None = Field(default=None, gt=0)
+    stop_loss: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> ProtectionRequest:
+        if self.take_profit is None and self.stop_loss is None:
+            raise ValueError("give a take-profit, a stop, or both")
+        return self
+
+
+@router.post("/positions/{position_id}/protection", status_code=204)
+def set_protection(position_id: str, body: ProtectionRequest) -> None:
+    """Have the venue hold a take-profit and stop-loss against a position.
+
+    A write against a live account, and the one write on this desk that can only
+    reduce risk: both legs are reduce-only by construction, so the worst outcome
+    of a mistake here is a position closed earlier than intended.
+
+    The levels are held by the exchange, which is the point - they fire with this
+    app closed and the machine asleep, on a market that trades overnight.
+    """
+    spec = get_venue(VENUE_ID)
+    if not spec.can(Capability.PERPETUALS):
+        raise HTTPException(status_code=501, detail="this venue holds no positions")
+    broker = broker_for(spec)
+    if not isinstance(broker, PerpetualsData):
+        raise HTTPException(status_code=501, detail="this venue cannot hold a stop")
+    try:
+        broker.set_protection(
+            position_id,
+            quantity=body.quantity,
+            take_profit=body.take_profit,
+            stop_loss=body.stop_loss,
+        )
+    except BrokerError as exc:
+        # Never swallowed: protection that silently failed to attach is worse than
+        # none, because you would believe it was there.
+        raise HTTPException(status_code=502, detail=exc.message) from exc

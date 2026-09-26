@@ -50,6 +50,24 @@ class PerpPosition:
     unrealized_pnl_in_margin_asset: float | None
     #: The venue's own id, for cancelling or attaching a stop to this position.
     position_id: str
+    #: How many take-profit and stop-loss orders the venue is already holding
+    #: against this position. Counts, not levels - the position payload reports
+    #: only how many, and reading the levels means listing open orders.
+    #:
+    #: Zero stop-loss orders on a leveraged position is the thing worth noticing
+    #: on this desk, which is why it is carried here rather than fetched when
+    #: somebody thinks to look.
+    take_profit_orders: int = 0
+    stop_loss_orders: int = 0
+
+    @property
+    def is_protected(self) -> bool:
+        """Whether the venue is holding a stop for this position.
+
+        A stop the exchange holds works with this app closed and the machine off,
+        which is the only kind that counts on a market that trades overnight.
+        """
+        return self.stop_loss_orders > 0
 
     @property
     def is_long(self) -> bool:

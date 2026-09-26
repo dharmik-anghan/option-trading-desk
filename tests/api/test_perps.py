@@ -90,11 +90,27 @@ class Stub:
     def __init__(self, position: PerpPosition | None = None, fail: bool = False) -> None:
         self._position = position
         self._fail = fail
+        self.protection: list[tuple[str, float, float | None, float | None]] = []
 
     def get_perp_positions(self) -> list[PerpPosition]:
         if self._fail:
             raise BrokerError("Shark: signature rejected")
         return [self._position] if self._position is not None else []
+
+    def set_protection(
+        self,
+        position_id: str,
+        *,
+        quantity: float,
+        take_profit: float | None = None,
+        stop_loss: float | None = None,
+    ) -> None:
+        """Recorded, never sent. The protocol requires it, so a stub that omitted
+        it would stop satisfying `PerpetualsData` - which is how this test caught
+        the method being added."""
+        if self._fail:
+            raise BrokerError("Shark: signature rejected")
+        self.protection.append((position_id, quantity, take_profit, stop_loss))
 
 
 def _position(**over: object) -> PerpPosition:
@@ -112,6 +128,8 @@ def _position(**over: object) -> PerpPosition:
         "unrealized_pnl": None,
         "unrealized_pnl_in_margin_asset": None,
         "position_id": "p-1",
+        "take_profit_orders": 0,
+        "stop_loss_orders": 0,
     }
     fields.update(over)
     return PerpPosition(**fields)  # type: ignore[arg-type]
@@ -175,3 +193,84 @@ class TestPositions:
         assert body["positions"] == []
         assert body["positions_error"] is not None
         assert "signature" in body["positions_error"]
+
+
+class TestProtection:
+    """Asking the venue to hold a stop. Never sent from a test - recorded."""
+
+    def test_a_stop_reaches_the_venue_with_the_position_size(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position())
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        response = client.post(
+            "/api/perps/positions/p-1/protection",
+            json={"quantity": 0.01, "stop_loss": 4500},
+        )
+        assert response.status_code == 204
+        assert stub.protection == [("p-1", 0.01, None, 4500.0)]
+
+    def test_both_levels_can_be_set_at_once(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position())
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        client.post(
+            "/api/perps/positions/p-1/protection",
+            json={"quantity": 0.01, "stop_loss": 4500, "take_profit": 4100},
+        )
+        assert stub.protection == [("p-1", 0.01, 4100.0, 4500.0)]
+
+    def test_asking_for_neither_is_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position())
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        assert (
+            client.post("/api/perps/positions/p-1/protection", json={"quantity": 0.01}).status_code
+            == 422
+        )
+        assert stub.protection == []
+
+    def test_a_zero_quantity_is_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub = Stub(_position())
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        assert (
+            client.post(
+                "/api/perps/positions/p-1/protection",
+                json={"quantity": 0, "stop_loss": 1},
+            ).status_code
+            == 422
+        )
+        assert stub.protection == []
+
+    def test_a_venue_refusal_is_reported_not_swallowed(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Believing a stop is attached when it is not is worse than knowing there
+        # is none.
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(fail=True))
+        response = client.post(
+            "/api/perps/positions/p-1/protection",
+            json={"quantity": 0.01, "stop_loss": 1},
+        )
+        assert response.status_code == 502
+        assert "signature" in response.json()["detail"]
+
+    def test_an_unprotected_position_says_so(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        (p,) = client.get("/api/perps").json()["positions"]
+        assert p["protected"] is False
+
+    def test_a_protected_position_says_so(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        held = _position(stop_loss_orders=1)
+        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(held))
+        (p,) = client.get("/api/perps").json()["positions"]
+        assert p["protected"] is True
+        assert p["stop_loss_orders"] == 1

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { PerpPosition } from "../api";
+import { setProtection } from "../api";
 import { dir, num, pct, signed } from "../format";
 
 interface Props {
@@ -8,6 +10,8 @@ interface Props {
   quoteCurrency: string;
   /** What the margin is in, which is not the same on this venue. */
   moneyCurrency: string;
+  /** Called after a stop is attached, so the list redraws with it. */
+  onChanged: () => void;
 }
 
 /** Below this, liquidation is close enough to say so loudly. */
@@ -23,7 +27,49 @@ const CLOSE_TO_LIQUIDATION = 0.1;
  * and it is a percentage of price so that gold at 4,300 and Bitcoin at 84,000 can
  * be read side by side.
  */
-export function PerpsPositions({ positions, error, quoteCurrency, moneyCurrency }: Props) {
+export function PerpsPositions({
+  positions,
+  error,
+  quoteCurrency,
+  moneyCurrency,
+  onChanged,
+}: Props) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [target, setTarget] = useState("");
+  const [stop, setStop] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const open = (p: PerpPosition) => {
+    setEditing(p.position_id);
+    setTarget("");
+    setStop("");
+    setFailed(null);
+  };
+
+  const submit = async (p: PerpPosition) => {
+    const tp = target.trim() ? Number(target) : null;
+    const sl = stop.trim() ? Number(stop) : null;
+    if (tp === null && sl === null) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await setProtection(p.position_id, {
+        quantity: p.quantity,
+        take_profit: tp,
+        stop_loss: sl,
+      });
+      setEditing(null);
+      onChanged();
+    } catch (e) {
+      // Shown, never swallowed: believing a stop is attached when it is not is
+      // worse than knowing there is none.
+      setFailed(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="panel a-positions">
       <div className="ph">
@@ -54,6 +100,7 @@ export function PerpsPositions({ positions, error, quoteCurrency, moneyCurrency 
                 <th>Now</th>
                 <th>P&amp;L</th>
                 <th>To liq.</th>
+                <th>Stop</th>
               </tr>
             </thead>
             <tbody>
@@ -95,6 +142,26 @@ export function PerpsPositions({ positions, error, quoteCurrency, moneyCurrency 
                         ? "—"
                         : pct(p.liquidation_distance, 1).replace("+", "")}
                     </td>
+                    <td>
+                      {/* The first thing to know about a leveraged position, so
+                          it is a column rather than something to go and check.
+                          An exchange-held stop works with this app closed; an
+                          unprotected position has nothing between it and the
+                          market. */}
+                      {p.protected ? (
+                        <span className="prot on" title={`${p.stop_loss_orders} held by the venue`}>
+                          held
+                        </span>
+                      ) : (
+                        <button
+                          className="xbtn danger"
+                          onClick={() => open(p)}
+                          title="Nothing is protecting this position"
+                        >
+                          none
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -102,6 +169,40 @@ export function PerpsPositions({ positions, error, quoteCurrency, moneyCurrency 
           </table>
         )}
       </div>
+
+      {editing !== null && (
+        <div className="protform">
+          <span className="dim">Held by the exchange, so it fires with this closed:</span>
+          <input
+            type="number"
+            value={stop}
+            placeholder="stop price"
+            aria-label="Stop price"
+            onChange={(e) => setStop(e.target.value)}
+          />
+          <input
+            type="number"
+            value={target}
+            placeholder="target price"
+            aria-label="Take-profit price"
+            onChange={(e) => setTarget(e.target.value)}
+          />
+          <button
+            className="xbtn"
+            disabled={busy || (!stop.trim() && !target.trim())}
+            onClick={() => {
+              const p = positions.find((x) => x.position_id === editing);
+              if (p) void submit(p);
+            }}
+          >
+            {busy ? "Sending…" : "Attach"}
+          </button>
+          <button className="xbtn" disabled={busy} onClick={() => setEditing(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {failed && <p className="err">Not attached: {failed}</p>}
 
       {positions.length > 0 && (
         <p className="dim" style={{ margin: 0, padding: "4px 9px 8px", lineHeight: 1.4 }}>

@@ -228,6 +228,11 @@ one situation reading as two is worse than a wrong figure.
 - **Calendars and diagonals get no payoff curve.** The maths assumes one
   expiry, and applying it across two reports the whole debit as a certain loss,
   so it is suppressed rather than shown wrong.
+- **Write access to Shark is unproven.** Every read works. The first write - a
+  request to attach a stop, aimed at a position id that does not exist - came back
+  "Access denied", which could mean the position is not there or could mean the
+  API key has no trading permission. The two are indistinguishable from the
+  response, and it matters before anything places an order.
 - **One shape in the Shark integration is unverified.** An open perpetual
   position's unrealised-P&L field name is guessed, because the account had no
   open position to capture and a closed one reports realised profit instead. When

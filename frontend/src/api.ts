@@ -536,6 +536,31 @@ export interface PerpPosition {
   /** Fraction of price. Comparable across instruments; a points difference is not. */
   liquidation_distance: number | null;
   position_id: string;
+  /** Whether the exchange is holding a stop for this position. An exchange-held
+      stop fires with this app closed; its absence means nothing closes the
+      position but the market. */
+  protected: boolean;
+  take_profit_orders: number;
+  stop_loss_orders: number;
+}
+
+export interface Protection {
+  quantity: number;
+  take_profit?: number | null;
+  stop_loss?: number | null;
+}
+
+/** Ask the venue to hold a take-profit and stop-loss against a position. */
+export async function setProtection(positionId: string, body: Protection): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/api/perps/positions/${encodeURIComponent(positionId)}/protection`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!response.ok) throw new Error(await extractErrorMessage(response));
 }
 
 export interface PerpsDesk {

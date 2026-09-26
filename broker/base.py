@@ -114,6 +114,21 @@ class PerpetualsData(Protocol):
         """Open positions, with their leverage, margin and liquidation price."""
         ...
 
+    def set_protection(
+        self,
+        position_id: str,
+        *,
+        quantity: float,
+        take_profit: float | None = None,
+        stop_loss: float | None = None,
+    ) -> None:
+        """Have the venue hold a take-profit and stop-loss against a position.
+
+        At the venue, not here: a stop this desk watches for stops working when a
+        laptop lid shuts, and this market trades overnight.
+        """
+        ...
+
 
 @runtime_checkable
 class Streaming(Protocol):

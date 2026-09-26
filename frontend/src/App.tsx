@@ -328,6 +328,7 @@ export default function App() {
             error={perps.data?.positions_error ?? null}
             quoteCurrency={perps.data?.quote_currency ?? "USDT"}
             moneyCurrency={perps.data?.money_currency ?? "INR"}
+            onChanged={perps.refresh}
           />
         )}
         {!onPerps && (
