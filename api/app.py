@@ -83,8 +83,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     open_db(db_path).close()
 
     feeds_cache = get_feeds()
+    # Built before the watcher so price watches on streamed instruments read from
+    # it rather than asking a broker that does not list them.
+    hub = TickHub()
     watcher = Watcher(
-        gather=lambda: gather(db_path, get_broker(), feeds_cache),
+        gather=lambda: gather(db_path, get_broker(), feeds_cache, hub),
         open_conn=lambda: open_db(db_path),
         notifier=notifier,
     )
@@ -98,7 +101,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # is not a nicety: its budget is 60 requests a minute against Fyers' ~200, and
     # three instruments across several panels would spend it on nothing. The hub
     # holds the latest so everything else reads from memory.
-    hub = TickHub()
     stream: SharkStream | None = None
     application.state.tick_hub = hub
     application.state.tick_stream = None

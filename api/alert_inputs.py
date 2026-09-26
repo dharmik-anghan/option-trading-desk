@@ -26,6 +26,8 @@ from execution.portfolio_status import get_portfolio_status
 from feeds.fetch import Feeds
 from storage.alert_repo import list_watches
 from storage.basket_repo import list_baskets as repo_list_baskets
+from streaming import TickHub
+from venues.instruments import instrument
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def gather(
     db_path: Path,
     broker: OptionsBroker,
     feeds: Feeds,
+    hub: TickHub | None = None,
 ) -> Inputs:
     """One pass's worth of data, with partial failure preferred over none.
 
@@ -68,14 +71,29 @@ def gather(
     finally:
         conn.close()
 
+    # Each symbol to the venue that actually lists it. Asking the options broker
+    # for BTCUSDT does not come back empty - it raises KeyError on a response
+    # shape it cannot read - and because its quotes are one batched call, a single
+    # crypto symbol in the list stopped every price watch working, index ones
+    # included. The alerts panel offers crypto symbols on the crypto desk, so
+    # that was a watch anybody would have created.
+    quotes: dict[str, float] = {}
+    streamed = [s for s in watched if instrument(s) is not None]
+    polled = [s for s in watched if instrument(s) is None]
+
+    if streamed and hub is not None:
+        # Free and already live: the stream delivered these, so there is nothing
+        # to request. A symbol the stream has not carried yet is absent rather
+        # than zero, which is what keeps a "below" watch from firing on startup.
+        quotes.update({s: p for s in streamed if (p := hub.price(s)) is not None})
+
     # Only what something is actually watching. A quote request costs budget, and
     # watching nothing should cost nothing.
-    quotes: dict[str, float] = {}
-    if watched:
+    if polled:
         try:
-            quotes = {sym: q.ltp for sym, q in broker.get_quote(watched).items()}
+            quotes.update({sym: q.ltp for sym, q in broker.get_quote(polled).items()})
         except Exception:  # noqa: BLE001 - a missed quote is a late alert, not a failed pass
-            log.warning("alert pass could not read quotes for %s", watched, exc_info=True)
+            log.warning("alert pass could not read quotes for %s", polled, exc_info=True)
 
     chains: dict[tuple[str, str], OptionChain] = {}
     for basket in baskets:
