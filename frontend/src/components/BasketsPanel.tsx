@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Basket, Position, Quote } from "../api";
-import { closeBasketLeg, deleteBasket, removeBasketLeg } from "../api";
+import { closeBasketLeg, deleteBasket, removeBasketLeg, setBasketLevels } from "../api";
 import { dir, int, num, rupeesC, signed } from "../format";
 import { PayoffChart } from "./PayoffChart";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -194,6 +194,12 @@ export function BasketsPanel({
 
                   {openId === b.id ? (
                     <StructureDetail
+                      onLevels={(levels) =>
+                        // Through the same helper as closing a leg, so a refused
+                        // level surfaces where a refused close does rather than
+                        // vanishing into the console.
+                        void run(() => setBasketLevels(b.id, levels), () => {})
+                      }
                       basket={b}
                       spot={quotes?.[b.underlying_symbol]?.ltp ?? null}
                       onCloseLeg={(l) =>

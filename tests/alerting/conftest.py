@@ -33,6 +33,14 @@ class FakeBasket:
     days_to_expiry: float | None = 30.0
     max_loss: float | None = -5000.0
     max_profit: float | None = 2000.0
+    #: This structure's own levels. Unset by default, as a new basket's are.
+    stop_loss: float | None = None
+    profit_target: float | None = None
+    delta_limit: float | None = None
+    #: Computed server-side in the real thing; given here so the rules can be
+    #: exercised without reconstructing the arithmetic in a test.
+    mtm: float | None = None
+    net_delta: float | None = None
     legs: list[FakeLeg] = field(default_factory=lambda: [FakeLeg()])
 
 

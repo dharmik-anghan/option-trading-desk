@@ -146,6 +146,53 @@ def evaluate(
                 )
             )
 
+        # Levels set on this structure, judged before the account-wide ones. They
+        # are the ones that answer "how is this trade doing" - which a threshold
+        # applied to every structure alike cannot, because a condor's acceptable
+        # delta is not a calendar's and a target on one book is not a target on
+        # one position.
+        if b.profit_target is not None and b.mtm is not None and b.mtm >= b.profit_target:
+            on.append(
+                Condition(
+                    key=f"profit:{b.id}:{b.profit_target:g}",
+                    severity=Severity.TARGET,
+                    subject=b.name,
+                    message=f"Target reached \u2014 {rupees(b.mtm)} of {rupees(b.profit_target)}",
+                )
+            )
+
+        # Held as a negative number, the way a loss reads. A positive one is
+        # taken as the magnitude rather than refused, since "stop at 2000" is a
+        # reasonable thing to type and refusing it would be pedantry.
+        if b.stop_loss is not None and b.mtm is not None:
+            floor = -abs(b.stop_loss)
+            if b.mtm <= floor:
+                on.append(
+                    Condition(
+                        key=f"stop:{b.id}:{floor:g}",
+                        severity=Severity.RISK,
+                        subject=b.name,
+                        message=f"Stop hit \u2014 {rupees(b.mtm)} against {rupees(floor)}",
+                    )
+                )
+
+        # Direction-agnostic: a structure meant to be neutral has drifted whether
+        # it drifted long or short, and which way is in the figure.
+        if b.delta_limit is not None and b.net_delta is not None:
+            if abs(b.net_delta) >= abs(b.delta_limit):
+                leaning = "long" if b.net_delta > 0 else "short"
+                on.append(
+                    Condition(
+                        key=f"delta:{b.id}:{abs(b.delta_limit):g}",
+                        severity=Severity.WARN,
+                        subject=b.name,
+                        message=(
+                            f"Delta {b.net_delta:+.2f} is past {abs(b.delta_limit):.2f} "
+                            f"\u2014 leaning {leaning}"
+                        ),
+                    )
+                )
+
         if b.days_to_expiry is not None and b.days_to_expiry <= limits.expiry_days:
             on.append(
                 Condition(

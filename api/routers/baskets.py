@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, model_validator
 
 from analytics.payoff import (
     payoff_curve_points,
@@ -27,7 +28,14 @@ from api.store import open_db
 from broker.models import OptionChain, OptionChainRow
 from broker.symbols import series_prefix
 from execution.basket_status import get_basket_payoff
-from storage.basket_repo import Basket, BasketLeg, NewBasketLeg, create_basket, get_basket
+from storage.basket_repo import (
+    Basket,
+    BasketLeg,
+    NewBasketLeg,
+    create_basket,
+    get_basket,
+    set_basket_levels,
+)
 from storage.basket_repo import close_leg as repo_close_leg
 from storage.basket_repo import delete_basket as repo_delete_basket
 from storage.basket_repo import delete_leg as repo_delete_leg
@@ -78,6 +86,48 @@ def _leg_response(leg: BasketLeg, row: OptionChainRow | None) -> BasketLegRespon
         oi_change=row.oi_change if row is not None else None,
     )
 
+def _structure_totals(
+    legs: list[BasketLegResponse],
+) -> tuple[float | None, float | None]:
+    """What the open legs are worth now, and how the structure leans.
+
+    Computed here rather than in the browser, which is where both used to be
+    worked out. Two places deriving the same figure is how the desk and the alert
+    that warns about it come to disagree - and now the rules need them too, so
+    there would have been three.
+
+    A short leg subtracts: selling premium shows positive theta and negative
+    delta on a call, which is the shape of the trade. Either is None when the
+    broker has not priced every open leg, because a partial total read as a whole
+    one is a number that looks fine and is wrong.
+    """
+    open_legs = [leg for leg in legs if leg.is_open]
+    if not open_legs:
+        return None, None
+
+    def direction(leg: BasketLegResponse) -> int:
+        return 1 if leg.side == "BUY" else -1
+
+    marks = [leg.ltp for leg in open_legs]
+    deltas = [leg.delta for leg in open_legs]
+
+    mtm: float | None = None
+    if all(mark is not None for mark in marks):
+        mtm = sum(
+            direction(leg) * (mark - leg.entry_price) * leg.quantity
+            for leg, mark in zip(open_legs, marks, strict=True)
+            if mark is not None
+        )
+    net_delta: float | None = None
+    if all(delta is not None for delta in deltas):
+        net_delta = sum(
+            direction(leg) * leg.quantity * delta
+            for leg, delta in zip(open_legs, deltas, strict=True)
+            if delta is not None
+        )
+    return mtm, net_delta
+
+
 def _basket_to_response(
     basket: Basket,
     live: tuple[list[PayoffPoint], float | None, str | None] = ([], None, None),
@@ -95,6 +145,8 @@ def _basket_to_response(
         # net debit is reported as a certain loss. Better to show nothing.
         payoff = replace(payoff, max_profit=0.0, max_loss=0.0, breakevens=[], legs=[])
         today = []
+    legs = [_leg_response(leg, rows.get(leg.symbol)) for leg in basket.legs]
+    mtm, net_delta = _structure_totals(legs)
     return BasketResponse(
         id=basket.id,
         name=basket.name,
@@ -102,7 +154,11 @@ def _basket_to_response(
         underlying_symbol=basket.underlying_symbol,
         created_at=basket.created_at.isoformat(),
         stop_loss=basket.stop_loss,
-        legs=[_leg_response(leg, rows.get(leg.symbol)) for leg in basket.legs],
+        profit_target=basket.profit_target,
+        delta_limit=basket.delta_limit,
+        mtm=mtm,
+        net_delta=net_delta,
+        legs=legs,
         max_profit=None if math.isinf(payoff.max_profit) else payoff.max_profit,
         max_loss=None if math.isinf(payoff.max_loss) else payoff.max_loss,
         breakevens=payoff.breakevens,
@@ -238,3 +294,51 @@ def delete_leg_endpoint(basket_id: int, leg_id: int, db_path: DbPathDep) -> None
     conn.close()
     if not existed:
         raise HTTPException(status_code=404, detail=f"Leg {leg_id} not found in basket {basket_id}")
+
+
+class LevelsRequest(BaseModel):
+    """Alert levels for one structure. Null clears a level.
+
+    Deliberately not validated as positive. A stop is a loss and reads naturally
+    as a negative number, a target is a gain, and a delta limit is a magnitude -
+    one rule for all three would refuse a sensible value in at least one of them.
+    Zero is refused, though: a level of zero is indistinguishable from no level,
+    and would fire the moment a structure ticked past break-even.
+    """
+
+    stop_loss: float | None = None
+    profit_target: float | None = None
+    delta_limit: float | None = None
+
+    @model_validator(mode="after")
+    def _no_zero_levels(self) -> LevelsRequest:
+        for name in ("stop_loss", "profit_target", "delta_limit"):
+            value = getattr(self, name)
+            if value is not None and value == 0:
+                raise ValueError(f"{name} of zero is not a level; send null to clear it")
+        return self
+
+
+@router.put("/api/baskets/{basket_id}/levels", response_model=BasketResponse)
+def put_levels(basket_id: int, body: LevelsRequest, db_path: DbPathDep) -> BasketResponse:
+    """Set this structure's own alert levels.
+
+    Returns the structure rather than the levels, so the panel that just edited
+    them redraws from one answer instead of stitching a response into what it
+    already had.
+    """
+    conn = open_db(db_path)
+    try:
+        if not set_basket_levels(
+            conn,
+            basket_id,
+            stop_loss=body.stop_loss,
+            profit_target=body.profit_target,
+            delta_limit=body.delta_limit,
+        ):
+            raise HTTPException(status_code=404, detail="no such basket")
+        basket = get_basket(conn, basket_id)
+    finally:
+        conn.close()
+    assert basket is not None
+    return _basket_to_response(basket)

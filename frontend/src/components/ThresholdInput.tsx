@@ -2,10 +2,17 @@ import { useEffect, useRef, useState } from "react";
 
 interface Props {
   label: string;
-  value: number;
+  value: number | null;
   step: number;
-  /** Called once, with a valid number, when the edit is finished. */
-  onCommit: (value: number) => void;
+  /** Allow a blank field, committed as null - "no level set". Without this a
+      blank means "leave it alone", which is right for a threshold that must
+      always have a value and wrong for a level you want to remove. */
+  nullable?: boolean;
+  /** Allow a negative number. A stop is a loss and reads as one. */
+  signed?: boolean;
+  placeholder?: string;
+  /** Called once, when the edit is finished. */
+  onCommit: (value: number | null) => void;
 }
 
 /**
@@ -22,37 +29,58 @@ interface Props {
  * only adopted while you are not the one editing - otherwise the poll is fighting
  * the keyboard, and the keyboard should win.
  */
-export function ThresholdInput({ label, value, step, onCommit }: Props) {
-  const [draft, setDraft] = useState(String(value));
+export function ThresholdInput({
+  label,
+  value,
+  step,
+  nullable = false,
+  signed = false,
+  placeholder,
+  onCommit,
+}: Props) {
+  const text = (v: number | null) => (v === null ? "" : String(v));
+  const [draft, setDraft] = useState(text(value));
   const editing = useRef(false);
 
   // Adopt a new value from above only when it is not being typed over. A poll
   // every twenty seconds against a field mid-edit is how "3" became "30" became
   // "3" again.
   useEffect(() => {
-    if (!editing.current) setDraft(String(value));
+    if (!editing.current) setDraft(text(value));
+    // `text` is recreated each render and is a pure formatter, so it is not a
+    // dependency worth tracking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const commit = () => {
     editing.current = false;
-    const parsed = Number(draft);
-    // A blank or unparseable field means "leave it alone", not "set it to zero" -
-    // and zero is refused by the backend anyway, since a threshold of zero would
-    // silently never fire.
-    if (!draft.trim() || !Number.isFinite(parsed) || parsed <= 0) {
-      setDraft(String(value));
+    const blank = !draft.trim();
+    if (blank) {
+      // Clearing a level removes it; clearing a threshold that must have a value
+      // means "leave it alone", because zero would silently never fire.
+      if (nullable && value !== null) onCommit(null);
+      else setDraft(text(value));
       return;
     }
-    if (parsed !== value) onCommit(Math.abs(parsed));
+    const parsed = Number(draft);
+    // Zero is refused either way: indistinguishable from no level, and it would
+    // fire the moment a figure ticked past break-even.
+    if (!Number.isFinite(parsed) || parsed === 0) {
+      setDraft(text(value));
+      return;
+    }
+    const next = signed ? parsed : Math.abs(parsed);
+    if (next !== value) onCommit(next);
   };
 
   return (
     <input
       type="number"
       step={step}
-      min={0}
+      min={signed ? undefined : 0}
       value={draft}
       aria-label={label}
+      placeholder={placeholder}
       onFocus={() => {
         editing.current = true;
       }}
@@ -65,7 +93,7 @@ export function ThresholdInput({ label, value, step, onCommit }: Props) {
         }
         if (e.key === "Escape") {
           editing.current = false;
-          setDraft(String(value));
+          setDraft(text(value));
           e.currentTarget.blur();
         }
       }}

@@ -1,9 +1,12 @@
-import type { Basket, BasketLeg } from "../api";
+import type { Basket, BasketLeg, BasketLevels } from "../api";
 import { PayoffChart, PayoffLegend } from "./PayoffChart";
 import { dir, int, num, pct, rupees, signed } from "../format";
+import { ThresholdInput } from "./ThresholdInput";
 
 interface Props {
   basket: Basket;
+  /** Set this structure's own alert levels. */
+  onLevels: (levels: BasketLevels) => void;
   /** Live price of this basket's own underlying, or null if not known. */
   spot: number | null;
   onCloseLeg: (leg: BasketLeg) => void;
@@ -20,14 +23,18 @@ const sign = (leg: BasketLeg) => (leg.side === "BUY" ? 1 : -1);
  * short leg subtracts. Selling premium therefore shows positive theta and
  * negative vega and gamma, which is the shape of the trade.
  */
-export function StructureDetail({ basket, spot, onCloseLeg, onRemoveLeg }: Props) {
+export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLeg }: Props) {
   const open = basket.legs.filter((l) => l.is_open);
   const known = (field: keyof BasketLeg) => open.every((l) => l[field] !== null);
 
   const total = (field: "delta" | "gamma" | "theta" | "vega") =>
     open.reduce((a, l) => a + sign(l) * l.quantity * ((l[field] as number | null) ?? 0), 0);
 
-  const netDelta = total("delta");
+  // From the server, which now computes both - the rules that alert on them read
+  // the same figures, and three places deriving one number is three chances to
+  // disagree. The per-leg totals below are still summed here, since they are a
+  // table footer rather than a number anything alerts on.
+  const netDelta = basket.net_delta ?? total("delta");
   const theta = total("theta");
   const vega = total("vega");
   const gamma = total("gamma");
@@ -43,7 +50,7 @@ export function StructureDetail({ basket, spot, onCloseLeg, onRemoveLeg }: Props
   const closeNow = known("ltp")
     ? open.reduce((a, l) => a + sign(l) * l.quantity * (l.ltp ?? 0), 0)
     : null;
-  const mtm = closeNow === null ? null : closeNow + credit;
+  const mtm = basket.mtm ?? (closeNow === null ? null : closeNow + credit);
 
   const captured =
     mtm !== null && basket.max_profit !== null && basket.max_profit > 0
@@ -69,6 +76,12 @@ export function StructureDetail({ basket, spot, onCloseLeg, onRemoveLeg }: Props
     ["Vega / vol pt", signed(vega)],
     ["Gamma", num(gamma, 4)],
   ];
+
+  const levels: BasketLevels = {
+    stop_loss: basket.stop_loss,
+    profit_target: basket.profit_target,
+    delta_limit: basket.delta_limit,
+  };
 
   const rows: [string, string, string?][] = [
     ["Exposure per 1% move", deltaRupees === null ? "—" : signed(deltaRupees)],
@@ -147,6 +160,59 @@ export function StructureDetail({ basket, spot, onCloseLeg, onRemoveLeg }: Props
           </div>
         ))}
       </div>
+
+      {/* Levels for this structure, where the structure is - rather than as
+          account-wide settings applied to every one alike. "Has this trade made
+          its money" and "has it drifted" are questions about one position, and a
+          single threshold shared across a condor and a calendar cannot answer
+          either. Blank means no level. */}
+      <div className="sec">
+        Tell me when<span className="dim">levels for this structure alone</span>
+      </div>
+      <table className="lim tight">
+        <tbody>
+          <tr>
+            <td className="l">Profit reaches</td>
+            <td>
+              <ThresholdInput
+                label="Profit target for this structure"
+                value={basket.profit_target}
+                step={500}
+                nullable
+                placeholder="none"
+                onCommit={(v) => onLevels({ ...levels, profit_target: v })}
+              />
+            </td>
+          </tr>
+          <tr>
+            <td className="l">Loss reaches</td>
+            <td>
+              <ThresholdInput
+                label="Stop for this structure"
+                value={basket.stop_loss}
+                step={500}
+                nullable
+                signed
+                placeholder="none"
+                onCommit={(v) => onLevels({ ...levels, stop_loss: v })}
+              />
+            </td>
+          </tr>
+          <tr>
+            <td className="l">Net delta past</td>
+            <td>
+              <ThresholdInput
+                label="Delta limit for this structure"
+                value={basket.delta_limit}
+                step={0.05}
+                nullable
+                placeholder="none"
+                onCommit={(v) => onLevels({ ...levels, delta_limit: v })}
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
       <div className="sec">Where the trade stands</div>
       <table>

@@ -33,12 +33,21 @@ interface Props {
   onDeleteWatch: (id: number) => void;
 }
 
+/**
+ * Thresholds that are genuinely about the whole book.
+ *
+ * The other three moved onto the structures they describe. A worst case, a
+ * tested short and an expiry warning are facts about one position, and one
+ * number shared across a condor and a calendar answers for neither - while a
+ * target on the account could not answer "did this trade make its money", which
+ * is the question anyone actually asks. Those live in the structure view now.
+ *
+ * These two stay because they have no per-structure meaning: they are the
+ * account's P&L for the day, across everything.
+ */
 const FIELDS: { key: keyof Limits; label: string; step: number }[] = [
   { key: "target", label: "Profit target", step: 1000 },
   { key: "daily_loss", label: "Daily loss", step: 1000 },
-  { key: "max_loss", label: "Worst case per structure", step: 1000 },
-  { key: "short_delta", label: "Short tested at delta", step: 0.05 },
-  { key: "expiry_days", label: "Warn this many days out", step: 1 },
 ];
 
 /**
@@ -228,7 +237,7 @@ export function AlertsPanel({
       {showThresholds && (
         <>
           <div className="sec">
-            Risk thresholds<span className="dim">on your option structures</span>
+            Account limits<span className="dim">across the whole book</span>
           </div>
           <table className="lim tight">
             <tbody>
@@ -247,6 +256,10 @@ export function AlertsPanel({
               ))}
             </tbody>
           </table>
+          <p className="dim" style={{ margin: 0, padding: "2px 9px 6px", lineHeight: 1.4 }}>
+            A target, a stop or a delta limit for one structure is set on that
+            structure, under Open structures.
+          </p>
         </>
       )}
       <p className="dim" style={{ margin: 0, padding: "6px 9px 9px", lineHeight: 1.4 }}>

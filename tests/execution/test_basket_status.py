@@ -65,6 +65,8 @@ def _basket(legs: list[BasketLeg]) -> Basket:
         underlying_symbol="X",
         created_at=datetime(2026, 9, 1, tzinfo=UTC),
         stop_loss=None,
+        profit_target=None,
+        delta_limit=None,
         legs=legs,
     )
 

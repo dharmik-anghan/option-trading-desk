@@ -115,6 +115,25 @@ def _alert_watches(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _basket_alert_levels(conn: sqlite3.Connection) -> None:
+    """Alert levels that belong to one structure rather than to the account.
+
+    Three of the five thresholds were account-wide settings applied to every
+    structure, which is the wrong shape: a condor's acceptable delta is not a
+    calendar's, and "worst case past your limit" means a different number for
+    each. Worse, one of them - a profit target - only ever measured the whole
+    Fyers account, so there was no way to ask about the profit on one basket.
+
+    `stop_loss` already existed on `basket` for exactly this purpose and nothing
+    ever alerted on it. These two join it, and all three are nullable: null means
+    no level set, not a level of zero.
+    """
+    conn.executescript("""
+        ALTER TABLE basket ADD COLUMN profit_target REAL;
+        ALTER TABLE basket ADD COLUMN delta_limit REAL;
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
@@ -122,6 +141,8 @@ MIGRATIONS: tuple[Migration, ...] = (
               apply=_alert_state),
     Migration(version=3, reason="price and P&L levels you ask to be told about",
               apply=_alert_watches),
+    Migration(version=4, reason="per-structure profit target and delta limit",
+              apply=_basket_alert_levels),
 )
 
 

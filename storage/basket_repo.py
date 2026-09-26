@@ -56,7 +56,13 @@ class Basket:
     strategy: str
     underlying_symbol: str
     created_at: datetime
+    #: Levels for this structure alone. None means no level set - which is not
+    #: the same as zero, and is why these are nullable rather than defaulted.
     stop_loss: float | None
+    #: P&L on this structure at which to say it is done.
+    profit_target: float | None
+    #: |net delta| at which the structure has drifted further than you wanted.
+    delta_limit: float | None
     legs: list[BasketLeg]
 
 
@@ -138,8 +144,8 @@ def _legs_for_basket(conn: sqlite3.Connection, basket_id: int) -> list[BasketLeg
 
 def get_basket(conn: sqlite3.Connection, basket_id: int) -> Basket | None:
     row = conn.execute(
-        "SELECT id, name, strategy, underlying_symbol, created_at, stop_loss "
-        "FROM basket WHERE id = ?",
+        "SELECT id, name, strategy, underlying_symbol, created_at, stop_loss, "
+        "profit_target, delta_limit FROM basket WHERE id = ?",
         (basket_id,),
     ).fetchone()
     if row is None:
@@ -151,6 +157,8 @@ def get_basket(conn: sqlite3.Connection, basket_id: int) -> Basket | None:
         underlying_symbol=row[3],
         created_at=datetime.fromisoformat(row[4]),
         stop_loss=row[5],
+        profit_target=row[6],
+        delta_limit=row[7],
         legs=_legs_for_basket(conn, basket_id),
     )
 
@@ -209,3 +217,24 @@ def delete_leg(conn: sqlite3.Connection, basket_id: int, leg_id: int) -> bool:
         conn.execute("DELETE FROM basket WHERE id = ?", (basket_id,))
     conn.commit()
     return True
+
+
+def set_basket_levels(
+    conn: sqlite3.Connection,
+    basket_id: int,
+    *,
+    stop_loss: float | None,
+    profit_target: float | None,
+    delta_limit: float | None,
+) -> bool:
+    """Set this structure's own alert levels. False if there is no such basket.
+
+    All three are written together, so clearing one is a matter of sending it as
+    null rather than needing a separate call to unset it.
+    """
+    cursor = conn.execute(
+        "UPDATE basket SET stop_loss = ?, profit_target = ?, delta_limit = ? WHERE id = ?",
+        (stop_loss, profit_target, delta_limit, basket_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0

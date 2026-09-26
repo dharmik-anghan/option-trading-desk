@@ -92,7 +92,15 @@ export interface Basket {
   strategy: string;
   underlying_symbol: string;
   created_at: string;
+  /** This structure's own alert levels. Null means no level set. */
   stop_loss: number | null;
+  profit_target: number | null;
+  delta_limit: number | null;
+  /** What the open legs are worth now, and how the structure leans — computed
+      server-side, so the screen and the alert about it read one number. Null
+      when the broker has not priced every open leg. */
+  mtm: number | null;
+  net_delta: number | null;
   legs: BasketLeg[];
   max_profit: number | null;
   max_loss: number | null;
@@ -284,6 +292,17 @@ export function createBasket(
     { name: string; strategy: string; underlying_symbol: string; legs: NewBasketLegInput[] },
     Basket
   >("/api/baskets", { name, strategy, underlying_symbol: underlyingSymbol, legs });
+}
+
+/** Alert levels for one structure. Null clears a level. */
+export interface BasketLevels {
+  stop_loss: number | null;
+  profit_target: number | null;
+  delta_limit: number | null;
+}
+
+export function setBasketLevels(id: number, levels: BasketLevels): Promise<Basket> {
+  return putJson<BasketLevels, Basket>(`/api/baskets/${id}/levels`, levels);
 }
 
 export function closeBasketLeg(basketId: number, legId: number, exitPrice: number): Promise<Basket> {

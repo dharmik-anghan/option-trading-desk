@@ -143,7 +143,17 @@ class BasketResponse(BaseModel):
     strategy: str
     underlying_symbol: str
     created_at: str
+    #: This structure's own alert levels. None means no level set, which is not
+    #: the same as a level of zero.
     stop_loss: float | None
+    profit_target: float | None = None
+    delta_limit: float | None = None
+    #: What the open legs are worth now, and how the structure leans. Computed
+    #: server-side so the screen, the alert about it, and the rule that raises
+    #: that alert all read one number. None when the broker has not priced every
+    #: open leg - a partial total read as a whole one looks fine and is wrong.
+    mtm: float | None = None
+    net_delta: float | None = None
     legs: list[BasketLegResponse]
     max_profit: float | None
     max_loss: float | None
