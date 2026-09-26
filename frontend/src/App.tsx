@@ -73,12 +73,6 @@ const EVENTS_MS = 600000;
 const BASKETS_MS = 30000;
 const HEALTH_MS = 30000;
 
-/** A write that failed. Logged, not thrown: an alert setting that did not save
-    must not take the trading screen down with it. */
-function noteFailure(error: unknown): void {
-  console.error("alert settings did not save", error);
-}
-
 function initialTheme(): Theme {
   try {
     const saved = localStorage.getItem("optiondesk-theme");
@@ -117,6 +111,9 @@ export default function App() {
   // desk switch, because having the desk overrule a filter you just set would
   // make the chips feel broken.
   const [newsTopics, setNewsTopics] = useState<string[] | null>(null);
+  // A failed write, shown rather than only logged. Not seeing why a threshold
+  // would not save is most of what makes it feel broken.
+  const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
   const shownTopics = newsTopics ?? (onPerps ? ["crypto", "commodities"] : ["india"]);
 
   useEffect(() => {
@@ -261,34 +258,41 @@ export default function App() {
   const alerts = useLive(() => getAlerts(), paused ? 0 : ALERTS_MS, [], paused, 2500);
 
   const refreshAlerts = alerts.refresh;
+  const noteAlertFailure = useCallback((error: unknown) => {
+    setAlertSaveError(error instanceof Error ? error.message : String(error));
+  }, []);
+  const afterAlertWrite = useCallback(() => {
+    setAlertSaveError(null);
+    refreshAlerts();
+  }, [refreshAlerts]);
   const onLimits = useCallback(
     (next: Limits) => {
       // Sent straight through: the backend owns these now, so a threshold typed
       // here has to reach it or the next pass judges against the old one.
-      void saveLimits(next).then(refreshAlerts).catch(noteFailure);
+      void saveLimits(next).then(afterAlertWrite).catch(noteAlertFailure);
     },
-    [refreshAlerts],
+    [afterAlertWrite, noteAlertFailure],
   );
   const onClear = useCallback(() => {
-    void clearAlerts().then(refreshAlerts).catch(noteFailure);
-  }, [refreshAlerts]);
+    void clearAlerts().then(afterAlertWrite).catch(noteAlertFailure);
+  }, [afterAlertWrite, noteAlertFailure]);
   const onAddWatch = useCallback(
     (watch: NewWatch) => {
-      void addWatch(watch).then(refreshAlerts).catch(noteFailure);
+      void addWatch(watch).then(afterAlertWrite).catch(noteAlertFailure);
     },
-    [refreshAlerts],
+    [afterAlertWrite, noteAlertFailure],
   );
   const onToggleWatch = useCallback(
     (id: number, enabled: boolean) => {
-      void setWatchEnabled(id, enabled).then(refreshAlerts).catch(noteFailure);
+      void setWatchEnabled(id, enabled).then(afterAlertWrite).catch(noteAlertFailure);
     },
-    [refreshAlerts],
+    [afterAlertWrite, noteAlertFailure],
   );
   const onDeleteWatch = useCallback(
     (id: number) => {
-      void deleteWatch(id).then(refreshAlerts).catch(noteFailure);
+      void deleteWatch(id).then(afterAlertWrite).catch(noteAlertFailure);
     },
-    [refreshAlerts],
+    [afterAlertWrite, noteAlertFailure],
   );
 
   const onBasketChanged = useCallback(() => {
@@ -368,6 +372,7 @@ export default function App() {
         telegram={alerts.data?.watcher.telegram ?? false}
         watching={alerts.data?.watcher.running ?? false}
         showThresholds={!onPerps}
+        saveError={alertSaveError}
         trouble={alerts.data?.watcher.last_error ?? null}
         onLimits={onLimits}
         onClear={onClear}

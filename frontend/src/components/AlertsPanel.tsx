@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Alert, Limits, Watch, WatchDirection, WatchKind } from "../api";
 import { SEVERITY_LABEL } from "../api";
 import { clockIST } from "../format";
+import { ThresholdInput } from "./ThresholdInput";
 
 interface Props {
   alerts: readonly Alert[];
@@ -16,6 +17,8 @@ interface Props {
       off the options book - its P&L, its structures, its short legs - so on any
       other desk they would be somebody else's numbers to edit. */
   showThresholds: boolean;
+  /** Why the last change did not save, if it did not. */
+  saveError: string | null;
   trouble: string | null;
   onLimits: (next: Limits) => void;
   onClear: () => void;
@@ -55,6 +58,7 @@ export function AlertsPanel({
   telegram,
   watching,
   showThresholds,
+  saveError,
   trouble,
   onLimits,
   onClear,
@@ -106,6 +110,9 @@ export function AlertsPanel({
           </p>
         )}
         {watching && trouble && <p className="empty warnish">Last alert pass failed: {trouble}</p>}
+        {/* A rejected write used to reach the console only, so a threshold that
+            would not save looked like a field that would not type. */}
+        {saveError && <p className="err">Not saved: {saveError}</p>}
 
         {/* The empty state has to agree with the count beside the heading. It
             once read "Nothing yet" while the header said several were live,
@@ -229,16 +236,11 @@ export function AlertsPanel({
                 <tr key={f.key}>
                   <td className="l">{f.label}</td>
                   <td>
-                    <input
-                      type="number"
-                      step={f.step}
-                      min={0}
+                    <ThresholdInput
+                      label={f.label}
                       value={limits[f.key]}
-                      aria-label={f.label}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        onLimits({ ...limits, [f.key]: Number.isFinite(v) ? Math.abs(v) : 0 });
-                      }}
+                      step={f.step}
+                      onCommit={(v) => onLimits({ ...limits, [f.key]: v })}
                     />
                   </td>
                 </tr>
