@@ -360,3 +360,53 @@ class TestLevelsOnOneStructure:
         keys = keys_of(evaluate(None, [done, running], L))
         assert any(k.startswith("profit:1:") for k in keys)
         assert not any(k.startswith("profit:2:") for k in keys)
+
+
+class TestDeltaSigns:
+    """Delta is signed, and the limit is a magnitude. Worth pinning separately.
+
+    The broker signs it: a call is positive, a put negative. Selling flips it, so
+    a short put contributes positive delta - which is why a short-premium condor
+    can sum to zero while no leg is anywhere near zero. Getting the sign wrong
+    would read a hedge as exposure and vice versa.
+
+    The figure is also multiplied by the contracts held, so it is in index points
+    per unit move and not in the 0-to-1 range a single option's delta lives in.
+    """
+
+    def _legs(self, *specs: tuple[str, str, float, int]) -> FakeBasket:
+        legs = [
+            FakeLeg(id=i, side=side, option_type=kind, delta=delta, quantity=qty, strike=20000 + i)
+            for i, (side, kind, delta, qty) in enumerate(specs, start=1)
+        ]
+        return FakeBasket(id=8, legs=legs)
+
+    def test_a_short_put_leans_long(self) -> None:
+        # Sold a put: you are long the underlying. Positive contribution from a
+        # negative quoted delta.
+        b = self._legs(("SELL", "PE", -0.32, 65))
+        on = evaluate(None, [replace(b, net_delta=-1 * 65 * -0.32, delta_limit=10.0)], L)
+        fired = next(c for c in on if c.key.startswith("delta:"))
+        assert "leaning long" in fired.message
+
+    def test_a_short_call_leans_short(self) -> None:
+        b = self._legs(("SELL", "CE", 0.23, 65))
+        on = evaluate(None, [replace(b, net_delta=-1 * 65 * 0.23, delta_limit=10.0)], L)
+        fired = next(c for c in on if c.key.startswith("delta:"))
+        assert "leaning short" in fired.message
+
+    def test_the_limit_is_a_magnitude_not_a_direction(self) -> None:
+        # One limit catches drift either way; the message says which way.
+        for net in (12.0, -12.0):
+            b = FakeBasket(id=8, net_delta=net, delta_limit=10.0)
+            assert [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
+
+    def test_a_negative_limit_is_read_as_its_size(self) -> None:
+        # Typing -10 means the same as 10; refusing it would be pedantry.
+        b = FakeBasket(id=8, net_delta=12.0, delta_limit=-10.0)
+        assert [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
+
+    def test_a_neutral_structure_does_not_fire(self) -> None:
+        # The live condor: +20.80 -12.35 -14.95 +6.50 = 0.00, with no leg near zero.
+        b = FakeBasket(id=8, net_delta=0.0, delta_limit=10.0)
+        assert not [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]

@@ -199,12 +199,20 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
             </td>
           </tr>
           <tr>
-            <td className="l">Net delta past</td>
+            {/* A magnitude, hence the plus-or-minus: a structure meant to be
+                neutral has drifted whether it drifted long or short, and the
+                alert names which way. Stepped in whole units because net delta
+                is multiplied by the contracts held - on a 65-lot condor each leg
+                contributes about 20, so a limit of 0.2 would fire instantly and
+                a limit of 0.05 is not a number anyone means. */}
+            <td className="l">
+              Net delta past &plusmn;<span className="dim"> per index point</span>
+            </td>
             <td>
               <ThresholdInput
-                label="Delta limit for this structure"
+                label="Delta limit for this structure, as a magnitude"
                 value={basket.delta_limit}
-                step={0.05}
+                step={1}
                 nullable
                 placeholder="none"
                 onCommit={(v) => onLevels({ ...levels, delta_limit: v })}
