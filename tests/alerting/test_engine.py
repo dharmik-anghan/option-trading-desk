@@ -8,11 +8,14 @@ source landed, and eleven minutes apart when a threshold wobbled.
 from __future__ import annotations
 
 from alerting.engine import FIRE_COOLDOWN_MS, REFIRE_FLOOR_MS, dedupe_log, reconcile
-from alerting.models import Alert, Condition, Limits, Severity
-from alerting.rules import evaluate
+from alerting.models import Alert, Condition, Severity
 
-L = Limits()
-BREACH = evaluate(-L.daily_loss, None, L)
+#: A condition, written out rather than produced by the rules. The engine's job is
+#: folding conditions into a log once each, and it should not need the rules to be
+#: exercised - which it did, until a rule it borrowed was deleted.
+BREACH = [
+    Condition(key="stop:8:-2000", severity=Severity.RISK, message="Stop hit"),
+]
 #: The transition rule, isolated. These timestamps are seconds apart, so the
 #: cooldown would mask what is being tested; it has its own tests below.
 NO_COOLDOWN = 0

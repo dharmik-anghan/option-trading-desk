@@ -48,8 +48,6 @@ class AlertResponse(BaseModel):
 
 
 class LimitsResponse(BaseModel):
-    target: float
-    daily_loss: float
     max_loss: float
     short_delta: float
     expiry_days: float
@@ -107,8 +105,6 @@ class AlertsResponse(BaseModel):
 class LimitsRequest(BaseModel):
     # Bounds are sanity, not policy: a negative threshold would silently never
     # fire, and a short delta above 1 is not reachable.
-    target: float = Field(gt=0)
-    daily_loss: float = Field(gt=0)
     max_loss: float = Field(gt=0)
     short_delta: float = Field(gt=0, le=1)
     expiry_days: float = Field(ge=0)
@@ -116,8 +112,6 @@ class LimitsRequest(BaseModel):
 
 def _limits_response(limits: Limits) -> LimitsResponse:
     return LimitsResponse(
-        target=limits.target,
-        daily_loss=limits.daily_loss,
         max_loss=limits.max_loss,
         short_delta=limits.short_delta,
         expiry_days=limits.expiry_days,
@@ -179,8 +173,6 @@ def clear(db_path: DbPathDep) -> None:
 @router.put("/api/alerts/limits", response_model=LimitsResponse)
 def put_limits(request_body: LimitsRequest, db_path: DbPathDep) -> LimitsResponse:
     limits = Limits(
-        target=request_body.target,
-        daily_loss=request_body.daily_loss,
         max_loss=request_body.max_loss,
         short_delta=request_body.short_delta,
         expiry_days=request_body.expiry_days,

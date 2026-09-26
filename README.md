@@ -156,14 +156,23 @@ recorded and shown, just not sent. A batch that fires together is sent as one
 message, and an alert stays queued until a send succeeds, so an unreachable
 Telegram means a late message rather than a lost one.
 
-Besides the thresholds it applies to every structure, you can ask about levels
-of your own — "tell me if NIFTY goes above 24,000", or if net P&L drops through
+Levels belong to the structure they describe: a profit target, a stop and a delta
+limit are set on each open structure rather than as account-wide settings, since
+one number shared across a condor and a calendar answers for neither. Blank means
+no level, and moving a level lets it fire again.
+
+Besides those, you can ask about levels — "tell me if NIFTY goes above 24,000", or if net P&L drops through
 a number. Add them in the alerts panel, or `POST /api/alerts/watches`. A level
 can be paused without losing it, and moving one lets it fire again rather than
 counting as already-announced. Only symbols something is actually watching are
 quoted, so watching nothing costs nothing.
 
-`GET /api/alerts` returns the log, the conditions currently true, the thresholds,
+Three thresholds remain as fixed defaults rather than being editable: the
+worst-case limit, the delta a short counts as tested at, and how many days before
+expiry to warn. They are defaults for the per-structure rules, and the honest end
+of this change is for them to move onto the structure too.
+
+`GET /api/alerts` returns the log, the conditions currently true, those defaults,
 the levels being watched, and whether the watcher is actually running — an empty
 list means "nothing is wrong" only if something is looking. Each alert carries
 whether it was delivered, so the desk can show what actually left the building.

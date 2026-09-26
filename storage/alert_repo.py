@@ -95,34 +95,24 @@ def save_active(conn: sqlite3.Connection, keys: frozenset[str], now: int) -> Non
 def load_limits(conn: sqlite3.Connection) -> Limits:
     """The stored thresholds, or the defaults if none have been set."""
     row = conn.execute(
-        "SELECT target, daily_loss, max_loss, short_delta, expiry_days "
-        "FROM alert_limits WHERE id = 1"
+        "SELECT max_loss, short_delta, expiry_days FROM alert_limits WHERE id = 1"
     ).fetchone()
     if row is None:
         return Limits()
-    return Limits(
-        target=row[0],
-        daily_loss=row[1],
-        max_loss=row[2],
-        short_delta=row[3],
-        expiry_days=row[4],
-    )
+    return Limits(max_loss=row[0], short_delta=row[1], expiry_days=row[2])
 
 
 def save_limits(conn: sqlite3.Connection, limits: Limits) -> None:
+    # The target and daily_loss columns are still in the table and no longer read.
+    # They are written as zero to satisfy their NOT NULL, rather than dropped: a
+    # migration to delete two unused numbers buys nothing and rewrites a table
+    # holding real history.
     conn.execute(
         "INSERT INTO alert_limits (id, target, daily_loss, max_loss, short_delta, expiry_days) "
-        "VALUES (1, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET target = excluded.target, "
-        "daily_loss = excluded.daily_loss, max_loss = excluded.max_loss, "
+        "VALUES (1, 0, 0, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET max_loss = excluded.max_loss, "
         "short_delta = excluded.short_delta, expiry_days = excluded.expiry_days",
-        (
-            limits.target,
-            limits.daily_loss,
-            limits.max_loss,
-            limits.short_delta,
-            limits.expiry_days,
-        ),
+        (limits.max_loss, limits.short_delta, limits.expiry_days),
     )
     conn.commit()
 

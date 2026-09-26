@@ -92,32 +92,11 @@ def evaluate(
     """
     on: list[Condition] = []
 
-    if total_pnl is not None:
-        net = total_pnl
-        if net >= limits.target:
-            on.append(
-                Condition(
-                    key="target",
-                    severity=Severity.TARGET,
-                    message=f"Profit target reached — net {rupees(net)}",
-                )
-            )
-        if net <= -limits.daily_loss:
-            on.append(
-                Condition(
-                    key="daily-loss",
-                    severity=Severity.RISK,
-                    message=f"Daily loss limit breached — net {rupees(net)}",
-                )
-            )
-        elif net <= -0.8 * limits.daily_loss:
-            on.append(
-                Condition(
-                    key="daily-loss-near",
-                    severity=Severity.WARN,
-                    message=f"80% of the daily loss used — net {rupees(net)}",
-                )
-            )
+    # Nothing account-wide. The book's total was measured against two thresholds
+    # here, and both are better asked of a structure: "did this trade make its
+    # money" and "has this one lost more than I meant to" are answerable, while
+    # the same questions about the account are a sum that names nothing to act on.
+    # Every level now belongs to the structure it describes.
 
     for b in baskets or ():
         open_legs = [leg for leg in b.legs if leg.is_open]

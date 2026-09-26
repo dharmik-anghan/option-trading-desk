@@ -76,8 +76,13 @@ def _save_limits(db: Path, limits: Limits) -> None:
         save_limits(conn, limits)
 
 
+#: A structure past its own stop - which is what an alert-worthy state looks like
+#: now that nothing is measured against the account.
+_STOPPED = FakeBasket(id=8, name="27 Oct - Iron Condor", stop_loss=-2000.0, mtm=-2500.0)
+
+
 def _breach() -> Inputs:
-    return Inputs(total_pnl=-L.daily_loss, baskets=[], events=[], events_loaded=True)
+    return Inputs(total_pnl=0.0, baskets=[_STOPPED], events=[], events_loaded=True)
 
 
 def _quiet() -> Inputs:
@@ -103,9 +108,9 @@ class TestOnePass:
     def test_a_breach_is_recorded(self, db: Path) -> None:
         w, _ = _watcher(db, _breach)
         outcome = asyncio.run(w.tick())
-        assert [a.key for a in outcome.fired] == ["daily-loss"]
-        assert [a.key for a in _log(db)] == ["daily-loss"]
-        assert _active(db) == frozenset({"daily-loss"})
+        assert [a.key for a in outcome.fired] == ["stop:8:-2000"]
+        assert [a.key for a in _log(db)] == ["stop:8:-2000"]
+        assert _active(db) == frozenset({"stop:8:-2000"})
 
     def test_a_quiet_book_records_nothing(self, db: Path) -> None:
         w, _ = _watcher(db, _quiet)
@@ -128,9 +133,12 @@ class TestOnePass:
         assert len(_log(db)) == 1
 
     def test_stored_limits_are_used_not_the_defaults(self, db: Path) -> None:
-        _save_limits(db, Limits(daily_loss=1_000_000))
-        w, _ = _watcher(db, _breach)
-        assert asyncio.run(w.tick()).fired == []
+        # The remaining limits are defaults for the per-structure rules; a stored
+        # one has to reach the pass rather than the dataclass default being used.
+        _save_limits(db, Limits(max_loss=1.0))
+        wide = FakeBasket(id=9, name="Wide", max_loss=-500_000.0, legs=[FakeLeg()])
+        w, _ = _watcher(db, lambda: Inputs(0.0, [wide], [], True))
+        assert [a.key for a in asyncio.run(w.tick()).fired] == ["worst-case:9"]
 
 
 class TestTheCalendarGuard:
@@ -172,7 +180,7 @@ class TestDelivery:
         recorder = Recorder()
         w, _ = _watcher(db, _breach, recorder)
         asyncio.run(w.tick())
-        assert [a.key for a in recorder.sent[0]] == ["daily-loss"]
+        assert [a.key for a in recorder.sent[0]] == ["stop:8:-2000"]
         assert _undelivered(db) == []
 
     def test_a_failed_send_is_retried_not_lost(self, db: Path) -> None:
@@ -221,7 +229,7 @@ class TestTheLoopSurvivesFailure:
 
         asyncio.run(run_briefly())
         assert calls["n"] >= 2, "the loop stopped after one failure"
-        assert [a.key for a in _log(db)] == ["daily-loss"]
+        assert [a.key for a in _log(db)] == ["stop:8:-2000"]
 
     def test_a_failure_is_reported_then_cleared(self, db: Path) -> None:
         state = {"fail": True}

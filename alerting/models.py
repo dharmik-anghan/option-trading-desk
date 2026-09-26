@@ -24,12 +24,14 @@ class Severity(StrEnum):
 
 @dataclass(frozen=True)
 class Limits:
-    """The thresholds the desk alerts on."""
+    """Defaults the per-structure rules fall back on.
 
-    #: Net profit at which to say "you're done".
-    target: float = 15000.0
-    #: Net loss at which to stop. Held as a positive magnitude.
-    daily_loss: float = 25000.0
+    What is left after the account-wide thresholds were dropped and the rest moved
+    onto the structures they describe. These three still shape alerts and are not
+    editable on screen, which is worth saying plainly: they are defaults, and the
+    honest end of this change is for them to become per-structure too.
+    """
+
     #: Largest acceptable worst-case-at-expiry for one structure.
     max_loss: float = 40000.0
     #: |delta| at which a short strike counts as being tested.

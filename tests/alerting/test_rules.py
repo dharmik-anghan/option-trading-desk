@@ -25,27 +25,6 @@ def keys(conditions: list) -> list[str]:  # type: ignore[type-arg]
 keys_of = keys
 
 
-class TestAccountLimits:
-    def test_profit_target(self) -> None:
-        on = evaluate(L.target, None, L)
-        assert "target" in keys(on)
-        assert next(c for c in on if c.key == "target").severity is Severity.TARGET
-
-    def test_daily_loss_breached(self) -> None:
-        assert "daily-loss" in keys(evaluate(-L.daily_loss, None, L))
-
-    def test_eighty_percent_of_the_daily_loss(self) -> None:
-        on = keys(evaluate(-0.85 * L.daily_loss, None, L))
-        assert "daily-loss-near" in on
-        assert "daily-loss" not in on
-
-    def test_nothing_when_flat(self) -> None:
-        assert evaluate(0.0, None, L) == []
-
-    def test_no_portfolio_is_not_a_zero_pnl(self) -> None:
-        assert evaluate(None, None, L) == []
-
-
 class TestPerStructureRisk:
     def test_unbounded_downside(self) -> None:
         b = FakeBasket(max_loss=None)
@@ -189,10 +168,9 @@ class TestWording:
     """The messages are shared with the browser engine, so the text matters."""
 
     def test_money_is_worded_as_the_desk_words_it(self) -> None:
-        on = evaluate(-L.daily_loss, None, L)
-        assert next(c for c in on if c.key == "daily-loss").message == (
-            "Daily loss limit breached — net −₹25,000"
-        )
+        b = FakeBasket(id=8, stop_loss=-25000.0, mtm=-25000.0)
+        on = next(c for c in evaluate(None, [b], L) if c.key.startswith("stop:"))
+        assert on.message == "Stop hit \u2014 \u2212\u20b925,000 against \u2212\u20b925,000"
 
     def test_a_strike_carries_its_side(self) -> None:
         b = FakeBasket(legs=[FakeLeg(id=19, side="SELL", strike=22900, option_type="PE",

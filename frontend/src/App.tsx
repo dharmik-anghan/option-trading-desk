@@ -32,10 +32,9 @@ import {
   getAlerts,
   getPerpsDesk,
   getVenues,
-  saveLimits,
   setWatchEnabled,
 } from "./api";
-import type { Limits, NewWatch } from "./api";
+import type { NewWatch } from "./api";
 
 type View = "trading" | "oi" | "greeks";
 type Theme = "dark" | "light";
@@ -52,26 +51,15 @@ const CONTEXT_MS = 15000;
 // Both are somebody else's website behind a server-side cache, so polling them
 // hard buys nothing - the backend would just hand back the same snapshot.
 const NEWS_MS = 120000;
+const EVENTS_MS = 600000;
+const BASKETS_MS = 30000;
+const HEALTH_MS = 30000;
 // The backend judges about once a minute, so polling faster only repeats an
 // answer. Slower than that and a fired alert sits unseen on screen.
 const ALERTS_MS = 20000;
 // Faster than the rest: this one reads prices the stream already delivered, so a
 // poll costs the backend a dictionary lookup rather than a venue request.
 const PERPS_MS = 2000;
-
-/** Shown only until the first /api/alerts answer lands, so the threshold inputs
-    have numbers rather than blanks. The backend's stored values are the real
-    ones - these are never saved. */
-const FALLBACK_LIMITS: Limits = {
-  target: 15000,
-  daily_loss: 25000,
-  max_loss: 40000,
-  short_delta: 0.3,
-  expiry_days: 3,
-};
-const EVENTS_MS = 600000;
-const BASKETS_MS = 30000;
-const HEALTH_MS = 30000;
 
 function initialTheme(): Theme {
   try {
@@ -265,14 +253,6 @@ export default function App() {
     setAlertSaveError(null);
     refreshAlerts();
   }, [refreshAlerts]);
-  const onLimits = useCallback(
-    (next: Limits) => {
-      // Sent straight through: the backend owns these now, so a threshold typed
-      // here has to reach it or the next pass judges against the old one.
-      void saveLimits(next).then(afterAlertWrite).catch(noteAlertFailure);
-    },
-    [afterAlertWrite, noteAlertFailure],
-  );
   const onClear = useCallback(() => {
     void clearAlerts().then(afterAlertWrite).catch(noteAlertFailure);
   }, [afterAlertWrite, noteAlertFailure]);
@@ -362,7 +342,6 @@ export default function App() {
       <AlertsPanel
         alerts={alerts.data?.alerts ?? []}
         activeCount={alerts.data?.active.length ?? 0}
-        limits={alerts.data?.limits ?? FALLBACK_LIMITS}
         watches={alerts.data?.watches ?? []}
         symbols={
           onPerps
@@ -371,10 +350,8 @@ export default function App() {
         }
         telegram={alerts.data?.watcher.telegram ?? false}
         watching={alerts.data?.watcher.running ?? false}
-        showThresholds={!onPerps}
         saveError={alertSaveError}
         trouble={alerts.data?.watcher.last_error ?? null}
-        onLimits={onLimits}
         onClear={onClear}
         onAddWatch={onAddWatch}
         onToggleWatch={onToggleWatch}

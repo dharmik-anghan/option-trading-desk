@@ -63,7 +63,7 @@ class TestReading:
 
     def test_the_limits_come_with_it(self, client: TestClient) -> None:
         limits = client.get("/api/alerts").json()["limits"]
-        assert limits["daily_loss"] == Limits().daily_loss
+        assert limits["max_loss"] == Limits().max_loss
         assert limits["short_delta"] == Limits().short_delta
 
     def test_it_says_whether_anything_is_watching(self, client: TestClient) -> None:
@@ -93,14 +93,12 @@ class TestClearing:
 class TestLimits:
     def test_limits_can_be_changed_and_stick(self, client: TestClient, db_path: Path) -> None:
         payload = {
-            "target": 20000,
-            "daily_loss": 10000,
             "max_loss": 30000,
             "short_delta": 0.25,
             "expiry_days": 5,
         }
         assert client.put("/api/alerts/limits", json=payload).status_code == 200
-        assert client.get("/api/alerts").json()["limits"]["daily_loss"] == 10000
+        assert client.get("/api/alerts").json()["limits"]["max_loss"] == 30000
         conn = open_db(db_path)
         try:
             assert load_limits(conn).short_delta == 0.25
@@ -108,19 +106,11 @@ class TestLimits:
             conn.close()
 
     def test_a_nonsense_threshold_is_refused(self, client: TestClient) -> None:
-        payload = {
-            "target": 20000,
-            "daily_loss": -1,  # would silently never fire
-            "max_loss": 30000,
-            "short_delta": 0.25,
-            "expiry_days": 5,
-        }
+        payload = {"max_loss": -1, "short_delta": 0.25, "expiry_days": 5}  # never fires
         assert client.put("/api/alerts/limits", json=payload).status_code == 422
 
     def test_a_delta_above_one_is_refused(self, client: TestClient) -> None:
         payload = {
-            "target": 20000,
-            "daily_loss": 10000,
             "max_loss": 30000,
             "short_delta": 1.5,  # unreachable
             "expiry_days": 5,

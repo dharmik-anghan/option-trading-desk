@@ -121,13 +121,12 @@ class TestLimits:
         assert load_limits(conn) == Limits()
 
     def test_limits_round_trip(self, conn: sqlite3.Connection) -> None:
-        mine = Limits(target=20000, daily_loss=10000, max_loss=30000, short_delta=0.25,
-                      expiry_days=5)
+        mine = Limits(max_loss=30000, short_delta=0.25, expiry_days=5)
         save_limits(conn, mine)
         assert load_limits(conn) == mine
 
     def test_saving_twice_updates_rather_than_duplicates(self, conn: sqlite3.Connection) -> None:
-        save_limits(conn, Limits(target=1))
-        save_limits(conn, Limits(target=2))
-        assert load_limits(conn).target == 2
+        save_limits(conn, Limits(max_loss=1))
+        save_limits(conn, Limits(max_loss=2))
+        assert load_limits(conn).max_loss == 2
         assert conn.execute("SELECT count(*) FROM alert_limits").fetchone()[0] == 1

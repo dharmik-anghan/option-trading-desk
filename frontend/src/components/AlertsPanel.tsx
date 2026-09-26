@@ -1,26 +1,19 @@
 import { useState } from "react";
-import type { Alert, Limits, Watch, WatchDirection, WatchKind } from "../api";
+import type { Alert, Watch, WatchDirection, WatchKind } from "../api";
 import { SEVERITY_LABEL } from "../api";
 import { clockIST } from "../format";
-import { ThresholdInput } from "./ThresholdInput";
 
 interface Props {
   alerts: readonly Alert[];
   activeCount: number;
-  limits: Limits;
   watches: readonly Watch[];
   /** Symbols worth offering for a price level — the underlyings on screen. */
   symbols: readonly { id: string; name: string }[];
   telegram: boolean;
   watching: boolean;
-  /** Whether the risk thresholds below apply to what is on screen. They are read
-      off the options book - its P&L, its structures, its short legs - so on any
-      other desk they would be somebody else's numbers to edit. */
-  showThresholds: boolean;
   /** Why the last change did not save, if it did not. */
   saveError: string | null;
   trouble: string | null;
-  onLimits: (next: Limits) => void;
   onClear: () => void;
   onAddWatch: (watch: {
     kind: WatchKind;
@@ -34,23 +27,6 @@ interface Props {
 }
 
 /**
- * Thresholds that are genuinely about the whole book.
- *
- * The other three moved onto the structures they describe. A worst case, a
- * tested short and an expiry warning are facts about one position, and one
- * number shared across a condor and a calendar answers for neither - while a
- * target on the account could not answer "did this trade make its money", which
- * is the question anyone actually asks. Those live in the structure view now.
- *
- * These two stay because they have no per-structure meaning: they are the
- * account's P&L for the day, across everything.
- */
-const FIELDS: { key: keyof Limits; label: string; step: number }[] = [
-  { key: "target", label: "Profit target", step: 1000 },
-  { key: "daily_loss", label: "Daily loss", step: 1000 },
-];
-
-/**
  * The alert log, the thresholds behind it, and the levels you asked about.
  *
  * A view now. The engine that raised these ran in this tab until recently,
@@ -61,15 +37,12 @@ const FIELDS: { key: keyof Limits; label: string; step: number }[] = [
 export function AlertsPanel({
   alerts,
   activeCount,
-  limits,
   watches,
   symbols,
   telegram,
   watching,
-  showThresholds,
   saveError,
   trouble,
-  onLimits,
   onClear,
   onAddWatch,
   onToggleWatch,
@@ -232,36 +205,6 @@ export function AlertsPanel({
         </table>
       )}
 
-      {/* Named for what they are. "Watch for" read as a heading for the whole
-          panel, which made five live thresholds look like decoration. */}
-      {showThresholds && (
-        <>
-          <div className="sec">
-            Account limits<span className="dim">across the whole book</span>
-          </div>
-          <table className="lim tight">
-            <tbody>
-              {FIELDS.map((f) => (
-                <tr key={f.key}>
-                  <td className="l">{f.label}</td>
-                  <td>
-                    <ThresholdInput
-                      label={f.label}
-                      value={limits[f.key]}
-                      step={f.step}
-                      onCommit={(v) => onLimits({ ...limits, [f.key]: v })}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="dim" style={{ margin: 0, padding: "2px 9px 6px", lineHeight: 1.4 }}>
-            A target, a stop or a delta limit for one structure is set on that
-            structure, under Open structures.
-          </p>
-        </>
-      )}
       <p className="dim" style={{ margin: 0, padding: "6px 9px 9px", lineHeight: 1.4 }}>
         {telegram
           ? "Raised by the backend and sent to Telegram, so they fire with this tab closed."
