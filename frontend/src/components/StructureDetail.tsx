@@ -208,8 +208,17 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
                 is multiplied by the contracts held - on a 65-lot condor each leg
                 contributes about 20, so a limit of 0.2 would fire instantly and
                 a limit of 0.05 is not a number anyone means. */}
+            {/* The current value beside the field, because the scale is the
+                trap: net delta is every leg's delta times its contracts, so on a
+                65-lot structure it moves 0.65 for each point of per-contract
+                drift. Typing a number that looks like a single option's delta
+                sets a limit that fires on the next tick. */}
             <td className="l">
-              Net delta past &plusmn;<span className="dim"> per index point</span>
+              Net delta past &plusmn;
+              <span className="dim">
+                {" "}
+                now {netDelta === null ? "\u2014" : num(netDelta, 2)}
+              </span>
             </td>
             <td>
               <ThresholdInput
