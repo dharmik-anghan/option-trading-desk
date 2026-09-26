@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from alerting.models import WatchKind
 from alerting.watcher import Inputs
 from api.pricing import basket_live_curve
 from api.store import open_db
@@ -23,6 +24,7 @@ from broker.models import OptionChain
 from execution.basket_status import get_basket_payoff
 from execution.portfolio_status import get_portfolio_status
 from feeds.fetch import Feeds
+from storage.alert_repo import list_watches
 from storage.basket_repo import list_baskets as repo_list_baskets
 
 log = logging.getLogger(__name__)
@@ -56,8 +58,24 @@ def gather(
     conn = open_db(db_path)
     try:
         baskets = repo_list_baskets(conn)
+        watched = sorted(
+            {
+                w.symbol
+                for w in list_watches(conn, enabled_only=True)
+                if w.kind is WatchKind.PRICE and w.symbol
+            }
+        )
     finally:
         conn.close()
+
+    # Only what something is actually watching. A quote request costs budget, and
+    # watching nothing should cost nothing.
+    quotes: dict[str, float] = {}
+    if watched:
+        try:
+            quotes = {sym: q.ltp for sym, q in broker.get_quote(watched).items()}
+        except Exception:  # noqa: BLE001 - a missed quote is a late alert, not a failed pass
+            log.warning("alert pass could not read quotes for %s", watched, exc_info=True)
 
     chains: dict[tuple[str, str], OptionChain] = {}
     for basket in baskets:
@@ -85,4 +103,5 @@ def gather(
         baskets=views,
         events=cached.events,
         events_loaded=events_loaded,
+        quotes=quotes,
     )

@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from alerting.models import Limits, Severity
-from alerting.rules import HYSTERESIS, affects_india, evaluate, events_before
+from alerting.models import Direction, Limits, Severity, Watch, WatchKind
+from alerting.rules import HYSTERESIS, affects_india, evaluate, evaluate_watches, events_before
 from tests.alerting.conftest import FakeBasket, FakeEvent, FakeLeg
 
 L = Limits()
@@ -207,3 +207,69 @@ class TestWording:
 def test_replace_keeps_the_builders_honest() -> None:
     # guards against a fixture default drifting out from under the tests
     assert replace(FakeLeg(), delta=-0.5).delta == -0.5
+
+
+class TestYourOwnLevels:
+    """Watches: lines you drew, which nothing in the data suggests on its own."""
+
+    def _price(self, level: float, direction: Direction = Direction.ABOVE, **kw: object) -> Watch:
+        return Watch(
+            id=1,
+            kind=WatchKind.PRICE,
+            direction=direction,
+            level=level,
+            symbol="NSE:NIFTY50-INDEX",
+            **kw,  # type: ignore[arg-type]
+        )
+
+    def test_a_price_through_the_level_fires(self) -> None:
+        on = evaluate_watches([self._price(24000)], {"NSE:NIFTY50-INDEX": 24015.0}, None)
+        assert len(on) == 1
+        assert on[0].message == "NIFTY50 above 24,000 — now 24,015"
+
+    def test_a_price_short_of_the_level_is_quiet(self) -> None:
+        assert evaluate_watches([self._price(24000)], {"NSE:NIFTY50-INDEX": 23900.0}, None) == []
+
+    def test_exactly_on_the_level_counts_as_through(self) -> None:
+        assert evaluate_watches([self._price(24000)], {"NSE:NIFTY50-INDEX": 24000.0}, None)
+
+    def test_below_is_the_other_direction(self) -> None:
+        watch = self._price(23000, Direction.BELOW)
+        assert evaluate_watches([watch], {"NSE:NIFTY50-INDEX": 22900.0}, None)
+        assert evaluate_watches([watch], {"NSE:NIFTY50-INDEX": 23100.0}, None) == []
+
+    def test_a_missing_quote_is_not_a_zero(self) -> None:
+        # Otherwise every "below" watch fires the moment a quote goes missing.
+        assert evaluate_watches([self._price(23000, Direction.BELOW)], {}, None) == []
+
+    def test_a_disabled_watch_is_ignored(self) -> None:
+        watch = self._price(24000, enabled=False)
+        assert evaluate_watches([watch], {"NSE:NIFTY50-INDEX": 24015.0}, None) == []
+
+    def test_your_own_words_win_over_the_symbol(self) -> None:
+        watch = self._price(24000, note="Nifty breakout")
+        on = evaluate_watches([watch], {"NSE:NIFTY50-INDEX": 24015.0}, None)
+        assert on[0].message.startswith("Nifty breakout above")
+
+    def test_a_pnl_level_reads_the_book_not_a_quote(self) -> None:
+        watch = Watch(id=2, kind=WatchKind.PNL, direction=Direction.ABOVE, level=10000)
+        on = evaluate_watches([watch], {}, 10500.0)
+        assert on[0].message == "Net P&L above ₹10,000 — now ₹10,500"
+        assert on[0].severity is Severity.TARGET
+
+    def test_a_pnl_level_downward_is_a_risk(self) -> None:
+        watch = Watch(id=2, kind=WatchKind.PNL, direction=Direction.BELOW, level=-5000)
+        assert evaluate_watches([watch], {}, -6000.0)[0].severity is Severity.RISK
+
+    def test_no_pnl_yet_is_not_a_zero(self) -> None:
+        # A broker that has not answered must not read as a flat book, or every
+        # "below zero" watch fires on startup.
+        watch = Watch(id=2, kind=WatchKind.PNL, direction=Direction.BELOW, level=-5000)
+        assert evaluate_watches([watch], {}, None) == []
+
+    def test_moving_the_level_makes_a_new_condition(self) -> None:
+        # so an edited line can fire again rather than being suppressed as
+        # "already alerted"
+        first = self._price(24000).key
+        moved = self._price(24500).key
+        assert first != moved

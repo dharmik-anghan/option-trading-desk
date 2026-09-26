@@ -12,11 +12,20 @@ easy to state and to trust.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 
 from alerting.format import integer, rupees, rupees_compact
-from alerting.models import BasketView, Condition, EventView, Limits, Severity
+from alerting.models import (
+    BasketView,
+    Condition,
+    Direction,
+    EventView,
+    Limits,
+    Severity,
+    Watch,
+    WatchKind,
+)
 
 #: Countries whose releases move an Indian index enough to be worth a warning.
 #:
@@ -199,4 +208,79 @@ def evaluate(
                         )
                     )
 
+    return on
+
+
+def _crossed(direction: Direction, value: float, level: float) -> bool:
+    return value >= level if direction is Direction.ABOVE else value <= level
+
+
+def _display(watch: Watch) -> str:
+    """What to call the thing being watched.
+
+    Your own note wins; otherwise the symbol, tidied. "NSE:NIFTY50-INDEX" is
+    what the broker calls it and not what anyone says out loud.
+    """
+    if watch.note:
+        return watch.note
+    symbol = watch.symbol or ""
+    return symbol.split(":")[-1].removesuffix("-INDEX") or "price"
+
+
+def evaluate_watches(
+    watches: Sequence[Watch],
+    quotes: Mapping[str, float],
+    total_pnl: float | None,
+) -> list[Condition]:
+    """Which of your own levels are currently through.
+
+    Held apart from `evaluate` because the two answer different questions: that
+    one reads risk out of the book, this one just checks lines you drew. Keeping
+    them separate means neither grows a branch for the other's inputs.
+
+    Crossing is "is it through the level now", not "did it move through this
+    tick". Edge triggering in the engine turns that into one alert when it
+    happens, and the fire cooldown keeps a price hovering on the line from
+    announcing itself repeatedly - the same treatment a wobbling delta gets.
+    """
+    on: list[Condition] = []
+    for watch in watches:
+        if not watch.enabled:
+            continue
+
+        if watch.kind is WatchKind.PNL:
+            if total_pnl is None:
+                continue
+            if not _crossed(watch.direction, total_pnl, watch.level):
+                continue
+            on.append(
+                Condition(
+                    key=watch.key,
+                    # A P&L line crossed upward is the good kind of news.
+                    severity=(
+                        Severity.TARGET if watch.direction is Direction.ABOVE else Severity.RISK
+                    ),
+                    message=(
+                        f"{_display(watch) if watch.note else 'Net P&L'} "
+                        f"{watch.direction} {rupees(watch.level)} — now {rupees(total_pnl)}"
+                    ),
+                )
+            )
+            continue
+
+        if watch.symbol is None:
+            continue
+        price = quotes.get(watch.symbol)
+        if price is None or not _crossed(watch.direction, price, watch.level):
+            continue
+        on.append(
+            Condition(
+                key=watch.key,
+                severity=Severity.INFO,
+                message=(
+                    f"{_display(watch)} {watch.direction} {integer(watch.level)} "
+                    f"— now {integer(price)}"
+                ),
+            )
+        )
     return on

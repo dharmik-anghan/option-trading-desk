@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
   WATCHLIST,
@@ -22,14 +22,16 @@ import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
 import {
-  DEFAULT_LIMITS,
-  FIRE_COOLDOWN_MS,
+  UNDERLYINGS,
+  addWatch,
   affectsIndia,
-  dedupeLog,
-  evaluate,
-  reconcile,
-} from "./alerts";
-import type { Alert, Limits } from "./alerts";
+  clearAlerts,
+  deleteWatch,
+  getAlerts,
+  saveLimits,
+  setWatchEnabled,
+} from "./api";
+import type { Limits, NewWatch } from "./api";
 
 type View = "trading" | "oi" | "greeks";
 type Theme = "dark" | "light";
@@ -46,40 +48,28 @@ const CONTEXT_MS = 15000;
 // Both are somebody else's website behind a server-side cache, so polling them
 // hard buys nothing - the backend would just hand back the same snapshot.
 const NEWS_MS = 120000;
+// The backend judges about once a minute, so polling faster only repeats an
+// answer. Slower than that and a fired alert sits unseen on screen.
+const ALERTS_MS = 20000;
+
+/** Shown only until the first /api/alerts answer lands, so the threshold inputs
+    have numbers rather than blanks. The backend's stored values are the real
+    ones - these are never saved. */
+const FALLBACK_LIMITS: Limits = {
+  target: 15000,
+  daily_loss: 25000,
+  max_loss: 40000,
+  short_delta: 0.3,
+  expiry_days: 3,
+};
 const EVENTS_MS = 600000;
 const BASKETS_MS = 30000;
 const HEALTH_MS = 30000;
 
-function stored<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? ({ ...fallback, ...JSON.parse(raw) } as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-interface SavedAlerts {
-  log: Alert[];
-  /** Keys of the conditions that were true when this was written. */
-  active: string[];
-}
-
-function sameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const key of a) if (!b.has(key)) return false;
-  return true;
-}
-
-function persistAlerts(log: readonly Alert[], active: ReadonlySet<string>): void {
-  try {
-    localStorage.setItem(
-      "optiondesk-alerts",
-      JSON.stringify({ log: log.slice(0, 200), active: [...active] } satisfies SavedAlerts),
-    );
-  } catch {
-    // the log is a convenience; losing it must not break the desk
-  }
+/** A write that failed. Logged, not thrown: an alert setting that did not save
+    must not take the trading screen down with it. */
+function noteFailure(error: unknown): void {
+  console.error("alert settings did not save", error);
 }
 
 function initialTheme(): Theme {
@@ -101,37 +91,9 @@ export default function App() {
   const [depth, setDepth] = useState(15);
   // the chain is reference material here, not the main view, so it starts shut
   const [chainOpen, setChainOpen] = useState(false);
-  const [limits, setLimits] = useState<Limits>(() => stored("optiondesk-limits", DEFAULT_LIMITS));
-  // The log AND the set of conditions that were already true are restored
-  // together. Restoring only the log makes every still-true condition look
-  // like a fresh transition on reload, so a refresh re-fired all of them.
-  const [saved] = useState(() => {
-    const raw = stored<SavedAlerts>("optiondesk-alerts", { log: [], active: [] });
-    // Heal repeats an earlier build wrote: the log outlives the code, so a fix
-    // alone does not remove what the bug already recorded.
-    // At the cooldown's floor, so repeats an earlier build already wrote are
-    // cleared out by the same rule that now prevents them.
-    return { ...raw, log: dedupeLog(raw.log ?? [], FIRE_COOLDOWN_MS) };
-  });
-  const [alertLog, setAlertLog] = useState<Alert[]>(saved.log);
-  const activeKeys = useRef<Set<string>>(new Set(saved.active));
-  // The same keys again, as state this time, because the hysteresis band has to
-  // be known during render and a ref must not be read there. The ref stays the
-  // source of truth - advancing it is a side effect, and React may call a state
-  // updater more than once - so this is a mirror, kept in step by the effect.
-  const [sticky, setSticky] = useState<ReadonlySet<string>>(() => new Set(saved.active));
-  const logRef = useRef<Alert[]>(saved.log);
   const [paused, setPaused] = useState(false);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [basketNonce, setBasketNonce] = useState(0);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("optiondesk-limits", JSON.stringify(limits));
-    } catch {
-      // a limit we cannot remember is still enforced this session
-    }
-  }, [limits]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -229,76 +191,42 @@ export default function App() {
     setExpiry("");
   }, []);
 
-  // Re-evaluated whenever the data it reads changes, which is what the polls
-  // already provide - no second clock to keep in step.
-  // Which conditions hold right now. Derived during render rather than kept in
-  // state, because it is a pure function of data already on screen.
-  const conditions = useMemo(
-    () =>
-      paused
-        ? []
-        : evaluate(
-            portfolio.data,
-            baskets.data,
-            limits,
-            events.data?.events ?? [],
-            sticky,
-          ),
-    [paused, portfolio.data, baskets.data, limits, events.data, sticky],
+  // Alerts are read, not computed. The engine that raises them runs in the
+  // backend (`alerting/`), which is what lets them fire with this tab closed and
+  // reach a phone - neither of which a browser engine could ever do. It also
+  // means the log is the same in every browser rather than per-origin.
+  const alerts = useLive(() => getAlerts(), paused ? 0 : ALERTS_MS, [], paused, 2500);
+
+  const refreshAlerts = alerts.refresh;
+  const onLimits = useCallback(
+    (next: Limits) => {
+      // Sent straight through: the backend owns these now, so a threshold typed
+      // here has to reach it or the next pass judges against the old one.
+      void saveLimits(next).then(refreshAlerts).catch(noteFailure);
+    },
+    [refreshAlerts],
   );
-
-  // Nothing fetched yet is not the same as nothing wrong: evaluating early
-  // reports no conditions, which clears the restored active set and re-fires
-  // everything once the data lands. That was the refresh duplicating alerts.
-  //
-  // Both sources, not either. The portfolio answers in one broker call while
-  // the live basket list makes several, so `||` still let a pass run with the
-  // baskets missing - and every basket-derived alert fired a second time.
-  // An empty list is loaded; only null is "not yet".
-  const hasData = portfolio.data !== null && baskets.data !== null;
-  // Loaded is not the same as usable. An empty calendar is a valid response -
-  // a re-scrape that came back with nothing, which happens because the source
-  // is scraped - and it is indistinguishable from every event having passed.
-  // Judging event keys against it drops them all, and the next good poll fires
-  // the whole block again. That is the six repeated event warnings.
-  const eventsLoaded = (events.data?.events?.length ?? 0) > 0;
-
-  useEffect(() => {
-    if (paused || !hasData) return;
-
-    // Deliberately not inside a setAlertLog updater: advancing `activeKeys` is
-    // a side effect, and React may call an updater more than once. It did -
-    // the second call saw every key already active, fired nothing, and handed
-    // back the previous log, so alerts silently never appeared.
-    // Event conditions cannot be judged until the calendar has loaded, and it
-    // polls far more slowly than the rest. Without this its keys are dropped
-    // in the gap and re-fire on arrival - the duplicate event alert.
-    const evaluable = (key: string) => (key.startsWith("event:") ? eventsLoaded : true);
-    const next = reconcile(
-      activeKeys.current,
-      logRef.current,
-      conditions,
-      Date.now(),
-      undefined,
-      evaluable,
-    );
-    activeKeys.current = next.active;
-    // Compared by content, not identity: reconcile returns a fresh Set every
-    // pass, and setting state from it unconditionally would re-render, which
-    // re-derives the conditions, which runs this effect again, forever.
-    setSticky((was) => (sameKeys(was, next.active) ? was : next.active));
-    if (next.fired.length) {
-      // Deduped on the way in as well as on restore. The cooldown in reconcile
-      // should make this a no-op; it is here so that if anything ever slips
-      // past it, the panel still does not show the same line twice.
-      const healed = dedupeLog(next.log, FIRE_COOLDOWN_MS);
-      logRef.current = healed;
-      setAlertLog(healed);
-    }
-    // saved every pass, not only when something fires: a condition that has
-    // *cleared* has to be recorded too, or it would fire again after a reload
-    persistAlerts(logRef.current, activeKeys.current);
-  }, [conditions, paused, hasData, eventsLoaded]);
+  const onClear = useCallback(() => {
+    void clearAlerts().then(refreshAlerts).catch(noteFailure);
+  }, [refreshAlerts]);
+  const onAddWatch = useCallback(
+    (watch: NewWatch) => {
+      void addWatch(watch).then(refreshAlerts).catch(noteFailure);
+    },
+    [refreshAlerts],
+  );
+  const onToggleWatch = useCallback(
+    (id: number, enabled: boolean) => {
+      void setWatchEnabled(id, enabled).then(refreshAlerts).catch(noteFailure);
+    },
+    [refreshAlerts],
+  );
+  const onDeleteWatch = useCallback(
+    (id: number) => {
+      void deleteWatch(id).then(refreshAlerts).catch(noteFailure);
+    },
+    [refreshAlerts],
+  );
 
   const onBasketChanged = useCallback(() => {
     setBasketNonce((n) => n + 1);
@@ -341,23 +269,19 @@ export default function App() {
       </div>
 
       <AlertsPanel
-        alerts={alertLog}
-        activeCount={conditions.length}
-        limits={limits}
-        onLimits={setLimits}
-        onClear={() => {
-          // The active set goes too. Keeping it meant every condition that was
-          // still true stayed marked as already-alerted, so nothing re-fired and
-          // the panel sat on "Nothing yet" while the header said several were
-          // live. Clearing is an explicit "show me where things stand", not a
-          // mute, so what is true now is written again on the next pass - which
-          // is a re-list, not the spurious repeat the active set guards against.
-          logRef.current = [];
-          setAlertLog([]);
-          activeKeys.current = new Set();
-          setSticky(new Set());
-          persistAlerts([], activeKeys.current);
-        }}
+        alerts={alerts.data?.alerts ?? []}
+        activeCount={alerts.data?.active.length ?? 0}
+        limits={alerts.data?.limits ?? FALLBACK_LIMITS}
+        watches={alerts.data?.watches ?? []}
+        symbols={UNDERLYINGS}
+        telegram={alerts.data?.watcher.telegram ?? false}
+        watching={alerts.data?.watcher.running ?? false}
+        trouble={alerts.data?.watcher.last_error ?? null}
+        onLimits={onLimits}
+        onClear={onClear}
+        onAddWatch={onAddWatch}
+        onToggleWatch={onToggleWatch}
+        onDeleteWatch={onDeleteWatch}
       />
 
       <OptionChainPanel

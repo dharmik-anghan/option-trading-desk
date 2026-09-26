@@ -22,15 +22,16 @@ import asyncio
 import logging
 import sqlite3
 import time
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from alerting.engine import reconcile
 from alerting.models import Alert, BasketView, EventView, Limits, Outcome
-from alerting.rules import evaluate
+from alerting.rules import evaluate, evaluate_watches
 from storage.alert_repo import (
     append,
+    list_watches,
     load_active,
     load_limits,
     load_log,
@@ -62,6 +63,9 @@ class Inputs:
     baskets: Sequence[BasketView]
     events: Sequence[EventView]
     events_loaded: bool
+    #: Last price per symbol, for the price levels being watched. Only the
+    #: symbols something is actually watching are fetched.
+    quotes: Mapping[str, float] = field(default_factory=dict)
 
 
 class Notifier(Protocol):
@@ -134,13 +138,20 @@ class Watcher:
             active = load_active(conn)
             limits: Limits = load_limits(conn)
             now = self._now_ms()
-            conditions = evaluate(
-                inputs.total_pnl,
-                list(inputs.baskets),
-                limits,
-                list(inputs.events),
-                sticky=active,
-            )
+            conditions = [
+                *evaluate(
+                    inputs.total_pnl,
+                    list(inputs.baskets),
+                    limits,
+                    list(inputs.events),
+                    sticky=active,
+                ),
+                # Your own levels, read from the same pass so one crossing is one
+                # alert on the same clock as everything else.
+                *evaluate_watches(
+                    list_watches(conn, enabled_only=True), inputs.quotes, inputs.total_pnl
+                ),
+            ]
             # An event key cannot be judged until the calendar has answered with
             # something. See Inputs.events_loaded.
             usable = inputs.events_loaded and bool(inputs.events)

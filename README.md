@@ -147,9 +147,17 @@ recorded and shown, just not sent. A batch that fires together is sent as one
 message, and an alert stays queued until a send succeeds, so an unreachable
 Telegram means a late message rather than a lost one.
 
+Besides the thresholds it applies to every structure, you can ask about levels
+of your own — "tell me if NIFTY goes above 24,000", or if net P&L drops through
+a number. Add them in the alerts panel, or `POST /api/alerts/watches`. A level
+can be paused without losing it, and moving one lets it fire again rather than
+counting as already-announced. Only symbols something is actually watching are
+quoted, so watching nothing costs nothing.
+
 `GET /api/alerts` returns the log, the conditions currently true, the thresholds,
-and whether the watcher is actually running — an empty list means "nothing is
-wrong" only if something is looking.
+the levels being watched, and whether the watcher is actually running — an empty
+list means "nothing is wrong" only if something is looking. Each alert carries
+whether it was delivered, so the desk can show what actually left the building.
 
 ## Checks
 
@@ -161,8 +169,13 @@ uv run ruff check .
 cd frontend && npm test && npm run lint && npm run build
 ```
 
-Tests never touch the network: the broker has a fake, and the feed parsers run
-against saved fixtures in `tests/feeds/fixtures/`.
+Tests never touch the network: the broker has a fake, the feed parsers run
+against saved fixtures in `tests/feeds/fixtures/`, and the alert watcher is
+handed a callable for its inputs rather than a broker.
+
+`tests/alerting/test_format.py` and `frontend/src/format.test.ts` assert the same
+table of money strings. Both exist because either side can word an alert now, and
+one situation reading as two is worse than a wrong figure.
 
 ## Security
 

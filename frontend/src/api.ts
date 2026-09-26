@@ -197,6 +197,18 @@ async function postJson<TRequest, TResponse>(path: string, body: TRequest): Prom
   return (await response.json()) as TResponse;
 }
 
+async function putJson<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  return (await response.json()) as TResponse;
+}
+
 async function del(path: string): Promise<void> {
   const response = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
   if (!response.ok) {
@@ -430,6 +442,128 @@ export function getNews(limit = 40): Promise<NewsResponse> {
 
 export function getHealth(): Promise<Health> {
   return getJson<Health>("/api/health");
+}
+
+/* -------------------------------------------------------------------------
+ * Alerts
+ *
+ * Raised by the backend, not here. The engine used to run in this tab, which
+ * meant nothing was watching once it was closed and Telegram could never work
+ * at all. What is left on this side is display: the log, the thresholds, and
+ * the levels you asked about.
+ * ---------------------------------------------------------------------- */
+
+export type Severity = "risk" | "warn" | "target" | "info";
+
+export interface Alert {
+  /** Stable per condition, so one condition is one alert however often it is polled. */
+  key: string;
+  severity: Severity;
+  /** Which structure it concerns, or null for account-wide ones. */
+  subject: string | null;
+  message: string;
+  /** Epoch milliseconds. */
+  at: number;
+  /** When it was delivered off-screen, or null if it has not been. */
+  notified_at: number | null;
+}
+
+export interface Limits {
+  target: number;
+  daily_loss: number;
+  max_loss: number;
+  short_delta: number;
+  expiry_days: number;
+}
+
+export type WatchKind = "price" | "pnl";
+export type WatchDirection = "above" | "below";
+
+/** A level you asked to be told about. */
+export interface Watch {
+  id: number;
+  kind: WatchKind;
+  symbol: string | null;
+  direction: WatchDirection;
+  level: number;
+  note: string;
+  enabled: boolean;
+}
+
+export interface NewWatch {
+  kind: WatchKind;
+  direction: WatchDirection;
+  level: number;
+  symbol?: string | null;
+  note?: string;
+}
+
+/** Whether anything is actually watching. An empty log only means calm if so. */
+export interface WatcherStatus {
+  running: boolean;
+  last_run_at: number | null;
+  last_error: string | null;
+  /** Whether alerts are being delivered anywhere off-screen. */
+  telegram: boolean;
+}
+
+export interface AlertsResponse {
+  alerts: Alert[];
+  /** Conditions true right now, whether or not they fired this pass. */
+  active: string[];
+  limits: Limits;
+  watches: Watch[];
+  watcher: WatcherStatus;
+}
+
+export const SEVERITY_LABEL: Record<Severity, string> = {
+  risk: "RISK",
+  warn: "WARN",
+  target: "TARGET",
+  info: "INFO",
+};
+
+/**
+ * Whether a calendar entry bears on an Indian index position.
+ *
+ * Kept on this side purely for the top bar's "next event", which picks one from
+ * the calendar it already has rather than asking for it. The backend applies the
+ * same rule when it decides what to alert on - `alerting/rules.py` - and that
+ * copy is the one that matters.
+ */
+export function affectsIndia(event: CalendarEvent): boolean {
+  if (event.importance !== "H") return false;
+  return event.coverage === "india" || event.country === "United States";
+}
+
+export function getAlerts(limit = 200): Promise<AlertsResponse> {
+  return getJson<AlertsResponse>(`/api/alerts?limit=${limit}`);
+}
+
+export async function clearAlerts(): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/alerts/clear`, { method: "POST" });
+  if (!response.ok) throw new Error(await extractErrorMessage(response));
+}
+
+export function saveLimits(limits: Limits): Promise<Limits> {
+  return putJson<Limits, Limits>("/api/alerts/limits", limits);
+}
+
+export function addWatch(watch: NewWatch): Promise<Watch> {
+  return postJson<NewWatch, Watch>("/api/alerts/watches", watch);
+}
+
+export async function setWatchEnabled(id: number, enabled: boolean): Promise<Watch[]> {
+  const response = await fetch(
+    `${API_BASE}/api/alerts/watches/${id}/enabled?enabled=${enabled}`,
+    { method: "POST" },
+  );
+  if (!response.ok) throw new Error(await extractErrorMessage(response));
+  return (await response.json()) as Watch[];
+}
+
+export function deleteWatch(id: number): Promise<void> {
+  return del(`/api/alerts/watches/${id}`);
 }
 
 /** The strategies the backend actually registers (api/app.py `_strategies`). */

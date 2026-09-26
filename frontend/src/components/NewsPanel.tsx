@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CalendarEvent, EventsResponse, NewsResponse } from "../api";
-import { affectsIndia } from "../alerts";
+import { affectsIndia } from "../api";
 import { clockIST, dayIST } from "../format";
 
 interface Props {

@@ -41,6 +41,49 @@ class Limits:
 DEFAULT_LIMITS = Limits()
 
 
+class WatchKind(StrEnum):
+    #: A price level on one instrument.
+    PRICE = "price"
+    #: A level on the book's overall P&L.
+    PNL = "pnl"
+
+
+class Direction(StrEnum):
+    ABOVE = "above"
+    BELOW = "below"
+
+
+@dataclass(frozen=True)
+class Watch:
+    """A level you asked to be told about.
+
+    Distinct from `Limits`, which are risk thresholds the desk applies to every
+    structure. A watch is a line you drew for your own reasons - "tell me if
+    NIFTY gets to 24,000" - and nothing in the data suggests it.
+    """
+
+    id: int
+    kind: WatchKind
+    direction: Direction
+    level: float
+    #: Required for a price watch, meaningless for a P&L one.
+    symbol: str | None = None
+    #: Your own words for it, shown instead of the raw symbol when set.
+    note: str = ""
+    enabled: bool = True
+
+    @property
+    def key(self) -> str:
+        """Stable per level, so moving a line can fire again.
+
+        The level is in the key on purpose. Editing 24,000 to 24,500 and having
+        it stay quiet because "that alert already fired" would be wrong: it is a
+        different question now.
+        """
+        what = self.symbol if self.kind is WatchKind.PRICE else "pnl"
+        return f"watch:{self.id}:{what}:{self.direction}:{self.level:g}"
+
+
 @dataclass(frozen=True)
 class Condition:
     """Something that is true right now, before it becomes a logged alert."""

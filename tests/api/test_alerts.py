@@ -126,3 +126,79 @@ class TestLimits:
             "expiry_days": 5,
         }
         assert client.put("/api/alerts/limits", json=payload).status_code == 422
+
+
+class TestWatches:
+    """Levels you ask about, over HTTP."""
+
+    PRICE = {
+        "kind": "price",
+        "direction": "above",
+        "level": 24000,
+        "symbol": "NSE:NIFTY50-INDEX",
+        "note": "Nifty breakout",
+    }
+    PNL = {"kind": "pnl", "direction": "below", "level": -5000}
+
+    def test_none_to_begin_with(self, client: TestClient) -> None:
+        assert client.get("/api/alerts/watches").json() == []
+
+    def test_adding_a_price_level(self, client: TestClient) -> None:
+        created = client.post("/api/alerts/watches", json=self.PRICE)
+        assert created.status_code == 201
+        body = created.json()
+        assert body["symbol"] == "NSE:NIFTY50-INDEX"
+        assert body["level"] == 24000
+        assert body["note"] == "Nifty breakout"
+        assert body["enabled"] is True
+
+    def test_adding_a_pnl_level_needs_no_symbol(self, client: TestClient) -> None:
+        body = client.post("/api/alerts/watches", json=self.PNL).json()
+        assert body["symbol"] is None
+        assert body["kind"] == "pnl"
+
+    def test_a_price_level_without_a_symbol_is_refused(self, client: TestClient) -> None:
+        bad = {"kind": "price", "direction": "above", "level": 24000}
+        assert client.post("/api/alerts/watches", json=bad).status_code == 422
+
+    def test_a_nonsense_direction_is_refused(self, client: TestClient) -> None:
+        bad = {**self.PRICE, "direction": "sideways"}
+        assert client.post("/api/alerts/watches", json=bad).status_code == 422
+
+    def test_they_come_back_with_the_alerts(self, client: TestClient) -> None:
+        client.post("/api/alerts/watches", json=self.PRICE)
+        assert len(client.get("/api/alerts").json()["watches"]) == 1
+
+    def test_turning_one_off_keeps_it(self, client: TestClient) -> None:
+        watch_id = client.post("/api/alerts/watches", json=self.PRICE).json()["id"]
+        rows = client.post(f"/api/alerts/watches/{watch_id}/enabled?enabled=false").json()
+        assert rows[0]["enabled"] is False
+        assert len(client.get("/api/alerts/watches").json()) == 1
+
+    def test_deleting_one_removes_it(self, client: TestClient) -> None:
+        watch_id = client.post("/api/alerts/watches", json=self.PRICE).json()["id"]
+        assert client.delete(f"/api/alerts/watches/{watch_id}").status_code == 204
+        assert client.get("/api/alerts/watches").json() == []
+
+    def test_deleting_something_absent_is_a_404(self, client: TestClient) -> None:
+        assert client.delete("/api/alerts/watches/999").status_code == 404
+
+    def test_toggling_something_absent_is_a_404(self, client: TestClient) -> None:
+        assert client.post("/api/alerts/watches/999/enabled?enabled=false").status_code == 404
+
+
+class TestDeliveryIsVisible:
+    def test_an_undelivered_alert_says_so(self, client: TestClient, db_path: Path) -> None:
+        _seed(db_path)
+        assert all(a["notified_at"] is None for a in client.get("/api/alerts").json()["alerts"])
+
+    def test_a_delivered_alert_carries_when(self, client: TestClient, db_path: Path) -> None:
+        _seed(db_path)
+        conn = open_db(db_path)
+        try:
+            from storage.alert_repo import mark_delivered, undelivered
+
+            mark_delivered(conn, [row_id for row_id, _a in undelivered(conn)], at=7777)
+        finally:
+            conn.close()
+        assert all(a["notified_at"] == 7777 for a in client.get("/api/alerts").json()["alerts"])

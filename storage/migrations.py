@@ -84,11 +84,44 @@ def _alert_state(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _alert_watches(conn: sqlite3.Connection) -> None:
+    """Levels you asked to be told about.
+
+    Everything the engine raised until now was derived - a delta crossing a
+    threshold, an event inside an expiry. These are the opposite: an arbitrary
+    line you drew yourself, on a price or on the book's P&L, which nothing in the
+    data suggests on its own.
+
+    The level is part of the alert's key rather than just a column, so moving a
+    line makes a new condition that can fire again. Editing 24,000 to 24,500 and
+    having it stay quiet because "that alert already fired" would be wrong.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS alert_watch (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            -- 'price' (needs a symbol) or 'pnl' (the book as a whole)
+            kind TEXT NOT NULL CHECK (kind IN ('price', 'pnl')),
+            symbol TEXT,
+            direction TEXT NOT NULL CHECK (direction IN ('above', 'below')),
+            level REAL NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            -- a price watch without a symbol has nothing to watch
+            CHECK (kind = 'pnl' OR symbol IS NOT NULL)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_alert_watch_enabled ON alert_watch(enabled);
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
     Migration(version=2, reason="alert log, active keys and limits move server-side",
               apply=_alert_state),
+    Migration(version=3, reason="price and P&L levels you ask to be told about",
+              apply=_alert_watches),
 )
 
 
