@@ -44,6 +44,7 @@ class FakeBasket:
     #: exercised without reconstructing the arithmetic in a test.
     mtm: float | None = None
     net_delta: float | None = None
+    net_delta_per_contract: float | None = None
     legs: list[FakeLeg] = field(default_factory=lambda: [FakeLeg()])
 
 

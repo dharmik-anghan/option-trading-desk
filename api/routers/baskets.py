@@ -88,7 +88,7 @@ def _leg_response(leg: BasketLeg, row: OptionChainRow | None) -> BasketLegRespon
 
 def _structure_totals(
     legs: list[BasketLegResponse],
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None, float | None]:
     """What the open legs are worth now, and how the structure leans.
 
     Computed here rather than in the browser, which is where both used to be
@@ -97,13 +97,26 @@ def _structure_totals(
     there would have been three.
 
     A short leg subtracts: selling premium shows positive theta and negative
-    delta on a call, which is the shape of the trade. Either is None when the
-    broker has not priced every open leg, because a partial total read as a whole
-    one is a number that looks fine and is wrong.
+    delta on a call, which is the shape of the trade. Any is None when the broker
+    has not priced every open leg, because a partial total read as a whole one is
+    a number that looks fine and is wrong.
+
+    Delta comes back twice, because the two answer different questions and only
+    differ by a constant - which is exactly why they get confused:
+
+    - per contract, the directional sum of the quoted deltas. On the condor:
+      +0.32 -0.19 -0.23 +0.10. This is the figure on the legs table, the scale a
+      trader speaks in, and what a delta limit is set against.
+    - weighted by contracts, which is the position's actual exposure and the only
+      one that converts to money: 65 lots of 0.32 is 20.80 index points per unit
+      move, not 0.32.
+
+    A balanced structure is zero in both, which is how one can be mistaken for
+    the other until something drifts.
     """
     open_legs = [leg for leg in legs if leg.is_open]
     if not open_legs:
-        return None, None
+        return None, None, None
 
     def direction(leg: BasketLegResponse) -> int:
         return 1 if leg.side == "BUY" else -1
@@ -119,13 +132,19 @@ def _structure_totals(
             if mark is not None
         )
     net_delta: float | None = None
+    per_contract: float | None = None
     if all(delta is not None for delta in deltas):
         net_delta = sum(
             direction(leg) * leg.quantity * delta
             for leg, delta in zip(open_legs, deltas, strict=True)
             if delta is not None
         )
-    return mtm, net_delta
+        per_contract = sum(
+            direction(leg) * delta
+            for leg, delta in zip(open_legs, deltas, strict=True)
+            if delta is not None
+        )
+    return mtm, net_delta, per_contract
 
 
 def _basket_to_response(
@@ -146,7 +165,7 @@ def _basket_to_response(
         payoff = replace(payoff, max_profit=0.0, max_loss=0.0, breakevens=[], legs=[])
         today = []
     legs = [_leg_response(leg, rows.get(leg.symbol)) for leg in basket.legs]
-    mtm, net_delta = _structure_totals(legs)
+    mtm, net_delta, per_contract = _structure_totals(legs)
     return BasketResponse(
         id=basket.id,
         name=basket.name,
@@ -161,6 +180,7 @@ def _basket_to_response(
         expiry_warn_days=basket.expiry_warn_days,
         mtm=mtm,
         net_delta=net_delta,
+        net_delta_per_contract=per_contract,
         legs=legs,
         max_profit=None if math.isinf(payoff.max_profit) else payoff.max_profit,
         max_loss=None if math.isinf(payoff.max_loss) else payoff.max_loss,

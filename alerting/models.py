@@ -176,6 +176,9 @@ class BasketView(Protocol):
     def mtm(self) -> float | None: ...
     @property
     def net_delta(self) -> float | None: ...
+    #: The unweighted directional sum - the scale a delta limit is set in.
+    @property
+    def net_delta_per_contract(self) -> float | None: ...
     @property
     def legs(self) -> list: ...  # type: ignore[type-arg]
 

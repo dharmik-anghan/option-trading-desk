@@ -158,7 +158,14 @@ class BasketResponse(BaseModel):
     #: that alert all read one number. None when the broker has not priced every
     #: open leg - a partial total read as a whole one looks fine and is wrong.
     mtm: float | None = None
+    #: Exposure: the deltas weighted by contracts held. The only one that converts
+    #: to money - 65 lots of 0.32 is 20.80 index points per unit move.
     net_delta: float | None = None
+    #: The directional sum of the quoted deltas, unweighted. The figure on the
+    #: legs table, the scale a trader speaks in, and what a delta limit is set
+    #: against. Zero in both for a balanced structure, which is how one gets
+    #: mistaken for the other.
+    net_delta_per_contract: float | None = None
     legs: list[BasketLegResponse]
     max_profit: float | None
     max_loss: float | None

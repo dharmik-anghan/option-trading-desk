@@ -311,12 +311,12 @@ class TestLevelsOnOneStructure:
 
     def test_a_delta_limit_fires_either_way(self) -> None:
         for net in (0.6, -0.6):
-            b = self._basket(delta_limit=0.5, net_delta=net)
+            b = self._basket(delta_limit=0.5, net_delta_per_contract=net)
             on = next(c for c in evaluate(None, [b], L) if c.key.startswith("delta:"))
             assert ("long" if net > 0 else "short") in on.message
 
     def test_a_delta_within_the_limit_is_quiet(self) -> None:
-        b = self._basket(delta_limit=0.5, net_delta=0.3)
+        b = self._basket(delta_limit=0.5, net_delta_per_contract=0.3)
         assert not [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
 
     def test_the_level_is_in_the_key_so_moving_it_can_fire_again(self) -> None:
@@ -363,30 +363,30 @@ class TestDeltaSigns:
         # Sold a put: you are long the underlying. Positive contribution from a
         # negative quoted delta.
         b = self._legs(("SELL", "PE", -0.32, 65))
-        on = evaluate(None, [replace(b, net_delta=-1 * 65 * -0.32, delta_limit=10.0)], L)
+        on = evaluate(None, [replace(b, net_delta_per_contract=0.32, delta_limit=0.2)], L)
         fired = next(c for c in on if c.key.startswith("delta:"))
         assert "leaning long" in fired.message
 
     def test_a_short_call_leans_short(self) -> None:
         b = self._legs(("SELL", "CE", 0.23, 65))
-        on = evaluate(None, [replace(b, net_delta=-1 * 65 * 0.23, delta_limit=10.0)], L)
+        on = evaluate(None, [replace(b, net_delta_per_contract=-0.23, delta_limit=0.2)], L)
         fired = next(c for c in on if c.key.startswith("delta:"))
         assert "leaning short" in fired.message
 
     def test_the_limit_is_a_magnitude_not_a_direction(self) -> None:
         # One limit catches drift either way; the message says which way.
-        for net in (12.0, -12.0):
-            b = FakeBasket(id=8, net_delta=net, delta_limit=10.0)
+        for net in (0.3, -0.3):
+            b = FakeBasket(id=8, net_delta_per_contract=net, delta_limit=0.2)
             assert [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
 
     def test_a_negative_limit_is_read_as_its_size(self) -> None:
-        # Typing -10 means the same as 10; refusing it would be pedantry.
-        b = FakeBasket(id=8, net_delta=12.0, delta_limit=-10.0)
+        # Typing -0.2 means the same as 0.2; refusing it would be pedantry.
+        b = FakeBasket(id=8, net_delta_per_contract=0.3, delta_limit=-0.2)
         assert [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
 
     def test_a_neutral_structure_does_not_fire(self) -> None:
-        # The live condor: +20.80 -12.35 -14.95 +6.50 = 0.00, with no leg near zero.
-        b = FakeBasket(id=8, net_delta=0.0, delta_limit=10.0)
+        # The live condor: +0.32 -0.19 -0.23 +0.10 = 0.00, with no leg near zero.
+        b = FakeBasket(id=8, net_delta_per_contract=0.0, delta_limit=0.15)
         assert not [c for c in evaluate(None, [b], L) if c.key.startswith("delta:")]
 
 
@@ -446,3 +446,19 @@ class TestPerStructureOverrides:
         fired = keys(evaluate(None, [loose, tight], L))
         assert "tested:1" not in fired
         assert "tested:2" in fired
+
+
+def test_the_limit_is_read_per_contract_not_weighted_by_lots() -> None:
+    """The distinction that matters, and the reason both figures exist.
+
+    A balanced structure is zero in both, so one passes for the other until
+    something drifts. On 65 lots the weighted figure is sixty-five times larger,
+    which turns a limit of 0.15 into one that trips on a quarter of a delta point.
+    The limit is set in the scale on the legs table: the unweighted sum.
+    """
+    drifted = FakeBasket(id=8, delta_limit=0.15, net_delta_per_contract=0.10, net_delta=6.5)
+    assert not [c for c in evaluate(None, [drifted], L) if c.key.startswith("delta:")]
+
+    past = FakeBasket(id=8, delta_limit=0.15, net_delta_per_contract=0.20, net_delta=13.0)
+    fired = next(c for c in evaluate(None, [past], L) if c.key.startswith("delta:"))
+    assert "+0.20" in fired.message, "the message quotes the per-contract figure"

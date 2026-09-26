@@ -166,18 +166,25 @@ def evaluate(
                     )
                 )
 
+        # Judged on the per-contract sum, not the contract-weighted exposure. Both
+        # are zero for a balanced structure and differ by the lot size otherwise,
+        # so the choice matters: a limit typed as 0.15 means a sixth of a delta
+        # point, not a sixth of one multiplied by sixty-five lots. The unweighted
+        # figure is the one on the legs table and the one a trader speaks in.
+        #
         # Direction-agnostic: a structure meant to be neutral has drifted whether
         # it drifted long or short, and which way is in the figure.
-        if b.delta_limit is not None and b.net_delta is not None:
-            if abs(b.net_delta) >= abs(b.delta_limit):
-                leaning = "long" if b.net_delta > 0 else "short"
+        drift = b.net_delta_per_contract
+        if b.delta_limit is not None and drift is not None:
+            if abs(drift) >= abs(b.delta_limit):
+                leaning = "long" if drift > 0 else "short"
                 on.append(
                     Condition(
                         key=f"delta:{b.id}:{abs(b.delta_limit):g}",
                         severity=Severity.WARN,
                         subject=b.name,
                         message=(
-                            f"Delta {b.net_delta:+.2f} is past {abs(b.delta_limit):.2f} "
+                            f"Delta {drift:+.2f} is past {abs(b.delta_limit):.2f} "
                             f"\u2014 leaning {leaning}"
                         ),
                     )

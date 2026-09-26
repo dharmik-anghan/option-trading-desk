@@ -104,7 +104,11 @@ export interface Basket {
       server-side, so the screen and the alert about it read one number. Null
       when the broker has not priced every open leg. */
   mtm: number | null;
+  /** Exposure: deltas weighted by contracts. The only one that converts to money. */
   net_delta: number | null;
+  /** The directional sum of the quoted deltas, unweighted — the figure on the
+      legs table and the scale a delta limit is set in. */
+  net_delta_per_contract: number | null;
   legs: BasketLeg[];
   max_profit: number | null;
   max_loss: number | null;

@@ -30,11 +30,17 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
   const total = (field: "delta" | "gamma" | "theta" | "vega") =>
     open.reduce((a, l) => a + sign(l) * l.quantity * ((l[field] as number | null) ?? 0), 0);
 
-  // From the server, which now computes both - the rules that alert on them read
-  // the same figures, and three places deriving one number is three chances to
-  // disagree. The per-leg totals below are still summed here, since they are a
-  // table footer rather than a number anything alerts on.
+  // Two delta figures, because they answer different questions and differ only
+  // by the lot size - which is exactly why they get confused. A balanced
+  // structure is zero in both.
+  //
+  //   drift    the directional sum of the quoted deltas. What the legs table
+  //            shows, what a trader says out loud, and what a delta limit is set
+  //            against.
+  //   netDelta the same weighted by contracts. The position's real exposure and
+  //            the only one that becomes money.
   const netDelta = basket.net_delta ?? total("delta");
+  const drift = basket.net_delta_per_contract;
   const theta = total("theta");
   const vega = total("vega");
   const gamma = total("gamma");
@@ -71,7 +77,10 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
   // four tiles each three lines deep is what made this strip cramped. The
   // rupee translations moved into the table below, with the other rupee rows.
   const greeks: [string, string][] = [
-    ["Net delta", num(netDelta, 2)],
+    // Labelled per contract because that is what it is, and because the number
+    // beside it is the same figure weighted by lots. One called "Net delta" and
+    // one called "Exposure" read as the same thing measured twice.
+    ["Delta per contract", drift === null ? "\u2014" : num(drift, 2)],
     ["Theta / day", signed(theta)],
     ["Vega / vol pt", signed(vega)],
     ["Gamma", num(gamma, 4)],
@@ -87,6 +96,7 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
   };
 
   const rows: [string, string, string?][] = [
+    ["Position delta", num(netDelta, 2)],
     ["Exposure per 1% move", deltaRupees === null ? "—" : signed(deltaRupees)],
     ["Curvature on a 1% move", gammaRupees === null ? "—" : signed(gammaRupees)],
     ["Took in", rupees(credit)],
@@ -208,16 +218,15 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
                 is multiplied by the contracts held - on a 65-lot condor each leg
                 contributes about 20, so a limit of 0.2 would fire instantly and
                 a limit of 0.05 is not a number anyone means. */}
-            {/* The current value beside the field, because the scale is the
-                trap: net delta is every leg's delta times its contracts, so on a
-                65-lot structure it moves 0.65 for each point of per-contract
-                drift. Typing a number that looks like a single option's delta
-                sets a limit that fires on the next tick. */}
+            {/* The current value beside the field, because the scale was the
+                trap: the limit is read against the per-contract sum - the figure
+                on the legs table - and not against the same sum weighted by
+                sixty-five lots. */}
             <td className="l">
               Net delta past &plusmn;
               <span className="dim">
                 {" "}
-                now {netDelta === null ? "\u2014" : num(netDelta, 2)}
+                now {drift === null ? "\u2014" : num(drift, 2)}
               </span>
             </td>
             <td>
