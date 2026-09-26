@@ -32,7 +32,7 @@ class Quote(BaseModel):
     high: float
     low: float
     prev_close: float
-    volume: int
+    volume: float
     bid: float
     ask: float
     timestamp: datetime
@@ -101,12 +101,15 @@ class Candle(BaseModel):
     high: float
     low: float
     close: float
-    volume: int
+    # Fractional on a crypto venue (1762.221 XAU), whole on an index.
+    volume: float
 
 
 class OrderRequest(BaseModel):
     symbol: str
-    quantity: int
+    #: Float for the same reason as Position.net_quantity: perpetuals trade in
+    #: fractions of a contract.
+    quantity: float
     side: Side
     order_type: OrderType = "MARKET"
     limit_price: float = 0.0
@@ -120,7 +123,10 @@ class OrderResult(BaseModel):
 
 class Position(BaseModel):
     symbol: str
-    net_quantity: int
+    # Float, not int: index options trade in whole contracts but a perpetual
+    # trades in fractions of one (0.01 BTC), and an int cannot hold that. Whole
+    # numbers are exact in a float, so the options path is unaffected.
+    net_quantity: float
     average_price: float
     ltp: float
     unrealized_pnl: float

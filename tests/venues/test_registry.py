@@ -13,8 +13,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from broker.base import MarketData, OptionsData, Streaming, Trading
+from broker.base import Funds_, MarketData, OptionsData, Streaming, Trading
 from broker.fake import FakeBroker
+from broker.shark import SharkBroker
 from venues import AssetClass, Capability, Session, VenueSpec, get, is_open, listed
 from venues.registry import DEFAULT_VENUE_ID, VENUES, UnknownVenueError
 
@@ -91,6 +92,7 @@ _PROTOCOL_FOR = {
     Capability.QUOTES: MarketData,
     Capability.HISTORY: MarketData,
     Capability.TRADING: Trading,
+    Capability.FUNDS: Funds_,
     Capability.OPTION_CHAIN: OptionsData,
     Capability.STREAMING: Streaming,
 }
@@ -106,6 +108,10 @@ def _adapter_for(spec: VenueSpec) -> object | None:
     """
     if spec.id == "fyers":
         return FakeBroker()
+    if spec.id == "shark":
+        # Constructing it needs no network and no real key - it only signs when
+        # it actually calls out - so the capability claim can be checked here.
+        return SharkBroker(api_key="test-key", api_secret="test-secret")
     return None
 
 
@@ -124,3 +130,25 @@ def test_declared_capabilities_are_actually_implemented() -> None:
 def test_every_capability_is_mapped_to_a_protocol() -> None:
     # so that adding a Capability without deciding what proves it fails here
     assert set(_PROTOCOL_FOR) == set(Capability)
+
+
+def test_a_venue_does_not_claim_what_it_cannot_do() -> None:
+    """The other half of the promise, and the one that actually bites.
+
+    Declaring a capability the adapter lacks means the UI offers a panel that can
+    never fill. Shark is the live example: the documented wallet endpoint answers
+    404, so it must not claim FUNDS, and it has no option chains to claim either.
+    """
+    for spec in listed():
+        adapter = _adapter_for(spec)
+        if adapter is None:
+            continue
+        for capability, protocol in _PROTOCOL_FOR.items():
+            if capability in spec.capabilities:
+                continue
+            if isinstance(adapter, protocol) and capability is not Capability.HISTORY:
+                # QUOTES and HISTORY share a protocol, so one can be satisfied
+                # while the other is not declared; everything else is a lie.
+                assert capability is Capability.QUOTES, (
+                    f"{spec.id} satisfies {protocol.__name__} but does not declare {capability}"
+                )

@@ -75,6 +75,8 @@ build context. `cp .env.example .env` and fill in:
 | `FYERS_REDIRECT_URI` | Any URL you control; it need not resolve |
 | `FYERS_ACCESS_TOKEN` | Written by the login script; leave blank initially |
 | `FYERS_USERNAME`, `FYERS_TOTP_KEY`, `FYERS_PIN` | Optional, for auto-login |
+| `SHARK_API_KEY`, `SHARK_API_SECRET` | Optional, for the perpetuals desk |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional, for alert delivery |
 
 Then log in once:
 
@@ -122,7 +124,7 @@ strategies/  Strike selection and structure construction.
 risk/        Pre-trade checks and limits.
 analytics/   Payoff, Black-Scholes, market context. Pure functions.
 storage/     SQLite persistence.
-broker/      The broker seam: one protocol, one adapter per broker.
+broker/      The broker seam: capability protocols, one adapter per venue.
 ```
 
 `broker/base.py` holds one protocol per capability - prices, trading, option

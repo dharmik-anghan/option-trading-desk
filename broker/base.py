@@ -46,12 +46,24 @@ class MarketData(Protocol):
 
 
 @runtime_checkable
-class Trading(Protocol):
-    """An account: what it holds, what it can risk, and placing orders."""
+class Funds_(Protocol):
+    """Account balances. Separate because a venue can trade without exposing them.
+
+    Shark documents `GET /v1/order/futures-wallet-details` and answers 404 to it,
+    so its adapter can read positions and place orders but cannot say what the
+    account holds. Bundled into `Trading` that would have meant implementing a
+    method that raises, which is the thing these protocols exist to avoid - and
+    the pre-trade margin check would have had no way to know it was blind.
+    """
 
     def get_funds(self) -> Funds:
         """Fetch current account balances (for pre-trade margin checks)."""
         ...
+
+
+@runtime_checkable
+class Trading(Protocol):
+    """An account's positions, and placing orders against them."""
 
     def get_positions(self) -> list[Position]:
         """Fetch currently open (non-zero net quantity) positions."""
@@ -90,11 +102,21 @@ class Broker(MarketData, Trading, Protocol):
     """The core every venue provides: prices, and an account to trade them in.
 
     Anything that works on any venue should be annotated with this, or with one
-    of the two halves if it only needs one.
+    of the narrower protocols if it only needs one. Note that funds are *not*
+    here: see `Funds_`.
     """
 
 
-class OptionsBroker(Broker, OptionsData, Streaming, Protocol):
+class FundedBroker(Broker, Funds_, Protocol):
+    """A venue that also reports what the account holds.
+
+    What realized P&L and a margin check need. A venue that trades but does not
+    expose balances satisfies `Broker` and not this, which is how the type system
+    says "you cannot ask this one how much is in the account".
+    """
+
+
+class OptionsBroker(FundedBroker, OptionsData, Streaming, Protocol):
     """A venue that lists options - what the Indian index options desk needs.
 
     The streaming half is declared here rather than on `Broker` because that is

@@ -11,17 +11,22 @@ that importing the catalogue never needs a key and never touches the network.
 """
 
 from venues.calendar import Session, is_open
+from venues.instruments import Instrument, for_venue, instrument
 from venues.models import AssetClass, Capability, VenueSpec
-from venues.registry import FYERS, VENUES, get, listed
+from venues.registry import FYERS, SHARK, VENUES, get, listed
 
 __all__ = [
     "FYERS",
+    "SHARK",
+    "Instrument",
     "VENUES",
     "AssetClass",
     "Capability",
     "Session",
     "VenueSpec",
     "get",
+    "for_venue",
+    "instrument",
     "is_open",
     "listed",
 ]

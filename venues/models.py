@@ -33,7 +33,12 @@ class Capability(StrEnum):
 
     QUOTES = "quotes"
     HISTORY = "history"
+    #: Positions, and placing orders against them.
     TRADING = "trading"
+    #: Reading account balances. Held apart from TRADING because a venue can
+    #: allow the one without exposing the other - which decides whether a
+    #: pre-trade margin check is possible at all.
+    FUNDS = "funds"
     OPTION_CHAIN = "option_chain"
     STREAMING = "streaming"
 

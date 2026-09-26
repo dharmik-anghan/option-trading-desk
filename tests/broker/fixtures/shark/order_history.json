@@ -1,0 +1,32 @@
+[
+ {
+  "id": 1001,
+  "clientOrderId": "synthetic-order-id",
+  "updatedAt": "2026-09-22T17:53:00.790Z",
+  "symbol": "XAUUSDT",
+  "type": "STOP_MARKET",
+  "isIsolated": true,
+  "side": "BUY",
+  "price": "4350.0",
+  "avgPrice": "4352.0",
+  "origQty": "43.5",
+  "cumQty": "0.01",
+  "executedQty": "0.01",
+  "reduceOnly": true,
+  "status": "FILLED",
+  "leverage": 8,
+  "subType": "STOP_LOSS",
+  "stopPrice": "4351.0",
+  "lockedMargin": 0,
+  "lockedMarginInMarginAsset": 0,
+  "marginAsset": "INR",
+  "positionId": "00000000-0000-0000-0000-000000000001",
+  "marginConversionRate": 102,
+  "deviceType": "WEB",
+  "contractType": "PERPETUAL",
+  "iconUrl": "https://example.invalid/xau.png",
+  "quoteAsset": "USDT",
+  "baseAsset": "XAU",
+  "leveragedQty": 0.01
+ }
+]

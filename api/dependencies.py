@@ -15,13 +15,13 @@ from pathlib import Path
 from broker.base import Broker, OptionsBroker
 from broker.cache import CachedBroker
 from broker.fyers import FyersBroker
+from broker.shark import SharkBroker
 from broker.token_store import get_access_token
 from feeds.fetch import Feeds
 from feeds.holidays import Holidays
 from settings import load_settings
 from venues import VenueSpec
 from venues import get as get_venue
-from venues.models import Capability
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "trading.db"
@@ -41,11 +41,19 @@ def _build_fyers() -> OptionsBroker:
     )
 
 
+def _build_shark() -> Broker:
+    settings = load_settings()
+    return SharkBroker(api_key=settings.shark_api_key, api_secret=settings.shark_api_secret)
+
+
 #: How to build an adapter for each venue in the catalogue. Kept here rather
 #: than in `venues/` so that importing the catalogue never needs a credential.
 #: A venue in the registry with no factory here is a configuration error, and
 #: `tests/api/test_venues.py` checks the two lists agree.
-BROKER_FACTORIES: dict[str, Callable[[], OptionsBroker]] = {"fyers": _build_fyers}
+BROKER_FACTORIES: dict[str, Callable[[], Broker]] = {
+    "fyers": _build_fyers,
+    "shark": _build_shark,
+}
 
 
 def broker_for(venue: VenueSpec | None = None) -> Broker:
@@ -61,37 +69,36 @@ def broker_for(venue: VenueSpec | None = None) -> Broker:
         raise NotImplementedError(
             f"venue {spec.id!r} is in the catalogue but has no adapter factory"
         ) from None
-    return _cached(spec, build)
-
-
-def _cached(spec: VenueSpec, build: Callable[[], OptionsBroker]) -> OptionsBroker:
-    global _cache
-    inner = build()
-    if not spec.can(Capability.OPTION_CHAIN):
-        # CachedBroker caches chains, so it only fits an options venue. A perps
-        # venue gets its own caching wrapper when one exists; until then it
-        # would be wrong to pretend this one applies.
-        return inner
-    if _cache is None:
-        _cache = CachedBroker(inner)
-    else:
-        _cache.rebind(inner)
-    return _cache
+    if spec.id == "fyers":
+        # The options desk has a cache in front of it; everything else gets the
+        # adapter directly until it needs one. A perps venue on a 60-per-minute
+        # budget will want its own, but caching chains it does not have would be
+        # the wrong wrapper.
+        return get_broker()
+    return build()
 
 
 def get_broker() -> OptionsBroker:
-    """A broker bound to a token that is checked for expiry on every request.
+    """The options broker, cached.
 
-    The Fyers adapter is constructed per request (not once at import) so that
-    an expired token gets refreshed mid-session instead of poisoning every
-    later call with `-16 Could not authenticate the user`.
+    Constructed per request (not once at import) so an expired token gets
+    refreshed mid-session instead of poisoning every later call with
+    `-16 Could not authenticate the user`.
 
-    It is handed to a process-wide `CachedBroker`, which holds reads for a few
-    seconds. Without it, four panels polling together breach Fyers' 10-per-
-    second cap in bursts and the desk goes stale behind a run of 429s - see
-    `broker/cache.py`.
+    Handed to a process-wide `CachedBroker`, which holds reads for a few seconds.
+    Without it, four panels polling together breach Fyers' ten-per-second cap in
+    bursts and the desk goes stale behind a run of 429s - see `broker/cache.py`.
+
+    Typed concretely rather than as `Broker` because the options endpoints need
+    chains, and `broker_for` cannot promise those for an arbitrary venue.
     """
-    return _cached(get_venue("fyers"), _build_fyers)
+    global _cache
+    fyers = _build_fyers()
+    if _cache is None:
+        _cache = CachedBroker(fyers)
+    else:
+        _cache.rebind(fyers)
+    return _cache
 
 
 def get_db_path() -> Path:

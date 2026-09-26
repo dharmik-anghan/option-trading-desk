@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     fyers_totp_key: str = ""
     fyers_pin: str = ""
 
+    # Shark Exchange, for the perpetuals desk. Requests are signed with the
+    # secret (HMAC-SHA256); it is never transmitted. Leave both blank and the
+    # venue is simply unavailable.
+    shark_api_key: str = ""
+    shark_api_secret: str = ""
+
     # Optional: where alerts are delivered when nobody is watching the screen.
     # Both or neither - with either missing, the desk still records alerts and
     # shows them, it just sends nothing. The bot token is a bearer credential:
@@ -41,6 +47,10 @@ class Settings(BaseSettings):
     @property
     def has_auto_login_credentials(self) -> bool:
         return bool(self.fyers_username and self.fyers_totp_key and self.fyers_pin)
+
+    @property
+    def has_shark(self) -> bool:
+        return bool(self.shark_api_key and self.shark_api_secret)
 
     @property
     def has_telegram(self) -> bool:

@@ -21,6 +21,7 @@ FYERS = VenueSpec(
             Capability.QUOTES,
             Capability.HISTORY,
             Capability.TRADING,
+            Capability.FUNDS,
             Capability.OPTION_CHAIN,
             # Declared because the protocol is implemented. It raises
             # NotImplementedError today - see broker/fyers.py - so a client
@@ -32,8 +33,33 @@ FYERS = VenueSpec(
     ),
 )
 
+SHARK = VenueSpec(
+    id="shark",
+    name="Crypto & commodities",
+    asset_class=AssetClass.PERPETUALS,
+    # Quoted in USDT. Note the account margins in INR - a closed XAUUSDT
+    # position reports marginAsset INR with a marginConversionRate alongside the
+    # USDT figure - so a balance and a price are not in the same unit here.
+    quote_currency="USDT",
+    # The venue never closes; gold and oil do. That is per instrument, in
+    # venues/instruments.py, because they sit on this same venue.
+    session=Session.ALWAYS,
+    capabilities=frozenset(
+        {
+            Capability.QUOTES,
+            Capability.HISTORY,
+            Capability.TRADING,
+            # No FUNDS: the documented wallet endpoint answers 404, so this
+            # adapter cannot say what the account holds. No OPTION_CHAIN either -
+            # these are perpetuals and never expire. STREAMING lands with the
+            # socket.io client; declaring it before then would promise a panel
+            # that cannot be filled.
+        }
+    ),
+)
+
 #: Insertion order is the order the switcher shows them in.
-VENUES: dict[str, VenueSpec] = {FYERS.id: FYERS}
+VENUES: dict[str, VenueSpec] = {FYERS.id: FYERS, SHARK.id: SHARK}
 
 #: The venue used when a request does not name one. Every endpoint that existed
 #: before venues did keeps working unchanged because of this.

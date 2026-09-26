@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from broker.base import Broker
+from broker.base import FundedBroker
 from broker.models import Position
 
 
@@ -25,7 +25,7 @@ class PortfolioStatus:
         return self.realized_pnl + self.unrealized_pnl
 
 
-def get_portfolio_status(broker: Broker) -> PortfolioStatus:
+def get_portfolio_status(broker: FundedBroker) -> PortfolioStatus:
     positions = broker.get_positions()
     funds = broker.get_funds()
     unrealized_pnl = sum(p.unrealized_pnl for p in positions)
