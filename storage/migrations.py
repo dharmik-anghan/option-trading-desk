@@ -154,6 +154,39 @@ def _basket_thresholds(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _perp_order_log(conn: sqlite3.Connection) -> None:
+    """Every order this program formed, whether or not it was sent.
+
+    Recorded before the send rather than after the reply, and recorded even when
+    the checks refused it or dry-run held it back. The reason is the obvious one:
+    the interesting question after a surprise is "what did it try to do", and a log
+    written only on success cannot answer it.
+
+    `sent` is the distinction that matters. A row with sent = 0 is either a refusal
+    or a rehearsal, and `reason` says which.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS perp_order (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            order_type TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            price REAL,
+            leverage REAL NOT NULL,
+            notional REAL NOT NULL,
+            -- 0 for a refusal or a dry run, 1 when it actually left
+            sent INTEGER NOT NULL,
+            -- why not, or what came back
+            reason TEXT NOT NULL,
+            venue_order_id TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_perp_order_at ON perp_order(at);
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
@@ -165,6 +198,8 @@ MIGRATIONS: tuple[Migration, ...] = (
               apply=_basket_alert_levels),
     Migration(version=5, reason="per-structure worst case, short delta and expiry warning",
               apply=_basket_thresholds),
+    Migration(version=6, reason="a log of every perpetual order formed, sent or not",
+              apply=_perp_order_log),
 )
 
 

@@ -12,13 +12,20 @@ Prices come from the tick stream rather than a request per read: this venue allo
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 from api.dependencies import broker_for
+from api.deps import DbPathDep
+from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
+from broker.models import OrderRequest as BrokerOrderRequest
+from risk.perps import check_perp_order
+from settings import load_settings
+from storage.perp_order_repo import note_outcome, recent_orders, record_order
 from streaming import TickHub
 from venues import Capability, for_venue
 from venues import get as get_venue
@@ -296,3 +303,175 @@ def set_protection(position_id: str, body: ProtectionRequest) -> None:
         # Never swallowed: protection that silently failed to attach is worse than
         # none, because you would believe it was there.
         raise HTTPException(status_code=502, detail=exc.message) from exc
+
+
+class OrderRequest(BaseModel):
+    """An order on this desk.
+
+    Leverage is required rather than defaulted: a default would be a decision
+    about risk taken quietly, and on a venue offering 150x the difference between
+    8 and 80 is the difference between a position and a lottery ticket.
+    """
+
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    quantity: float = Field(gt=0)
+    leverage: float = Field(gt=0)
+    #: Required for a limit order, ignored for a market one.
+    limit_price: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _limit_needs_a_price(self) -> OrderRequest:
+        if self.order_type == "LIMIT" and self.limit_price is None:
+            raise ValueError("a limit order needs a price")
+        return self
+
+
+class CheckResponse(BaseModel):
+    passed: bool
+    reason: str
+
+
+class OrderResponse(BaseModel):
+    #: Whether it actually left. False for a refusal and false for a rehearsal -
+    #: `dry_run` says which, and they must not be confused.
+    sent: bool
+    dry_run: bool
+    checks: list[CheckResponse]
+    reasons: list[str]
+    notional: float
+    #: What it was priced against, which for a market order is the streamed price.
+    price: float | None
+    venue_order_id: str | None
+    #: The row in the order log, so an attempt can be looked up afterwards.
+    record_id: int
+
+
+@router.post("/orders", response_model=OrderResponse)
+def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> OrderResponse:
+    """Check an order, record it, and send it unless dry-run holds it back.
+
+    The order of those verbs is the point. Checks run server-side, so a client
+    cannot skip them; the attempt is written to the log *before* the request
+    leaves, so a process that dies mid-send still leaves a record that something
+    was tried; and dry-run is the default, so the desk can be watched deciding
+    before it is allowed to spend.
+
+    Sizing is against the streamed price for a market order. A market order with
+    no price to size against is refused rather than sent blind - the notional cap
+    cannot be applied without one, and an uncapped market order is the thing the
+    caps exist to prevent.
+    """
+    spec = get_venue(VENUE_ID)
+    if instrument(body.symbol) is None:
+        raise HTTPException(status_code=404, detail=f"{body.symbol} is not on this desk")
+
+    hub = _hub(request)
+    streamed = hub.price(body.symbol) if hub is not None else None
+    price = body.limit_price if body.order_type == "LIMIT" else streamed
+    if price is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No price for this instrument yet, so the order cannot be sized or capped",
+        )
+
+    limits = load_settings().perp_limits
+    outcome = check_perp_order(body.quantity, price, body.leverage, limits)
+
+    now = datetime.now(UTC).isoformat()
+    refused = None if outcome.passed else "; ".join(outcome.reasons)
+    reason = refused or ("Held back: dry run" if outcome.dry_run else "Sending")
+
+    conn = open_db(db_path)
+    try:
+        record_id = record_order(
+            conn,
+            at=now,
+            symbol=body.symbol,
+            side=body.side,
+            order_type=body.order_type,
+            quantity=body.quantity,
+            price=price,
+            leverage=body.leverage,
+            notional=outcome.notional,
+            sent=False,
+            reason=reason,
+        )
+
+        sent = False
+        venue_order_id: str | None = None
+        if outcome.passed and not outcome.dry_run:
+            broker = broker_for(spec)
+            try:
+                result = broker.place_order(
+                    BrokerOrderRequest(
+                        symbol=body.symbol,
+                        quantity=body.quantity,
+                        side=body.side,
+                        order_type=body.order_type,
+                        limit_price=body.limit_price or 0.0,
+                    )
+                )
+                sent = True
+                venue_order_id = result.order_id
+                reason = result.message or "Accepted"
+            except BrokerError as exc:
+                reason = f"Venue refused it: {exc.message}"
+            note_outcome(
+                conn, record_id, sent=sent, reason=reason, venue_order_id=venue_order_id
+            )
+    finally:
+        conn.close()
+
+    return OrderResponse(
+        sent=sent,
+        dry_run=outcome.dry_run,
+        checks=[CheckResponse(passed=c.passed, reason=c.reason) for c in outcome.checks],
+        reasons=outcome.reasons,
+        notional=outcome.notional,
+        price=price,
+        venue_order_id=venue_order_id,
+        record_id=record_id,
+    )
+
+
+class OrderRecordResponse(BaseModel):
+    id: int
+    at: str
+    symbol: str
+    side: str
+    order_type: str
+    quantity: float
+    price: float | None
+    leverage: float
+    notional: float
+    sent: bool
+    reason: str
+    venue_order_id: str | None
+
+
+@router.get("/orders", response_model=list[OrderRecordResponse])
+def order_log(db_path: DbPathDep, limit: int = 50) -> list[OrderRecordResponse]:
+    """Every order this program formed, newest first - refusals and rehearsals too."""
+    conn = open_db(db_path)
+    try:
+        return [
+            OrderRecordResponse(
+                id=r.id,
+                at=r.at,
+                symbol=r.symbol,
+                side=r.side,
+                order_type=r.order_type,
+                quantity=r.quantity,
+                price=r.price,
+                leverage=r.leverage,
+                notional=r.notional,
+                sent=r.sent,
+                reason=r.reason,
+                venue_order_id=r.venue_order_id,
+            )
+            for r in recent_orders(conn, limit)
+        ]
+    finally:
+        conn.close()

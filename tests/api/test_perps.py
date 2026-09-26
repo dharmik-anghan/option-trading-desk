@@ -274,3 +274,124 @@ class TestProtection:
         (p,) = client.get("/api/perps").json()["positions"]
         assert p["protected"] is True
         assert p["stop_loss_orders"] == 1
+
+
+class TestPlacingAnOrder:
+    """The order path, which never sends in a test - dry-run is the default.
+
+    What is asserted is the order of operations: checks server-side so a client
+    cannot skip them, the attempt logged before anything leaves, and "held back"
+    kept distinct from "refused".
+    """
+
+    def _order(self, **over: object) -> dict[str, object]:
+        body: dict[str, object] = {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "order_type": "MARKET",
+            "quantity": 0.002,
+            "leverage": 8,
+        }
+        body.update(over)
+        return body
+
+    def _priced(self, price: float = 84_000.0) -> TickHub:
+        hub = TickHub()
+        hub.publish(Tick(symbol="BTCUSDT", price=price, at=datetime.now(UTC)))
+        return hub
+
+    def test_an_unlisted_instrument_is_refused(self, client: TestClient) -> None:
+        response = client.post("/api/perps/orders", json=self._order(symbol="DOGEUSDT"))
+        assert response.status_code == 404
+
+    def test_no_price_means_no_order(self, client: TestClient) -> None:
+        # The notional cap cannot be applied without one, and an uncapped market
+        # order is the thing the caps exist to prevent.
+        assert client.post("/api/perps/orders", json=self._order()).status_code == 503
+
+    def test_a_sound_order_passes_and_is_held_back(self, client: TestClient) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order()).json()
+            assert body["dry_run"] is True
+            assert body["sent"] is False, "dry run must not send"
+            assert body["reasons"] == [], "held back is not refused"
+            assert body["notional"] == pytest.approx(0.002 * 84_000)
+            assert all(c["passed"] for c in body["checks"])
+        finally:
+            app.state.tick_hub = None
+
+    def test_past_the_quantity_cap_is_refused_with_a_reason(self, client: TestClient) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order(quantity=5)).json()
+            assert body["sent"] is False
+            assert body["reasons"], "a refusal must say why"
+            assert any("Quantity" in r for r in body["reasons"])
+        finally:
+            app.state.tick_hub = None
+
+    def test_leverage_past_the_cap_is_refused(self, client: TestClient) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            body = client.post("/api/perps/orders", json=self._order(leverage=150)).json()
+            assert any("Leverage" in r for r in body["reasons"])
+        finally:
+            app.state.tick_hub = None
+
+    def test_a_limit_order_without_a_price_is_refused_by_validation(
+        self, client: TestClient
+    ) -> None:
+        assert (
+            client.post("/api/perps/orders", json=self._order(order_type="LIMIT")).status_code
+            == 422
+        )
+
+    def test_a_limit_order_is_sized_against_its_own_price(self, client: TestClient) -> None:
+        # Not against the stream: the order is at the price given, and capping it
+        # against a different number would cap the wrong order.
+        from api.app import app
+
+        app.state.tick_hub = self._priced(84_000.0)
+        try:
+            body = client.post(
+                "/api/perps/orders",
+                json=self._order(order_type="LIMIT", limit_price=80_000.0),
+            ).json()
+            assert body["price"] == 80_000.0
+            assert body["notional"] == pytest.approx(0.002 * 80_000)
+        finally:
+            app.state.tick_hub = None
+
+    def test_every_attempt_is_logged_including_refusals(self, client: TestClient) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order())
+            client.post("/api/perps/orders", json=self._order(quantity=5))
+        finally:
+            app.state.tick_hub = None
+        log = client.get("/api/perps/orders").json()
+        assert len(log) == 2
+        # newest first, and the refusal carries its reason
+        assert log[0]["quantity"] == 5
+        assert "Quantity" in log[0]["reason"]
+        assert all(row["sent"] is False for row in log)
+
+    def test_the_log_says_a_rehearsal_was_a_rehearsal(self, client: TestClient) -> None:
+        from api.app import app
+
+        app.state.tick_hub = self._priced()
+        try:
+            client.post("/api/perps/orders", json=self._order())
+        finally:
+            app.state.tick_hub = None
+        (row,) = client.get("/api/perps/orders").json()
+        assert "dry run" in row["reason"].lower()
