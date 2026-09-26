@@ -424,20 +424,27 @@ export interface Headline {
   link: string;
   source: string;
   published: string | null;
+  /** Its publisher's beat — taken from the source, not read out of the title. */
+  topics: string[];
 }
 
 export interface NewsResponse {
   headlines: Headline[];
   age_seconds: number | null;
   error: string | null;
+  /** Every topic the desk has a source for, so the filter offers what exists. */
+  available_topics: string[];
+  /** Topics per publisher, for naming what a filter would include. */
+  sources: Record<string, string[]>;
 }
 
 export function getEvents(days = 45, importance = "HM"): Promise<EventsResponse> {
   return getJson<EventsResponse>(`/api/events?days=${days}&importance=${importance}`);
 }
 
-export function getNews(limit = 40): Promise<NewsResponse> {
-  return getJson<NewsResponse>(`/api/news?limit=${limit}`);
+export function getNews(limit = 40, topics: readonly string[] = []): Promise<NewsResponse> {
+  const filter = topics.length ? `&topics=${encodeURIComponent(topics.join(","))}` : "";
+  return getJson<NewsResponse>(`/api/news?limit=${limit}${filter}`);
 }
 
 export function getHealth(): Promise<Health> {

@@ -231,9 +231,17 @@ class HeadlineResponse(BaseModel):
     link: str
     source: str
     published: str | None
+    #: Its publisher's beat, so a client can group or filter without a second
+    #: request and without guessing from the words in the title.
+    topics: list[str]
 
 
 class NewsResponse(BaseModel):
     headlines: list[HeadlineResponse]
+    #: Every topic the desk has a source for, so the filter offers what exists
+    #: rather than a list hardcoded in the frontend.
+    available_topics: list[str] = []
+    #: Topics per source, for a filter that wants to name them.
+    sources: dict[str, list[str]] = {}
     age_seconds: float | None
     error: str | None

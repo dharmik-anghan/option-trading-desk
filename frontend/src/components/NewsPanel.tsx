@@ -8,9 +8,21 @@ interface Props {
   events: EventsResponse | null;
   /** Expiry dates you hold, so events landing before one can be marked. */
   expiryDays: string[];
+  /** Which news topics are showing. Owned above, because the desk you are on
+      decides the default and the panel does not know which desk that is. */
+  topics: readonly string[];
+  onTopics: (topics: string[]) => void;
 }
 
 type Tab = "news" | "events";
+
+/** How each topic reads on a chip. The API names them; this names them for a
+    person, and anything new falls back to its own id rather than vanishing. */
+const TOPIC_LABEL: Record<string, string> = {
+  india: "India",
+  crypto: "Crypto",
+  commodities: "Metals & oil",
+};
 type Scope = "relevant" | "india" | "all";
 
 const SCOPES: [Scope, string][] = [
@@ -33,7 +45,7 @@ function inScope(event: CalendarEvent, scope: Scope): boolean {
  * expiries is marked, because that is the only thing on this panel that
  * actually bears on a position you hold.
  */
-export function NewsPanel({ news, events, expiryDays }: Props) {
+export function NewsPanel({ news, events, expiryDays, topics, onTopics }: Props) {
   const [tab, setTab] = useState<Tab>("news");
   // The calendar carries several hundred entries and most of them do not move
   // an Indian index, so the useful view is the default rather than an option.
@@ -72,8 +84,45 @@ export function NewsPanel({ news, events, expiryDays }: Props) {
         </div>
       )}
 
+      {/* The topics come from the backend rather than being listed here, so a
+          source added there shows up without a frontend change. Chips toggle,
+          because reading two markets at once is a normal thing to want and an
+          exclusive control would not allow it. Turning the last one off shows
+          everything, which is the only sensible reading of "no filter". */}
+      {tab === "news" && (news?.available_topics.length ?? 0) > 1 && (
+        <div className="fbar">
+          {(news?.available_topics ?? []).map((topic) => {
+            const on = topics.includes(topic);
+            return (
+              <button
+                key={topic}
+                aria-pressed={on}
+                title={sourcesFor(news, topic)}
+                onClick={() =>
+                  onTopics(
+                    on ? topics.filter((t) => t !== topic) : [...topics, topic],
+                  )
+                }
+              >
+                {TOPIC_LABEL[topic] ?? topic}
+              </button>
+            );
+          })}
+          {topics.length > 0 && (
+            <button className="fclear" onClick={() => onTopics([])} title="Show every source">
+              All
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="pb">
         {tab === "news" && !news && <p className="empty">Loading headlines…</p>}
+        {tab === "news" && news && !news.headlines.length && (
+          <p className="empty">
+            No headlines for {topics.map((t) => TOPIC_LABEL[t] ?? t).join(" or ")}.
+          </p>
+        )}
         {tab === "news" &&
           news?.headlines.map((h) => (
             <a
@@ -86,6 +135,14 @@ export function NewsPanel({ news, events, expiryDays }: Props) {
               <div className="nmeta">
                 <span>{h.published ? clockIST(h.published) : "—"}</span>
                 <span>{h.source}</span>
+                {/* Only when the filter is off: with one topic selected every row
+                    would carry the same word, which tells the reader nothing. */}
+                {topics.length !== 1 &&
+                  h.topics.map((t) => (
+                    <span className="ntopic" key={t}>
+                      {TOPIC_LABEL[t] ?? t}
+                    </span>
+                  ))}
               </div>
               <div className="nhead">{h.title}</div>
             </a>
@@ -136,4 +193,13 @@ function freshness(cached: { age_seconds: number | null } | null): string {
   const m = Math.round(s / 60);
   if (m < 90) return `updated ${m} min ago`;
   return `updated ${Math.round(m / 60)}h ago`;
+}
+
+
+/** Which publishers a topic covers, for the chip's tooltip. */
+function sourcesFor(news: NewsResponse | null, topic: string): string {
+  const names = Object.entries(news?.sources ?? {})
+    .filter(([, topics]) => topics.includes(topic))
+    .map(([name]) => name);
+  return names.length ? names.join(", ") : topic;
 }

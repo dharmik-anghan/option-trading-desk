@@ -1502,3 +1502,25 @@ a.nitem:hover .nhead {
 .candlewrap .zoom {
   padding: 2px 6px 4px;
 }
+
+/* ---------- news topic filter ----------
+   Reuses .fbar, so the two filters on this panel look and behave alike. */
+
+/* "All" clears rather than selects, so it must not look like another topic. */
+.fbar .fclear {
+  margin-left: auto;
+  border-style: dashed;
+}
+
+/* The publisher's beat on a row, shown only when the filter is off or wide -
+   with one topic selected every row would carry the same word. */
+.ntopic {
+  font-family: var(--u);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  padding: 0 3px;
+}

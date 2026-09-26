@@ -112,6 +112,12 @@ export default function App() {
   });
   const [perpSymbol, setPerpSymbol] = useState("BTCUSDT");
   const onPerps = venueId !== "fyers";
+  // Which news topics are showing. Null means "follow the desk", which is what
+  // anyone wants until they say otherwise; an explicit choice is kept across a
+  // desk switch, because having the desk overrule a filter you just set would
+  // make the chips feel broken.
+  const [newsTopics, setNewsTopics] = useState<string[] | null>(null);
+  const shownTopics = newsTopics ?? (onPerps ? ["crypto", "commodities"] : ["india"]);
 
   useEffect(() => {
     try {
@@ -162,7 +168,13 @@ export default function App() {
     paused || onPerps,
     850,
   );
-  const news = useLive(() => getNews(40), NEWS_MS, [], paused, 1900);
+  const news = useLive(
+    () => getNews(40, shownTopics),
+    NEWS_MS,
+    [shownTopics.join(",")],
+    paused,
+    1900,
+  );
   const events = useLive(() => getEvents(45, "HM"), EVENTS_MS, [], paused, 2400);
   const history = useLive(
     () => getPortfolioHistory(7),
@@ -334,7 +346,13 @@ export default function App() {
         )}
         {/* The calendar is shared: a release moves an index and a gold
             perpetual alike, so both desks read one feed. */}
-        <NewsPanel news={news.data} events={events.data} expiryDays={expiryDays} />
+        <NewsPanel
+          news={news.data}
+          events={events.data}
+          expiryDays={expiryDays}
+          topics={shownTopics}
+          onTopics={setNewsTopics}
+        />
       </div>
 
       <AlertsPanel

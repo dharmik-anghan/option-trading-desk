@@ -23,7 +23,7 @@ short is being tested, and what is scheduled to happen before they expire.
 | **P&L history** | A line of recorded snapshots, taken only while the exchange is trading |
 | **Open structures** | Your positions grouped into named structures, each with a payoff curve, greeks, breakevens and per-leg detail |
 | **Alerts** | Edge-triggered warnings with editable thresholds — a short being tested, buildup against you, an event before expiry, a limit breached. Raised by the backend, so they fire with no browser open, and delivered to Telegram when configured |
-| **News / Calendar** | Market headlines and the economic calendar, with events that land before one of your expiries marked |
+| **News / Calendar** | Market headlines and the economic calendar, with events that land before one of your expiries marked. Headlines filter by topic — India, crypto, metals and oil — and default to whichever desk you are on |
 | **Option chain** | Collapsed by default. Expiry selection, open-interest buildup, greeks |
 
 A second desk covers perpetual futures on Shark Exchange - Bitcoin, gold and
@@ -205,6 +205,11 @@ one situation reading as two is worse than a wrong figure.
 - **`python-engineio` is pinned below 4.11.** `fyers-apiv3` pins `aiohttp==3.9.3`
   exactly, and from 4.11 engineio calls an aiohttp API that version lacks, so a
   newer one installs cleanly and fails at connect time.
+- **News is filtered by publisher, not by content.** A source declares what it
+  covers and every headline inherits it. Cruder than reading the words in a
+  title, and honest: a publisher's beat is a fact, a topic guessed from a
+  headline is a guess. The cost is that an Indian source writing about gold is
+  filed under India.
 - **The economic calendar is scraped**, so it will break when the source page
   changes. It reports "reachable but unreadable" rather than showing an empty
   calendar, but fixing it means fixing the parser.

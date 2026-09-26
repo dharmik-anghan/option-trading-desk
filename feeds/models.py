@@ -37,3 +37,7 @@ class Headline:
     link: str
     source: str
     published: datetime | None
+    #: What its publisher writes about, copied from the source rather than read
+    #: out of the headline. A beat is a fact about the publisher; a topic guessed
+    #: from a title is a guess.
+    topics: frozenset[str] = frozenset()

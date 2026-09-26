@@ -21,7 +21,9 @@ _TAGS = re.compile(r"<[^>]+>")
 _STRAY_CDATA = re.compile(r"\]\]>\s*$")
 
 
-def parse_rss(xml: bytes | str, source: str) -> list[Headline]:
+def parse_rss(
+    xml: bytes | str, source: str, topics: frozenset[str] = frozenset()
+) -> list[Headline]:
     """Headlines from one feed, newest first where dates allow.
 
     Takes bytes by preference. An XML document declares its own encoding, and
@@ -51,6 +53,7 @@ def parse_rss(xml: bytes | str, source: str) -> list[Headline]:
                 link=_clean(_child(item, "link")),
                 source=source,
                 published=_parse_date(_child(item, "pubDate")),
+                topics=topics,
             )
         )
     out.sort(key=_recency, reverse=True)

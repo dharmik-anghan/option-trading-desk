@@ -98,7 +98,13 @@ class Feeds:
         failed: list[str] = []
         for source in NEWS_SOURCES:
             try:
-                collected.extend(parse_rss(self._get(source.url), source.name))
+                collected.extend(
+                    parse_rss(
+                        self._get(source.url),
+                        source.name,
+                        frozenset(str(t) for t in source.topics),
+                    )
+                )
             except Exception:  # noqa: BLE001 - one source down is not an outage
                 failed.append(source.name)
         collected.sort(key=_recency, reverse=True)

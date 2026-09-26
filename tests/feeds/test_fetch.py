@@ -5,7 +5,7 @@ from pathlib import Path
 
 from feeds.fetch import CALENDAR_TTL, NEWS_TTL, Feeds, upcoming
 from feeds.models import Event
-from feeds.sources import CALENDAR_URL
+from feeds.sources import CALENDAR_URL, NEWS_SOURCES, Topic, sources_for
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -135,7 +135,9 @@ class TestDegrading:
 
         cached = feeds.headlines()
 
-        assert len({h.source for h in cached.headlines}) == 4
+        # Derived, not hardcoded: adding a source should not fail this test, and
+        # the thing worth asserting is that every one of them made it in.
+        assert len({h.source for h in cached.headlines}) == len(NEWS_SOURCES)
         timed = [h.published.timestamp() for h in cached.headlines if h.published]
         assert timed == sorted(timed, reverse=True)
 
@@ -165,3 +167,47 @@ class TestUpcoming:
     def test_nothing_in_the_past(self) -> None:
         got = upcoming(self._events(), date(2026, 11, 1), days=5, importance="HML")
         assert got == []
+
+
+class TestTopics:
+    """Filtering on the source's beat rather than on the words in a headline."""
+
+    def test_every_source_declares_at_least_one_topic(self) -> None:
+        # A source with no topic is invisible to every filter, which is a silent
+        # way to drop a feed.
+        for source in NEWS_SOURCES:
+            assert source.topics, f"{source.name} declares no topic"
+
+    def test_topics_are_real_ones(self) -> None:
+        for source in NEWS_SOURCES:
+            for topic in source.topics:
+                assert topic in set(Topic)
+
+    def test_both_desks_have_sources(self) -> None:
+        # The point of the exercise: the crypto desk had no news of its own.
+        covered = {t for s in NEWS_SOURCES for t in s.topics}
+        assert Topic.INDIA in covered
+        assert Topic.CRYPTO in covered
+        assert Topic.COMMODITIES in covered
+
+    def test_selecting_a_topic_narrows_the_sources(self) -> None:
+        crypto = sources_for(frozenset({Topic.CRYPTO}))
+        assert crypto
+        assert len(crypto) < len(NEWS_SOURCES)
+        assert all(Topic.CRYPTO in s.topics for s in crypto)
+
+    def test_selecting_nothing_means_everything(self) -> None:
+        assert sources_for(frozenset()) == NEWS_SOURCES
+
+    def test_a_desk_can_ask_for_two_topics(self) -> None:
+        both = sources_for(frozenset({Topic.CRYPTO, Topic.COMMODITIES}))
+        names = {s.name for s in both}
+        assert "CoinDesk" in names
+        assert "OilPrice" in names
+        assert "RBI" not in names
+
+    def test_headlines_carry_their_source_topics(self) -> None:
+        feeds, _net, _clock = _feeds()
+        for headline in feeds.headlines().headlines:
+            source = next(s for s in NEWS_SOURCES if s.name == headline.source)
+            assert headline.topics == {str(t) for t in source.topics}
