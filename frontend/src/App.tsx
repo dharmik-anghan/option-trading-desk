@@ -21,7 +21,14 @@ import { PositionsRail } from "./components/PositionsRail";
 import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
-import { DEFAULT_LIMITS, affectsIndia, dedupeLog, evaluate, reconcile } from "./alerts";
+import {
+  DEFAULT_LIMITS,
+  FIRE_COOLDOWN_MS,
+  affectsIndia,
+  dedupeLog,
+  evaluate,
+  reconcile,
+} from "./alerts";
 import type { Alert, Limits } from "./alerts";
 
 type View = "trading" | "oi" | "greeks";
@@ -56,6 +63,12 @@ interface SavedAlerts {
   log: Alert[];
   /** Keys of the conditions that were true when this was written. */
   active: string[];
+}
+
+function sameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const key of a) if (!b.has(key)) return false;
+  return true;
 }
 
 function persistAlerts(log: readonly Alert[], active: ReadonlySet<string>): void {
@@ -96,10 +109,17 @@ export default function App() {
     const raw = stored<SavedAlerts>("optiondesk-alerts", { log: [], active: [] });
     // Heal repeats an earlier build wrote: the log outlives the code, so a fix
     // alone does not remove what the bug already recorded.
-    return { ...raw, log: dedupeLog(raw.log ?? []) };
+    // At the cooldown's floor, so repeats an earlier build already wrote are
+    // cleared out by the same rule that now prevents them.
+    return { ...raw, log: dedupeLog(raw.log ?? [], FIRE_COOLDOWN_MS) };
   });
   const [alertLog, setAlertLog] = useState<Alert[]>(saved.log);
   const activeKeys = useRef<Set<string>>(new Set(saved.active));
+  // The same keys again, as state this time, because the hysteresis band has to
+  // be known during render and a ref must not be read there. The ref stays the
+  // source of truth - advancing it is a side effect, and React may call a state
+  // updater more than once - so this is a mirror, kept in step by the effect.
+  const [sticky, setSticky] = useState<ReadonlySet<string>>(() => new Set(saved.active));
   const logRef = useRef<Alert[]>(saved.log);
   const [paused, setPaused] = useState(false);
   const [theme, setTheme] = useState<Theme>(initialTheme);
@@ -215,8 +235,16 @@ export default function App() {
   // state, because it is a pure function of data already on screen.
   const conditions = useMemo(
     () =>
-      paused ? [] : evaluate(portfolio.data, baskets.data, limits, events.data?.events ?? []),
-    [paused, portfolio.data, baskets.data, limits, events.data],
+      paused
+        ? []
+        : evaluate(
+            portfolio.data,
+            baskets.data,
+            limits,
+            events.data?.events ?? [],
+            sticky,
+          ),
+    [paused, portfolio.data, baskets.data, limits, events.data, sticky],
   );
 
   // Nothing fetched yet is not the same as nothing wrong: evaluating early
@@ -228,7 +256,12 @@ export default function App() {
   // baskets missing - and every basket-derived alert fired a second time.
   // An empty list is loaded; only null is "not yet".
   const hasData = portfolio.data !== null && baskets.data !== null;
-  const eventsLoaded = events.data !== null;
+  // Loaded is not the same as usable. An empty calendar is a valid response -
+  // a re-scrape that came back with nothing, which happens because the source
+  // is scraped - and it is indistinguishable from every event having passed.
+  // Judging event keys against it drops them all, and the next good poll fires
+  // the whole block again. That is the six repeated event warnings.
+  const eventsLoaded = (events.data?.events?.length ?? 0) > 0;
 
   useEffect(() => {
     if (paused || !hasData) return;
@@ -250,9 +283,17 @@ export default function App() {
       evaluable,
     );
     activeKeys.current = next.active;
+    // Compared by content, not identity: reconcile returns a fresh Set every
+    // pass, and setting state from it unconditionally would re-render, which
+    // re-derives the conditions, which runs this effect again, forever.
+    setSticky((was) => (sameKeys(was, next.active) ? was : next.active));
     if (next.fired.length) {
-      logRef.current = next.log;
-      setAlertLog(next.log);
+      // Deduped on the way in as well as on restore. The cooldown in reconcile
+      // should make this a no-op; it is here so that if anything ever slips
+      // past it, the panel still does not show the same line twice.
+      const healed = dedupeLog(next.log, FIRE_COOLDOWN_MS);
+      logRef.current = healed;
+      setAlertLog(healed);
     }
     // saved every pass, not only when something fires: a condition that has
     // *cleared* has to be recorded too, or it would fire again after a reload

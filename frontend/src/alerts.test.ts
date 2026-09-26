@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LIMITS,
+  FIRE_COOLDOWN_MS,
   affectsIndia,
   dedupeLog,
   evaluate,
@@ -187,6 +188,9 @@ describe("short strikes under pressure", () => {
 
 describe("edge triggering", () => {
   const breach = evaluate(pnl(-L.dailyLoss), null, L);
+  // The transition rule, isolated. These timestamps are seconds apart, so the
+  // fire cooldown would mask what is being tested here; it has its own tests.
+  const NO_COOLDOWN = 0;
 
   it("writes once when a condition becomes true and stays quiet after", () => {
     let active = new Set<string>();
@@ -205,11 +209,11 @@ describe("edge triggering", () => {
 
   it("can fire again once the condition has cleared", () => {
     let r = reconcile(new Set(), [], breach, 1000);
-    r = reconcile(r.active, r.log, [], 2000); // clears
+    r = reconcile(r.active, r.log, [], 2000, undefined, undefined, NO_COOLDOWN); // clears
     expect(r.active.size).toBe(0);
     expect(r.log).toHaveLength(1);
 
-    r = reconcile(r.active, r.log, breach, 3000); // returns
+    r = reconcile(r.active, r.log, breach, 3000, undefined, undefined, NO_COOLDOWN); // returns
     expect(r.log).toHaveLength(2);
     expect(r.log[0].at).toBe(3000); // newest first
   });
@@ -234,7 +238,7 @@ describe("edge triggering", () => {
     // the bug this guards: restoring the log but not the active set made every
     // still-true condition look like a fresh transition on every refresh
     const first = reconcile(new Set(), [], breach, 1000);
-    const lostActive = reconcile(new Set(), first.log, breach, 2000);
+    const lostActive = reconcile(new Set(), first.log, breach, 2000, undefined, undefined, NO_COOLDOWN);
 
     expect(lostActive.fired).toHaveLength(1);
     expect(lostActive.log).toHaveLength(2);
@@ -261,7 +265,8 @@ describe("edge triggering", () => {
 
     // and now the same condition counts as new again
     expect(
-      reconcile(premature.active, premature.log, breach, 2000).fired,
+      reconcile(premature.active, premature.log, breach, 2000, undefined, undefined, NO_COOLDOWN)
+        .fired,
     ).toHaveLength(1);
   });
 
@@ -269,11 +274,11 @@ describe("edge triggering", () => {
     let log: Alert[] = [];
     let active = new Set<string>();
     for (let i = 0; i < 10; i++) {
-      const r = reconcile(active, log, breach, i * 1000);
+      const r = reconcile(active, log, breach, i * 1000, undefined, undefined, NO_COOLDOWN);
       active = new Set(); // force a re-fire each pass
       log = r.log;
     }
-    const capped = reconcile(new Set(), log, breach, 99999, 3);
+    const capped = reconcile(new Set(), log, breach, 99999, 3, undefined, NO_COOLDOWN);
     expect(capped.log).toHaveLength(3);
   });
 });
@@ -475,9 +480,10 @@ describe("a source that has not loaded yet", () => {
 
   it("without the guard it fires twice, seconds apart", () => {
     // the reported bug, reproduced: this is what the old behaviour did
-    const first = reconcile(new Set(), [], eventCondition, 1000);
-    const gap = reconcile(first.active, first.log, [], 2000);
-    const arrived = reconcile(gap.active, gap.log, eventCondition, 3400);
+    // with the cooldown off too, so this shows the guard's own contribution
+    const first = reconcile(new Set(), [], eventCondition, 1000, undefined, undefined, 0);
+    const gap = reconcile(first.active, first.log, [], 2000, undefined, undefined, 0);
+    const arrived = reconcile(gap.active, gap.log, eventCondition, 3400, undefined, undefined, 0);
 
     expect(arrived.log).toHaveLength(2);
     expect(arrived.log[0].at - arrived.log[1].at).toBeLessThan(60_000);
@@ -489,5 +495,106 @@ describe("a source that has not loaded yet", () => {
     const cleared = reconcile(first.active, first.log, [], 2000, 200, () => true);
 
     expect(cleared.active.size).toBe(0);
+  });
+});
+
+describe("the same warning must not arrive twice", () => {
+  // Three batches of identical warnings landed 22 seconds and then 11 minutes
+  // apart. Two causes, both real: a short at delta 0.32 against a 0.30
+  // threshold crossed back and forth, and each crossing was a true false->true
+  // transition; and a calendar that re-scraped empty made every event
+  // condition look cleared.
+  const tested = (delta: number) =>
+    evaluate(null, [basket({ legs: [leg({ id: 19, side: "SELL", delta })] })], L, []);
+
+  it("fires a tested short once, at the threshold", () => {
+    expect(keys(tested(-0.32))).toContain("tested:19");
+  });
+
+  it("holds the alert on while delta wobbles back under the threshold", () => {
+    // Already on, and 0.29 is inside the release band: still tested.
+    const on = new Set(["tested:19"]);
+    const held = evaluate(
+      null,
+      [basket({ legs: [leg({ id: 19, side: "SELL", delta: -0.29 })] })],
+      L,
+      [],
+      on,
+    );
+    expect(keys(held)).toContain("tested:19");
+  });
+
+  it("clears once delta falls plainly clear of the threshold", () => {
+    const on = new Set(["tested:19"]);
+    const gone = evaluate(
+      null,
+      [basket({ legs: [leg({ id: 19, side: "SELL", delta: -0.2 })] })],
+      L,
+      [],
+      on,
+    );
+    expect(keys(gone)).not.toContain("tested:19");
+  });
+
+  it("does not re-fire a key inside the cooldown, however the condition churned", () => {
+    const now = 1_000_000;
+    const log: Alert[] = [
+      { key: "tested:19", severity: "warn", message: "Short 22,900 PE tested", at: now },
+    ];
+    // condition went false (active set empty) and came back 11 minutes later,
+    // which is what produced the 11:44 and 11:55 pair
+    const after = reconcile(new Set(), log, tested(-0.32), now + 11 * 60_000);
+    expect(after.fired).toHaveLength(0);
+    expect(after.log).toHaveLength(1);
+    // but it is active again, so it is not reported as cleared
+    expect(after.active.has("tested:19")).toBe(true);
+  });
+
+  it("does fire again once the cooldown has passed", () => {
+    const now = 1_000_000;
+    const log: Alert[] = [
+      { key: "tested:19", severity: "warn", message: "Short 22,900 PE tested", at: now },
+    ];
+    const after = reconcile(new Set(), log, tested(-0.32), now + FIRE_COOLDOWN_MS + 1);
+    expect(after.fired).toHaveLength(1);
+  });
+});
+
+describe("two events on one day", () => {
+  // Real data from the calendar: 2026-09-28 carried "Goods Exports (Mexico)"
+  // and "Goods Exports (Malaysia)". Keyed on `name` both were "Goods Exports",
+  // so the second was silently swallowed as a duplicate of the first.
+  const both = [
+    event({ day: "2026-09-28", name: "Goods Exports", label: "Goods Exports (Mexico)",
+            coverage: "global", country: "United States" }),
+    event({ day: "2026-09-28", name: "Goods Exports", label: "Goods Exports (Malaysia)",
+            coverage: "global", country: "United States" }),
+  ];
+
+  it("warns about each, not just the first", () => {
+    const cs = evaluate(null, [basket({ expiry_date: "27-10-2026" })], L, both);
+    const events = keys(cs).filter((k) => k.startsWith("event:"));
+    expect(new Set(events).size).toBe(2);
+  });
+});
+
+describe("healing a log an earlier build poisoned", () => {
+  it("collapses the eleven-minute repeats that were reported", () => {
+    // the shape of the reported log: one batch at 11:44:12, again at 11:44:34,
+    // again at 11:55:18
+    const base = Date.parse("2026-09-26T11:44:12+05:30");
+    const at = (mins: number, secs = 0) => base + mins * 60_000 + secs * 1000;
+    const line = (key: string, when: number): Alert => ({
+      key,
+      severity: "warn",
+      message: "Monthly Non Farm (United States) on 2026-10-02 lands before this expires",
+      at: when,
+    });
+    const poisoned = [
+      line("event:8:2026-10-02:Monthly Non Farm (United States)", at(11, 6)),
+      line("event:8:2026-10-02:Monthly Non Farm (United States)", at(0, 22)),
+      line("event:8:2026-10-02:Monthly Non Farm (United States)", at(0)),
+    ];
+    expect(dedupeLog(poisoned, FIRE_COOLDOWN_MS)).toHaveLength(1);
   });
 });

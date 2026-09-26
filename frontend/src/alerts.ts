@@ -56,6 +56,12 @@ export function evaluate(
   baskets: Basket[] | null,
   limits: Limits,
   events: readonly CalendarEvent[] = [],
+  /**
+   * Keys currently alerting, used only to widen a threshold that has already
+   * tripped. Still pure - same inputs, same output - it just needs to know
+   * which side of the band it is on.
+   */
+  sticky: ReadonlySet<string> = new Set(),
 ): Condition[] {
   const on: Condition[] = [];
 
@@ -117,7 +123,7 @@ export function evaluate(
     // and a short-premium book cannot step aside for it.
     for (const e of eventsBefore(events, b.expiry_date)) {
       on.push({
-        key: `event:${b.id}:${e.day}:${e.name}`,
+        key: `event:${b.id}:${e.day}:${e.label}`,
         severity: "warn",
         subject: b.name,
         message: `${e.label} on ${e.day} lands before this expires`,
@@ -128,9 +134,19 @@ export function evaluate(
       if (leg.side !== "SELL") continue;
       const label = `${int(leg.strike)} ${leg.option_type}`;
 
-      if (leg.delta !== null && Math.abs(leg.delta) >= limits.shortDelta) {
+      // A band, not a line. A short sitting at delta 0.32 against a 0.30
+      // threshold crosses back and forth all session, and each crossing is a
+      // real false->true transition, so the alert fired again every time. Once
+      // it is on it stays on until delta falls clear of the threshold, which is
+      // how a trader reads it anyway: the strike is being tested until it
+      // plainly is not.
+      const testedKey = `tested:${leg.id}`;
+      const onset = limits.shortDelta;
+      const release = limits.shortDelta * HYSTERESIS;
+      const bound = sticky.has(testedKey) ? release : onset;
+      if (leg.delta !== null && Math.abs(leg.delta) >= bound) {
         on.push({
-          key: `tested:${leg.id}`,
+          key: testedKey,
           severity: "warn",
           subject: b.name,
           message: `Short ${label} tested — delta ${Math.abs(leg.delta).toFixed(2)}`,
@@ -216,6 +232,8 @@ export function reconcile(
    * not evaluable are carried over untouched instead.
    */
   evaluable: (key: string) => boolean = () => true,
+  /** Quiet period after a key fires. See FIRE_COOLDOWN_MS. */
+  cooldownMs = FIRE_COOLDOWN_MS,
 ): { active: Set<string>; log: Alert[]; fired: Alert[] } {
   // One line per condition even if the same key is offered twice. Nothing does
   // that today, but a key is a promise that an alert is written once, and that
@@ -228,8 +246,20 @@ export function reconcile(
     if (!evaluable(key)) nowActive.add(key);
   }
 
+  // When each key last said something, so a key that has just fired stays
+  // quiet even if its condition has genuinely gone false and true again.
+  const lastFired = new Map<string, number>();
+  for (const entry of log) {
+    const seen = lastFired.get(entry.key);
+    if (seen === undefined || entry.at > seen) lastFired.set(entry.key, entry.at);
+  }
+  const cooling = (key: string) => {
+    const previous = lastFired.get(key);
+    return previous !== undefined && now - previous < cooldownMs;
+  };
+
   const fired = [...unique.values()]
-    .filter((c) => !active.has(c.key))
+    .filter((c) => !active.has(c.key) && !cooling(c.key))
     .map((c) => ({
       key: c.key,
       severity: c.severity,
@@ -255,6 +285,19 @@ export const SEVERITY_LABEL: Record<Severity, string> = {
 //: Two firings of one key closer together than this were not a condition
 //: clearing and returning - nothing clears and returns inside a minute.
 const REFIRE_FLOOR_MS = 60_000;
+
+/**
+ * How long a key stays quiet after firing.
+ *
+ * The last line of defence against a repeat. Hysteresis stops the churn we
+ * know about; this one bounds the damage from any source we have not thought
+ * of, because six identical warnings eleven minutes apart is worse than a
+ * missed re-test.
+ */
+export const FIRE_COOLDOWN_MS = 15 * 60_000;
+
+/** Fraction of a threshold at which an alert that is already on clears. */
+const HYSTERESIS = 0.9;
 
 /**
  * Collapse repeats a past bug wrote into a stored log.
