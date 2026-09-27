@@ -1,0 +1,514 @@
+"""A strategy as data, so one can be built by choosing rather than by coding.
+
+"EMA 5 crosses below the close, and RSI 14 is under 30, stop at the previous
+candle's low" is a sentence made of parts, and the parts are the same few kinds
+every time: something to measure, something to compare it to, and a way to
+compare them. Written out as a tree of those parts, a strategy becomes something a
+screen can build and something that can be stored, shared and compared - rather
+than a Python class somebody has to write and deploy.
+
+    operand    what to measure: an indicator, a price, a pivot level, a number,
+               or arithmetic on any of those
+    condition  a comparison, or several joined by and/or/not
+    spec       entries for each side, an exit, a stop and a target
+
+Three properties this shape buys, beyond not having to write code:
+
+Every operand names its timeframe, so "hourly EMA 50 above hourly EMA 200 while
+the five-minute RSI is under 30" is one expression rather than a special case, and
+the engine works out which timeframes to align by reading the tree.
+
+Nothing here can look ahead. Operands are read through `Frame`, which only ever
+offers closed bars, so a condition cannot reach a price that had not happened -
+whatever combination the person who built it chose.
+
+A missing value is never a comparison. During warm-up an indicator is `None`, and
+a comparison with one is false rather than an exception or a zero. A rule does not
+trade while it is still blind.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from backtest.view import Frame, View
+from marketdata.models import Interval
+
+#: Indicators an operand may name, against how many arguments they take.
+INDICATORS = ("ema", "sma", "rsi", "atr")
+
+#: A bar's four prices.
+FIELDS = ("open", "high", "low", "close")
+
+#: Pivot levels, by the names they are drawn with.
+LEVELS = ("S3", "S2", "S1", "P", "R1", "R2", "R3")
+
+
+class SpecError(ValueError):
+    """A strategy that cannot be read, with a message meant for whoever built it."""
+
+
+# ---------------------------------------------------------------------------
+# Operands
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Operand:
+    """Something with a number in it, at this instant.
+
+    `ago` counts closed bars backwards on the operand's own timeframe, so
+    `{"field": "low", "ago": 1}` is the previous candle's low - the commonest
+    stop there is - and on an hourly operand it is the previous hour.
+    """
+
+    kind: str
+    #: For an indicator: its name. For a price: the field. For a pivot: the level.
+    name: str = ""
+    length: int = 0
+    value: float = 0.0
+    ago: int = 0
+    interval: Interval | None = None
+    #: For arithmetic.
+    left: Operand | None = None
+    right: Operand | None = None
+    op: str = ""
+
+    def timeframes(self) -> set[Interval]:
+        found = {self.interval} if self.interval else set()
+        for side in (self.left, self.right):
+            if side is not None:
+                found |= side.timeframes()
+        return found
+
+    def read(self, view: View) -> float | None:
+        if self.kind == "value":
+            return self.value
+        if self.kind == "math":
+            return self._arithmetic(view)
+
+        frame = view.frame(self.interval) if self.interval else view.base
+        if self.kind == "price":
+            return frame.price(self.name, self.ago)
+        if self.kind == "indicator":
+            return self._indicator(frame)
+        if self.kind == "pivot":
+            levels = frame.pivots(self.ago)
+            return levels.levels[self.name] if levels else None
+        raise SpecError(f"{self.kind!r} is not something that can be measured")
+
+    def _indicator(self, frame: Frame) -> float | None:
+        if self.name == "ema":
+            return frame.ema(self.length, self.ago)
+        if self.name == "sma":
+            return frame.sma(self.length, self.ago)
+        if self.name == "rsi":
+            return frame.rsi(self.length, self.ago)
+        if self.name == "atr":
+            return frame.atr(self.length, self.ago)
+        raise SpecError(f"there is no indicator called {self.name!r}")
+
+    def _arithmetic(self, view: View) -> float | None:
+        if self.left is None or self.right is None:
+            raise SpecError("arithmetic needs both sides")
+        a = self.left.read(view)
+        b = self.right.read(view)
+        # One unknown side makes the whole expression unknown, rather than zero.
+        # "close - 2 x ATR" during ATR's warm-up is not the close.
+        if a is None or b is None:
+            return None
+        if self.op == "+":
+            return a + b
+        if self.op == "-":
+            return a - b
+        if self.op == "*":
+            return a * b
+        if self.op == "/":
+            return a / b if b else None
+        raise SpecError(f"{self.op!r} is not an arithmetic operator")
+
+    def describe(self) -> str:
+        where = f" {self.interval}" if self.interval else ""
+        back = f"[{self.ago} back]" if self.ago else ""
+        if self.kind == "value":
+            return f"{self.value:g}"
+        if self.kind == "math":
+            assert self.left and self.right
+            return f"({self.left.describe()} {self.op} {self.right.describe()})"
+        if self.kind == "indicator":
+            return f"{self.name.upper()} {self.length}{where}{back}"
+        if self.kind == "price":
+            return f"{self.name}{where}{back}"
+        return f"pivot {self.name}{where}{back}"
+
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+
+COMPARISONS = ("above", "below", "crosses_above", "crosses_below", "equals")
+
+
+@dataclass(frozen=True)
+class Condition:
+    """A comparison, or several joined together."""
+
+    kind: str
+    left: Operand | None = None
+    right: Operand | None = None
+    op: str = ""
+    of: tuple[Condition, ...] = ()
+
+    def timeframes(self) -> set[Interval]:
+        found: set[Interval] = set()
+        for side in (self.left, self.right):
+            if side is not None:
+                found |= side.timeframes()
+        for inner in self.of:
+            found |= inner.timeframes()
+        return found
+
+    def holds(self, view: View) -> bool:
+        if self.kind == "all":
+            return all(c.holds(view) for c in self.of)
+        if self.kind == "any":
+            return any(c.holds(view) for c in self.of)
+        if self.kind == "not":
+            return not all(c.holds(view) for c in self.of)
+        if self.kind != "compare":
+            raise SpecError(f"{self.kind!r} is not a kind of condition")
+
+        if self.left is None or self.right is None:
+            raise SpecError("a comparison needs both sides")
+        now_left = self.left.read(view)
+        now_right = self.right.read(view)
+        if now_left is None or now_right is None:
+            # Still warming up. Not tradeable rather than false-by-accident.
+            return False
+
+        if self.op == "above":
+            return now_left > now_right
+        if self.op == "below":
+            return now_left < now_right
+        if self.op == "equals":
+            return now_left == now_right
+        if self.op in ("crosses_above", "crosses_below"):
+            return self._crossed(view, now_left, now_right)
+        raise SpecError(f"{self.op!r} is not a comparison")
+
+    def _crossed(self, view: View, now_left: float, now_right: float) -> bool:
+        """A crossing is a statement about two bars, not one.
+
+        Both sides are re-read one bar back. Without that, "EMA crosses below
+        price" fires on every bar it is merely below, which is a completely
+        different strategy - usually a much worse one, because it enters late and
+        keeps entering.
+        """
+        assert self.left is not None and self.right is not None
+        before_left = _shifted(self.left).read(view)
+        before_right = _shifted(self.right).read(view)
+        if before_left is None or before_right is None:
+            return False
+        if self.op == "crosses_above":
+            return before_left <= before_right and now_left > now_right
+        return before_left >= before_right and now_left < now_right
+
+    def describe(self) -> str:
+        if self.kind in ("all", "any"):
+            joiner = " and " if self.kind == "all" else " or "
+            return "(" + joiner.join(c.describe() for c in self.of) + ")"
+        if self.kind == "not":
+            return "not " + "".join(c.describe() for c in self.of)
+        assert self.left and self.right
+        return f"{self.left.describe()} {self.op.replace('_', ' ')} {self.right.describe()}"
+
+
+def _shifted(operand: Operand) -> Operand:
+    """The same operand, one bar earlier.
+
+    Recursive through arithmetic, so "close - 2 x ATR" shifts both the close and
+    the ATR rather than only the outermost thing.
+    """
+    if operand.kind == "value":
+        return operand
+    if operand.kind == "math":
+        assert operand.left and operand.right
+        return Operand(
+            kind="math",
+            op=operand.op,
+            left=_shifted(operand.left),
+            right=_shifted(operand.right),
+        )
+    return Operand(
+        kind=operand.kind,
+        name=operand.name,
+        length=operand.length,
+        value=operand.value,
+        ago=operand.ago + 1,
+        interval=operand.interval,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stops and targets
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Level:
+    """Where a stop or a target goes, worked out at the moment of entry.
+
+    A level is not a condition: it is a price, computed once when the position
+    opens and then left alone. Recomputing it every bar would be a trailing stop,
+    which is a different thing and should be asked for by name.
+    """
+
+    kind: str
+    #: For "percent": how far, as a percentage. For "atr": the multiple.
+    value: float = 0.0
+    length: int = 14
+    #: For "candle": which price, and how many bars back.
+    name: str = "low"
+    ago: int = 1
+    interval: Interval | None = None
+
+    def timeframes(self) -> set[Interval]:
+        return {self.interval} if self.interval else set()
+
+    def price(
+        self, view: View, entry: float, long: bool, *, stop: float | None = None
+    ) -> float | None:
+        """The level, in money.
+
+        `long` decides the direction: a stop is below the entry for a long and
+        above it for a short, and getting that backwards produces a position that
+        closes itself on the next tick.
+        """
+        away = -1.0 if long else 1.0
+        frame = view.frame(self.interval) if self.interval else view.base
+
+        if self.kind == "percent":
+            return entry * (1 + away * self.value / 100.0)
+        if self.kind == "candle":
+            return frame.price(self.name, self.ago)
+        if self.kind == "atr":
+            width = frame.atr(self.length)
+            return entry + away * width * self.value if width is not None else None
+        if self.kind == "pivot":
+            levels = frame.pivots()
+            return levels.levels[self.name] if levels else None
+        if self.kind == "reward":
+            # A target expressed as a multiple of the risk taken, which needs the
+            # stop to exist first.
+            if stop is None:
+                return None
+            return entry - away * abs(entry - stop) * self.value
+        raise SpecError(f"{self.kind!r} is not a kind of level")
+
+
+# ---------------------------------------------------------------------------
+# The strategy
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StrategySpec:
+    """Everything a run needs, as data."""
+
+    name: str = "Untitled"
+    interval: Interval = Interval.M5
+    long_entry: Condition | None = None
+    short_entry: Condition | None = None
+    long_exit: Condition | None = None
+    short_exit: Condition | None = None
+    stop: Level | None = None
+    target: Level | None = None
+    notes: str = ""
+
+    @property
+    def context(self) -> tuple[Interval, ...]:
+        """Higher timeframes this strategy reads, worked out from its own parts.
+
+        Derived rather than declared: a person building this on a screen picks an
+        hourly EMA, and should not then have to remember to list the hourly
+        somewhere else. Longest first, which is only for a tidy display.
+        """
+        found: set[Interval] = set()
+        for part in (self.long_entry, self.short_entry, self.long_exit, self.short_exit):
+            if part is not None:
+                found |= part.timeframes()
+        for level in (self.stop, self.target):
+            if level is not None:
+                found |= level.timeframes()
+        found.discard(self.interval)
+        return tuple(sorted(found, key=lambda i: i.seconds, reverse=True))
+
+    def check(self) -> list[str]:
+        """Everything wrong with this, in words, before a run is attempted.
+
+        All of it at once rather than the first problem: somebody building a
+        strategy on a screen should see every mistake in one pass.
+        """
+        problems: list[str] = []
+        if self.long_entry is None and self.short_entry is None:
+            problems.append("Nothing to enter on: set a long or a short entry")
+        for interval in self.context:
+            if interval.seconds < self.interval.seconds:
+                problems.append(
+                    f"{interval} is shorter than the {self.interval} being traded; "
+                    "a condition can only look at a longer timeframe than the one it trades"
+                )
+        if (
+            self.long_entry is None
+            and self.short_entry is None
+            or (self.long_exit is None and self.short_exit is None)
+        ) and self.stop is None and self.target is None:
+            problems.append(
+                "Nothing to exit on: without an exit condition, a stop or a target, "
+                "a position is only closed when the data runs out"
+            )
+        return problems
+
+
+# ---------------------------------------------------------------------------
+# Reading one from a screen
+# ---------------------------------------------------------------------------
+
+
+def operand(raw: Any) -> Operand:
+    """One operand, from the shape a UI posts.
+
+    A bare number is allowed as shorthand, because `{"kind": "value", "value": 30}`
+    is a silly way to write 30.
+    """
+    if isinstance(raw, int | float) and not isinstance(raw, bool):
+        return Operand(kind="value", value=float(raw))
+    if not isinstance(raw, dict):
+        raise SpecError(f"{raw!r} is not an operand")
+
+    kind = str(raw.get("kind", "")).lower()
+    interval = _interval(raw.get("tf") or raw.get("interval"))
+    ago = _whole(raw.get("ago", 0), "ago")
+
+    if kind == "value":
+        return Operand(kind="value", value=float(raw.get("value", 0.0)))
+    if kind == "math":
+        op = str(raw.get("op", ""))
+        if op not in ("+", "-", "*", "/"):
+            raise SpecError(f"{op!r} is not one of + - * /")
+        return Operand(
+            kind="math", op=op, left=operand(raw.get("left")), right=operand(raw.get("right"))
+        )
+    if kind == "price":
+        name = str(raw.get("field", "close")).lower()
+        if name not in FIELDS:
+            raise SpecError(f"a candle has no {name!r}; pick one of {', '.join(FIELDS)}")
+        return Operand(kind="price", name=name, ago=ago, interval=interval)
+    if kind == "indicator":
+        name = str(raw.get("name", "")).lower()
+        if name not in INDICATORS:
+            raise SpecError(
+                f"there is no indicator called {name!r}; "
+                f"pick one of {', '.join(INDICATORS)}"
+            )
+        length = _whole(raw.get("length", 14), "length")
+        if length < 1:
+            raise SpecError(f"{name.upper()} needs a period of at least 1")
+        return Operand(kind="indicator", name=name, length=length, ago=ago, interval=interval)
+    if kind == "pivot":
+        name = str(raw.get("level", "P")).upper()
+        if name not in LEVELS:
+            raise SpecError(f"{name!r} is not a pivot level; pick one of {', '.join(LEVELS)}")
+        return Operand(kind="pivot", name=name, ago=ago, interval=interval)
+    raise SpecError(f"{kind!r} is not something that can be measured")
+
+
+def condition(raw: Any) -> Condition:
+    """One condition, from the shape a UI posts."""
+    if not isinstance(raw, dict):
+        raise SpecError(f"{raw!r} is not a condition")
+
+    for joiner in ("all", "any"):
+        if joiner in raw:
+            parts = raw[joiner]
+            if not isinstance(parts, list) or not parts:
+                raise SpecError(f"{joiner!r} needs a list of conditions")
+            return Condition(kind=joiner, of=tuple(condition(p) for p in parts))
+    if "not" in raw:
+        return Condition(kind="not", of=(condition(raw["not"]),))
+
+    op = str(raw.get("op", "")).lower()
+    if op not in COMPARISONS:
+        raise SpecError(f"{op!r} is not a comparison; pick one of {', '.join(COMPARISONS)}")
+    return Condition(
+        kind="compare", left=operand(raw.get("left")), right=operand(raw.get("right")), op=op
+    )
+
+
+def level(raw: Any) -> Level | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SpecError(f"{raw!r} is not a stop or a target")
+    kind = str(raw.get("kind", "")).lower()
+    if kind not in ("percent", "candle", "atr", "pivot", "reward"):
+        raise SpecError(
+            f"{kind!r} is not a kind of level; pick percent, candle, atr, pivot or reward"
+        )
+    return Level(
+        kind=kind,
+        value=float(raw.get("value", 0.0)),
+        length=_whole(raw.get("length", 14), "length"),
+        name=str(raw.get("field") or raw.get("level") or "low"),
+        ago=_whole(raw.get("ago", 1), "ago"),
+        interval=_interval(raw.get("tf") or raw.get("interval")),
+    )
+
+
+def parse(raw: dict[str, Any]) -> StrategySpec:
+    """A whole strategy, from the shape a UI posts.
+
+    Raises `SpecError` with a message a person can act on. This is the boundary
+    between something typed on a screen and something that runs, so every message
+    here says what to do rather than what went wrong internally.
+    """
+    if not isinstance(raw, dict):
+        raise SpecError("a strategy is an object")
+
+    spec = StrategySpec(
+        name=str(raw.get("name") or "Untitled"),
+        interval=_interval(raw.get("interval") or raw.get("tf")) or Interval.M5,
+        long_entry=condition(raw["long_entry"]) if raw.get("long_entry") else None,
+        short_entry=condition(raw["short_entry"]) if raw.get("short_entry") else None,
+        long_exit=condition(raw["long_exit"]) if raw.get("long_exit") else None,
+        short_exit=condition(raw["short_exit"]) if raw.get("short_exit") else None,
+        stop=level(raw.get("stop")),
+        target=level(raw.get("target")),
+        notes=str(raw.get("notes") or ""),
+    )
+    problems = spec.check()
+    if problems:
+        raise SpecError("; ".join(problems))
+    return spec
+
+
+def _interval(raw: Any) -> Interval | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return Interval(str(raw))
+    except ValueError:
+        raise SpecError(
+            f"{raw!r} is not a bar size; pick one of {', '.join(Interval)}"
+        ) from None
+
+
+def _whole(raw: Any, what: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise SpecError(f"{what} has to be a whole number, not {raw!r}") from None
+    if value < 0:
+        raise SpecError(f"{what} cannot be negative")
+    return value

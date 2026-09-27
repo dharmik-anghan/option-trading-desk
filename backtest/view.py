@@ -75,36 +75,54 @@ class Frame:
 
     # -- indicators --------------------------------------------------------
 
-    def sma(self, length: int) -> float | None:
-        return self._at(("sma", length))
+    def sma(self, length: int, ago: int = 0) -> float | None:
+        return self._at(("sma", length), ago)
 
-    def ema(self, length: int) -> float | None:
-        return self._at(("ema", length))
+    def ema(self, length: int, ago: int = 0) -> float | None:
+        return self._at(("ema", length), ago)
 
-    def rsi(self, length: int = 14) -> float | None:
-        return self._at(("rsi", length))
+    def rsi(self, length: int = 14, ago: int = 0) -> float | None:
+        return self._at(("rsi", length), ago)
 
-    def atr(self, length: int = 14) -> float | None:
-        return self._at(("atr", length))
+    def atr(self, length: int = 14, ago: int = 0) -> float | None:
+        return self._at(("atr", length), ago)
 
-    def pivots(self) -> Pivots | None:
+    def price(self, field: str, ago: int = 0) -> float | None:
+        """One of a bar's four prices, `ago` closed bars back."""
+        bar = self.ago(ago)
+        if bar is None:
+            return None
+        try:
+            return float(getattr(bar, field))
+        except AttributeError:
+            raise KeyError(f"a bar has no {field!r}") from None
+
+    def pivots(self, ago: int = 0) -> Pivots | None:
         """Levels for now, from the previous closed bar of this timeframe.
 
         Deliberately the bar before the newest one. Pivots are levels for a period
         derived from the period before it, so computing them from the bar the
         cursor is on would be using today's range to trade today.
         """
-        previous = self.ago(1)
+        previous = self.ago(ago + 1)
         return pivots(previous) if previous else None
 
-    def _at(self, key: tuple[str, int]) -> float | None:
-        if self._cursor < 0:
+    def _at(self, key: tuple[str, int], ago: int = 0) -> float | None:
+        """This indicator `ago` closed bars back.
+
+        `ago` is what makes a crossing expressible: "crossed above" is a claim
+        about two bars, not one, and without a way to ask for the previous value
+        a rule would have to keep its own state - which is exactly the state that
+        stops the same rule running live.
+        """
+        index = self._cursor - ago
+        if index < 0 or ago < 0:
             return None
         line = self._lines.get(key)
         if line is None:
             line = self._compute(key)
             self._lines[key] = line
-        return line[self._cursor]
+        return line[index]
 
     def _compute(self, key: tuple[str, int]) -> Line:
         name, length = key
