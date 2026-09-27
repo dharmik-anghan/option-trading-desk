@@ -15,6 +15,7 @@ forty thousand times sends the most recent few hundred with a count of the rest.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -156,6 +157,22 @@ class RunResponse(BaseModel):
     caveats: list[str]
 
 
+class CandleOut(BaseModel):
+    at: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class WindowResponse(BaseModel):
+    source: str
+    symbol: str
+    interval: str
+    candles: list[CandleOut]
+
+
 def _service(request: Request) -> BarService:
     service = getattr(request.app.state, "bar_service", None)
     if not isinstance(service, BarService):
@@ -163,6 +180,68 @@ def _service(request: Request) -> BarService:
             status_code=503, detail="The bar store is not open, so there is nothing to test on"
         )
     return service
+
+
+@router.get("/candles", response_model=WindowResponse)
+def candles(
+    request: Request,
+    source: str,
+    symbol: str,
+    interval: str,
+    start: str,
+    end: str,
+) -> WindowResponse:
+    """The bars over one window, for looking at a single trade.
+
+    A result says a trade made money; this is what lets you see whether it was a
+    trade anybody would have taken. The window is named by time rather than by a
+    count of days, because the caller is asking about a particular trade and not
+    about a period.
+
+    Read from the store only. A backtest is over history that has already been
+    fetched, and going to a source here could return bars that differ from the
+    ones the run was computed on - which would make the picture disagree with the
+    numbers beside it.
+    """
+    try:
+        size = Interval(interval)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{interval} is not a bar size") from None
+    try:
+        from_at = datetime.fromisoformat(start)
+        to_at = datetime.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start and end are ISO timestamps") from None
+    if to_at <= from_at:
+        raise HTTPException(status_code=400, detail="the window ends before it begins")
+
+    service = _service(request)
+    held = _stored_interval(service, source, symbol, size)
+    # Asked for by days because that is what the store's reader takes, then cut to
+    # the window. Generous enough to cover it, and bounded so a trade opened three
+    # years ago does not read the whole series.
+    days = max(1, int((datetime.now(UTC) - from_at).total_seconds() / 86400) + 1)
+    bars = service.stored(source, symbol, held, days=days).bars
+    if held != size:
+        bars = resample(bars, size)
+    inside = [b for b in bars if from_at <= b.ts <= to_at]
+
+    return WindowResponse(
+        source=source,
+        symbol=symbol,
+        interval=str(size),
+        candles=[
+            CandleOut(
+                at=b.ts.isoformat(),
+                open=b.open,
+                high=b.high,
+                low=b.low,
+                close=b.close,
+                volume=b.volume,
+            )
+            for b in inside
+        ],
+    )
 
 
 @router.post("/run", response_model=RunResponse)

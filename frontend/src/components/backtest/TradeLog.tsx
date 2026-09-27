@@ -5,6 +5,9 @@ interface Props {
   trades: BacktestTrade[];
   total: number;
   quote: string;
+  /** Which trade is being looked at on the chart, if any. */
+  picked: BacktestTrade | null;
+  onPick: (trade: BacktestTrade | null) => void;
 }
 
 type Filter = "all" | "long" | "short" | "won" | "lost";
@@ -24,7 +27,7 @@ const when = (iso: string) => iso.slice(0, 16).replace("T", " ");
  *
  * Newest first, because the last thing a run did is what you look at first.
  */
-export function TradeLog({ trades, total, quote }: Props) {
+export function TradeLog({ trades, total, quote, picked, onPick }: Props) {
   const [filter, setFilter] = useState<Filter>("all");
   const [limit, setLimit] = useState(200);
 
@@ -67,6 +70,7 @@ export function TradeLog({ trades, total, quote }: Props) {
           <option value="lost">losers</option>
         </select>
         <span className="sp" />
+        <small className="hint">click a row to see it on the chart</small>
         <small>
           {shown.length.toLocaleString()} shown
           {trades.length < total && ` · last ${trades.length.toLocaleString()} of ${total.toLocaleString()} kept`}
@@ -99,7 +103,15 @@ export function TradeLog({ trades, total, quote }: Props) {
           </thead>
           <tbody>
             {page.map((t, i) => (
-              <tr key={`${t.opened_at}-${i}`} className={t.net > 0 ? "won" : "lost"}>
+              <tr
+                key={`${t.opened_at}-${i}`}
+                className={[
+                  t.net > 0 ? "won" : "lost",
+                  picked === t ? "picked" : "",
+                ].join(" ")}
+                onClick={() => onPick(picked === t ? null : t)}
+                title="Show this trade on the chart"
+              >
                 <td>{when(t.opened_at)}</td>
                 <td>{when(t.closed_at)}</td>
                 <td className={t.side === "long" ? "lng" : "sht"}>{t.side}</td>

@@ -1024,6 +1024,31 @@ export interface BacktestResult {
   caveats: string[];
 }
 
+export interface WindowResponse {
+  source: string;
+  symbol: string;
+  interval: string;
+  candles: Candle[];
+}
+
+/**
+ * Bars over one window, for looking at a single trade.
+ *
+ * Read from the store only. A backtest runs over history already fetched, and
+ * going to a source here could return bars that differ from the ones the numbers
+ * were computed on.
+ */
+export function getBacktestCandles(
+  source: string,
+  symbol: string,
+  interval: string,
+  start: string,
+  end: string,
+): Promise<WindowResponse> {
+  const query = new URLSearchParams({ source, symbol, interval, start, end });
+  return getJson<WindowResponse>(`/api/backtest/candles?${query}`);
+}
+
 export function runBacktest(request: BacktestRequest): Promise<BacktestResult> {
   return postJson<BacktestRequest, BacktestResult>("/api/backtest/run", request);
 }

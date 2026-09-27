@@ -1,4 +1,7 @@
 import type { BacktestResult } from "../../api";
+import { useState } from "react";
+import type { BacktestTrade } from "../../api";
+import { TradeChart } from "./TradeChart";
 import { TradeLog } from "./TradeLog";
 
 interface Props {
@@ -20,6 +23,7 @@ const money = (v: number) =>
  */
 export function RunResult({ result }: Props) {
   const m = result.metrics;
+  const [picked, setPicked] = useState<BacktestTrade | null>(null);
   const costs = m.fees + m.funding + m.slippage;
 
   return (
@@ -145,8 +149,24 @@ export function RunResult({ result }: Props) {
         </table>
       )}
 
+      {picked && (
+        <TradeChart
+          trade={picked}
+          source={result.source}
+          symbol={result.symbol}
+          interval={result.interval}
+          onClose={() => setPicked(null)}
+        />
+      )}
+
       {result.trades.length > 0 && (
-        <TradeLog trades={result.trades} total={result.trades_total} quote="USDT" />
+        <TradeLog
+          trades={result.trades}
+          total={result.trades_total}
+          quote="USDT"
+          picked={picked}
+          onPick={setPicked}
+        />
       )}
 
     </div>

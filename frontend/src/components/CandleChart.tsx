@@ -12,6 +12,19 @@ interface Props {
   /** Decimal places the venue quotes in, so the axis invents no precision. */
   dp: number;
   height?: number;
+  /** Things drawn on top of the price: a backtest's entry and exit, its stop and
+      target, and the stretch of time the position was held. Optional, because a
+      live chart has none of them. */
+  overlay?: Overlay;
+}
+
+export interface Overlay {
+  /** Horizontal lines at a price, each with a short label on the axis. */
+  levels?: { price: number; label: string; kind: "entry" | "exit" | "stop" | "target" }[];
+  /** A point in time and price: where a position was opened or closed. */
+  marks?: { at: string; price: number; kind: "entry" | "exit"; side: "long" | "short" }[];
+  /** The stretch a position was held over, shaded. */
+  band?: { from: string; to: string };
 }
 
 const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
@@ -31,7 +44,14 @@ const MIN_BARS = 12;
  * reader here as they do on a position, and inventing a third pair for price
  * would make the screen say that they are different ideas.
  */
-export function CandleChart({ candles, seriesId, last, dp, height = 260 }: Props) {
+export function CandleChart({
+  candles,
+  seriesId,
+  last,
+  dp,
+  height = 260,
+  overlay,
+}: Props) {
   // The window, as a count of bars and where it ends. Held as an end index so
   // that new bars arriving keep the view pinned to the right, which is what
   // anyone watching a live chart expects - anchoring on the start would have the
@@ -150,6 +170,34 @@ export function CandleChart({ candles, seriesId, last, dp, height = 260 }: Props
   const step = plotW / shown.length;
   const bodyW = Math.max(1, step * 0.8);
 
+  // Where a moment falls on the x axis. A timestamp that is not one of the bars
+  // on screen is placed at the bar containing it, because a trade is filled at a
+  // bar's open and the label belongs on that bar rather than between two.
+  const xOf = (at: string): number | null => {
+    const want = Date.parse(at);
+    if (Number.isNaN(want)) return null;
+    let index = -1;
+    for (let i = 0; i < shown.length; i += 1) {
+      if (Date.parse(shown[i].at) <= want) index = i;
+      else break;
+    }
+    if (index < 0) return null;
+    return PAD.left + index * step + step / 2;
+  };
+
+  const marks = (overlay?.marks ?? [])
+    .map((mark) => ({ ...mark, x: xOf(mark.at) }))
+    .filter((mark): mark is typeof mark & { x: number } => mark.x !== null);
+
+  const band = (() => {
+    if (!overlay?.band) return null;
+    const from = xOf(overlay.band.from);
+    const to = xOf(overlay.band.to);
+    if (from === null) return null;
+    const right = to ?? PAD.left + plotW;
+    return { x: from, width: Math.max(1, right - from) };
+  })();
+
   // Four gridlines: enough to read a level off, few enough not to be a net.
   const ticks = [0, 1, 2, 3, 4].map((i) => view.min + ((view.max - view.min) * i) / 4);
 
@@ -210,6 +258,26 @@ export function CandleChart({ candles, seriesId, last, dp, height = 260 }: Props
         </g>
       ))}
 
+      {/* Under the candles, so a shaded holding period never hides a bar. */}
+      {band !== null && (
+        <rect
+          x={band.x}
+          y={PAD.top}
+          width={band.width}
+          height={plotH}
+          className="cheld"
+        />
+      )}
+
+      {(overlay?.levels ?? []).map((level) => (
+        <g key={`${level.kind}-${level.price}`} className={`clevel ${level.kind}`}>
+          <line x1={PAD.left} x2={PAD.left + plotW} y1={y(level.price)} y2={y(level.price)} />
+          <text x={PAD.left + 4} y={y(level.price) - 4} className="clevellabel">
+            {level.label}
+          </text>
+        </g>
+      ))}
+
       {shown.map((c, i) => {
         const cx = PAD.left + i * step + step / 2;
         const rising = c.close >= c.open;
@@ -229,6 +297,16 @@ export function CandleChart({ candles, seriesId, last, dp, height = 260 }: Props
           </g>
         );
       })}
+
+      {/* Over the candles: the two moments that matter most on this chart. */}
+      {marks.map((mark) => (
+        <g key={`${mark.kind}-${mark.at}`} className={`cmark ${mark.kind} ${mark.side}`}>
+          <circle cx={mark.x} cy={y(mark.price)} r={4.5} />
+          <text x={mark.x} y={y(mark.price) + (mark.kind === "entry" ? -9 : 15)}>
+            {mark.kind === "entry" ? (mark.side === "long" ? "buy" : "sell") : "close"}
+          </text>
+        </g>
+      ))}
 
       {last !== null && (
         <g>

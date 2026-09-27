@@ -214,3 +214,97 @@ def test_restricting_the_hours_changes_the_trades(stocked: TestClient) -> None:
     restricted = stocked.post("/api/backtest/run", json=request).json()
 
     assert restricted["metrics"]["trades"] < everywhere["metrics"]["trades"]
+
+
+def test_candles_over_a_window(stocked: TestClient) -> None:
+    """What a single trade is looked at on."""
+    response = stocked.get(
+        "/api/backtest/candles",
+        params={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-01T00:00:00+00:00",
+            "end": "2026-01-01T02:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    candles = response.json()["candles"]
+    # two hours of five-minute bars, inclusive of both ends
+    assert len(candles) == 25
+    assert candles[0]["at"].startswith("2026-01-01T00:00")
+
+
+def test_a_window_can_be_asked_for_at_a_longer_bar_size(stocked: TestClient) -> None:
+    """Only 5m is stored, so an hourly window has to be resampled."""
+    response = stocked.get(
+        "/api/backtest/candles",
+        params={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "1h",
+            "start": "2026-01-01T00:00:00+00:00",
+            "end": "2026-01-01T05:00:00+00:00",
+        },
+    )
+
+    assert [c["at"][11:16] for c in response.json()["candles"]] == [
+        "00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
+    ]
+
+
+def test_a_backwards_window_is_refused(stocked: TestClient) -> None:
+    response = stocked.get(
+        "/api/backtest/candles",
+        params={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-02T00:00:00+00:00",
+            "end": "2026-01-01T00:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "ends before it begins" in response.json()["detail"]
+
+
+def test_a_window_that_is_not_a_timestamp_says_so(stocked: TestClient) -> None:
+    response = stocked.get(
+        "/api/backtest/candles",
+        params={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "yesterday",
+            "end": "2026-01-01T00:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "ISO timestamps" in response.json()["detail"]
+
+
+def test_the_window_covers_the_trades_a_run_reported(stocked: TestClient) -> None:
+    """The point of the endpoint: a trade in the log must be drawable.
+
+    A run and a chart that disagree about what bars exist would make the picture
+    beside a number meaningless.
+    """
+    run_body = stocked.post("/api/backtest/run", json=_crossover()).json()
+    trade = run_body["trades"][0]
+
+    response = stocked.get(
+        "/api/backtest/candles",
+        params={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": run_body["interval"],
+            "start": trade["opened_at"],
+            "end": trade["closed_at"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candles"]
