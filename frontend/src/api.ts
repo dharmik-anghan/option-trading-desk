@@ -903,8 +903,15 @@ export interface Level {
   tf?: string;
 }
 
+/** A named session, or a window of your own with a real timezone. */
+export type SessionChoice = string | { name?: string; start: string; end: string; tz: string };
+
 export interface StrategySpec {
   name: string;
+  /** Hours during which entries may fire. Empty means all of them. */
+  sessions?: SessionChoice[];
+  /** Whether an open position is closed when the session ends. */
+  close_outside_session?: boolean;
   long_entry?: Group | null;
   short_entry?: Group | null;
   long_exit?: Group | null;

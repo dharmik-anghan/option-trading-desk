@@ -184,3 +184,33 @@ def test_leverage_beyond_the_venues_maximum_is_refused(stocked: TestClient) -> N
     response = stocked.post("/api/backtest/run", json={**_crossover(), "leverage": 500})
 
     assert response.status_code == 422
+
+
+def test_a_session_filter_is_applied_and_read_back(stocked: TestClient) -> None:
+    """A result has to say which hours it was allowed to trade in."""
+    request = {**_crossover()}
+    request["spec"] = {**request["spec"], "sessions": ["london"]}
+
+    body = stocked.post("/api/backtest/run", json=request).json()
+
+    assert "Only during London 08:00-16:30 Europe/London" in body["reads"]
+
+
+def test_an_unknown_session_is_refused_with_the_list(stocked: TestClient) -> None:
+    request = {**_crossover()}
+    request["spec"] = {**request["spec"], "sessions": ["atlantis"]}
+
+    response = stocked.post("/api/backtest/run", json=request)
+
+    assert response.status_code == 400
+    assert "not a session" in response.json()["detail"]
+
+
+def test_restricting_the_hours_changes_the_trades(stocked: TestClient) -> None:
+    everywhere = stocked.post("/api/backtest/run", json=_crossover()).json()
+
+    request = {**_crossover()}
+    request["spec"] = {**request["spec"], "sessions": ["london"]}
+    restricted = stocked.post("/api/backtest/run", json=request).json()
+
+    assert restricted["metrics"]["trades"] < everywhere["metrics"]["trades"]

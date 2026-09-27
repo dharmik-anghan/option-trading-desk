@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from backtest.market import Side
 from backtest.models import Intent, Position
+from backtest.sessions import in_any
 from backtest.spec import StrategySpec
 from backtest.view import View
 from marketdata.models import Interval
@@ -30,6 +31,11 @@ class SpecRule:
 
     def entry(self, view: View) -> Intent:
         spec = self.spec
+        # Judged on the bar's close, the instant the decision is made, and before
+        # anything else: a condition that fires outside the hours being traded is
+        # not a signal, so there is nothing to evaluate.
+        if view.at is not None and not in_any(spec.sessions, view.at):
+            return Intent.nothing()
         wants_long = spec.long_entry is not None and spec.long_entry.holds(view)
         wants_short = spec.short_entry is not None and spec.short_entry.holds(view)
         if wants_long and wants_short:
@@ -73,6 +79,17 @@ class SpecRule:
         an entry signal for a short.
         """
         spec = self.spec
+        # The session ending closes the position before any condition is read.
+        # This is the whole difference between "I trade the London session" and
+        # "I open trades during London and hold them through Tokyo".
+        if (
+            spec.close_outside_session
+            and spec.sessions
+            and view.at is not None
+            and not in_any(spec.sessions, view.at)
+        ):
+            return Intent.exit("the session ended")
+
         condition = spec.long_exit if position.side is Side.LONG else spec.short_exit
         if condition is not None and condition.holds(view):
             return Intent.exit(condition.describe())

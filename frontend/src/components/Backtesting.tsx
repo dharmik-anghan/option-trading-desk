@@ -3,6 +3,7 @@ import { getBarSeries, runBacktest } from "../api";
 import type { BacktestResult, BarSeries, Group, Level, Sizing, StrategySpec } from "../api";
 import { ConditionList } from "./backtest/ConditionList";
 import { LevelPicker } from "./backtest/LevelPicker";
+import { SessionPicker } from "./backtest/SessionPicker";
 import { RunResult } from "./backtest/RunResult";
 
 interface Props {
@@ -386,6 +387,13 @@ export function Backtesting({ onHome }: Props) {
             onChange={(g: Group | null) => setSpec({ ...spec, short_exit: g })}
             intervals={HIGHER}
             traded={interval}
+          />
+
+          <SessionPicker
+            sessions={(spec.sessions ?? []) as string[]}
+            closeOutside={spec.close_outside_session ?? false}
+            onSessions={(next) => setSpec({ ...spec, sessions: next })}
+            onCloseOutside={(v) => setSpec({ ...spec, close_outside_session: v })}
           />
 
           <div className="levels">

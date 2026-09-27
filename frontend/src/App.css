@@ -2427,3 +2427,75 @@ a.nitem:hover .nhead {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Sessions ──────────────────────────────────────────────────────────── */
+.bt .sessions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+.bt .sessions header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bt .sessions h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.bt .sessions .sp {
+  flex: 1;
+}
+.bt .sessions header button {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  color: var(--you);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.bt .sessions .picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.bt .sessions .pick {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.bt .sessions .pick:hover {
+  border-color: var(--dim);
+}
+.bt .sessions .pick.on {
+  color: var(--you-fg);
+  background: var(--you);
+  border-color: var(--you);
+}
+.bt .sessions .say {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+.bt .sessions .also {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.bt .sessions .also small {
+  color: var(--dim);
+}

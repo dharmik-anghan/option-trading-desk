@@ -30,8 +30,11 @@ trade while it is still blind.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import time
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backtest.sessions import PRESETS, WEEKDAYS, Session, preset
 from backtest.view import Frame, View
 from marketdata.models import Interval
 
@@ -324,6 +327,13 @@ class StrategySpec:
     short_exit: Condition | None = None
     stop: Level | None = None
     target: Level | None = None
+    #: Hours during which entries are allowed. Empty means all of them, which is
+    #: right for a perpetual and wrong for almost everything else.
+    sessions: tuple[Session, ...] = ()
+    #: Whether an open position is closed when the session ends. What an intraday
+    #: strategy does, and the difference between "I trade the London session" and
+    #: "I open trades during London and hold them through Tokyo".
+    close_outside_session: bool = False
     notes: str = ""
 
     @property
@@ -466,6 +476,65 @@ def level(raw: Any) -> Level | None:
     )
 
 
+def sessions(raw: Any) -> tuple[Session, ...]:
+    """The hours to trade in, from the shape a UI posts.
+
+    Either a preset by name - "london", "newyork" - or a window of its own with a
+    zone. A zone is required on a custom window rather than defaulted to UTC:
+    somebody writing 08:00 means eight o'clock somewhere, and guessing which
+    somewhere is how a session ends up an hour out for half the year.
+    """
+    if raw is None or raw == []:
+        return ()
+    if not isinstance(raw, list):
+        raise SpecError("sessions are a list")
+
+    out: list[Session] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            named = preset(entry)
+            if named is None:
+                raise SpecError(
+                    f"{entry!r} is not a session; pick one of {', '.join(PRESETS)}, "
+                    "or give a window of your own"
+                )
+            out.append(named)
+            continue
+        if not isinstance(entry, dict):
+            raise SpecError(f"{entry!r} is not a session")
+        if entry.get("name") and "start" not in entry:
+            named = preset(str(entry["name"]))
+            if named is not None:
+                out.append(named)
+                continue
+        zone = str(entry.get("tz") or "")
+        if not zone:
+            raise SpecError("a session of your own needs a timezone, such as Europe/London")
+        try:
+            ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise SpecError(f"{zone!r} is not a timezone this machine knows") from None
+        out.append(
+            Session(
+                name=str(entry.get("name") or zone),
+                start=_clock(entry.get("start"), "start"),
+                end=_clock(entry.get("end"), "end"),
+                tz=zone,
+                days=frozenset(int(d) for d in entry.get("days", WEEKDAYS)),
+            )
+        )
+    return tuple(out)
+
+
+def _clock(raw: Any, what: str) -> time:
+    """A time of day written "08:30"."""
+    try:
+        hour, _, minute = str(raw).partition(":")
+        return time(int(hour), int(minute or 0))
+    except (TypeError, ValueError):
+        raise SpecError(f"{what} has to be a time like 08:30, not {raw!r}") from None
+
+
 def parse(raw: dict[str, Any]) -> StrategySpec:
     """A whole strategy, from the shape a UI posts.
 
@@ -485,6 +554,8 @@ def parse(raw: dict[str, Any]) -> StrategySpec:
         short_exit=condition(raw["short_exit"]) if raw.get("short_exit") else None,
         stop=level(raw.get("stop")),
         target=level(raw.get("target")),
+        sessions=sessions(raw.get("sessions")),
+        close_outside_session=bool(raw.get("close_outside_session")),
         notes=str(raw.get("notes") or ""),
     )
     problems = spec.check()

@@ -298,6 +298,11 @@ def _stored_interval(service: BarService, source: str, symbol: str, wanted: Inte
 def _sentence(spec: Any) -> str:
     """The strategy read back, so a result says what produced it."""
     parts: list[str] = []
+    if spec.sessions:
+        during = " or ".join(s.describe() for s in spec.sessions)
+        parts.append(f"Only during {during}")
+        if spec.close_outside_session:
+            parts.append("Close whatever is open when the session ends")
     if spec.long_entry:
         parts.append(f"Long when {spec.long_entry.describe()}")
     if spec.short_entry:
