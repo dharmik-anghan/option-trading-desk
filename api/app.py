@@ -31,7 +31,7 @@ from starlette.types import Scope
 
 from alerting.watcher import Watcher
 from api.alert_inputs import gather
-from api.dependencies import broker_for, get_broker, get_db_path, get_feeds
+from api.dependencies import broker_for, get_broker, get_db_path, get_feeds, get_holidays
 from api.errors import broker_error_handler
 from api.routers import (
     alerts,
@@ -49,14 +49,16 @@ from api.routers import (
 )
 from api.store import open_db
 from broker.errors import BrokerError
+from broker.session import in_session
 from broker.shark.stream import SharkStream
 from marketdata import BarService
 from marketdata.holder import BarStoreHolder
 from marketdata.venue import VenueBars
 from notify import Telegram, TelegramConfig
 from settings import load_settings
+from storage.vol_recorder import VolRecorder
 from streaming import TickHub
-from venues import for_venue
+from venues import for_venue, option_underlyings
 from venues import get as get_venue
 
 log = logging.getLogger(__name__)
@@ -151,6 +153,23 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     task = asyncio.create_task(watcher.run_forever(), name="alert-watcher")
     log.info("alert watcher started (telegram=%s)", notifier is not None)
 
+    # What options cost, written down each session. The one piece of market data
+    # on this desk that cannot be fetched again: a price history can be
+    # backfilled from any source years later, and what the market was charging
+    # for a straddle on a Tuesday afternoon is gone when the session ends. Its
+    # own task, because it has to run with the tab closed.
+    recorder = VolRecorder(
+        underlyings=option_underlyings(),
+        fetch_chain=lambda symbol, strikes: get_broker().get_option_chain(
+            symbol, strike_count=strikes
+        ),
+        open_conn=lambda: open_db(db_path),
+        in_session=lambda at: in_session(at, get_holidays().dates()),
+    )
+    application.state.vol_recorder = recorder
+    vol_task = asyncio.create_task(recorder.run_forever(), name="vol-recorder")
+    log.info("volatility recorder started for %d underlyings", len(option_underlyings()))
+
     # The perpetuals venue pushes prices rather than being polled for them, which
     # is not a nicety: its budget is 60 requests a minute against Fyers' ~200, and
     # three instruments across several panels would spend it on nothing. The hub
@@ -174,8 +193,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     finally:
         shutting_down.set()
         task.cancel()
+        vol_task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        with suppress(asyncio.CancelledError):
+            await vol_task
         if stream is not None:
             await stream.stop()
         bars.close()

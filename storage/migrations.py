@@ -189,6 +189,66 @@ def _perp_order_log(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _vol_snapshot(conn: sqlite3.Connection) -> None:
+    """A daily record of what options cost, per underlying.
+
+    The one piece of market data on this desk that cannot be fetched again. A
+    price history can be backfilled from any source years later; what the market
+    was charging for a NIFTY straddle on a Tuesday afternoon is gone the moment
+    the session ends. Nobody publishes it, the broker does not serve it, and the
+    chain endpoint only ever answers "now".
+
+    Which is why this sits in SQLite beside the trades rather than in the bar
+    store: `scripts/backup_db.py` copies this file and leaves the DuckDB one
+    alone, on the grounds that bars can always be refetched. These cannot.
+
+    One row per underlying per day, keyed so a second pass in the same session
+    replaces rather than duplicates - the writer runs on a loop and the last
+    reading of the day is the one that closed.
+
+    Call and put implied are stored separately although this broker reports one
+    figure per strike and gives both legs the same number - checked across
+    eleven strikes, identical every time. They are kept apart because the
+    columns cost nothing and a broker that quotes them separately would
+    otherwise need a migration; nothing should compute a call-minus-put skew
+    from them while this is the source, because it can only ever be zero. The
+    skew that is real here runs across strikes rather than between the legs of
+    one: on the day this was written NIFTY implied ran 11.11 a percent below
+    the money against 10.04 a percent above it.
+
+    `atm_iv` is the average of the call and the put at the money, which is the
+    number an option seller means by "implied volatility" and is not the same as
+    India VIX: the VIX is a thirty-day constant-maturity figure built across
+    strikes, and on the day this was written it read 12.16 against an ATM IV of
+    9.85. Both are stored because they answer different questions.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS vol_snapshot (
+            underlying TEXT NOT NULL,
+            -- The trading day, as YYYY-MM-DD in IST.
+            day TEXT NOT NULL,
+            -- When within that day the reading was taken.
+            at TEXT NOT NULL,
+            spot REAL NOT NULL,
+            expiry TEXT NOT NULL,
+            days_to_expiry REAL NOT NULL,
+            atm_strike REAL NOT NULL,
+            -- The two legs, and their average. Kept apart because a skew shows
+            -- up as a gap between them and the average hides it.
+            call_iv REAL,
+            put_iv REAL,
+            atm_iv REAL,
+            -- The at-the-money straddle, which is the market's own expected
+            -- move to expiry in points.
+            straddle REAL,
+            india_vix REAL,
+            PRIMARY KEY (underlying, day)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_vol_snapshot_day ON vol_snapshot(day);
+    """)
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
@@ -202,6 +262,8 @@ MIGRATIONS: tuple[Migration, ...] = (
               apply=_basket_thresholds),
     Migration(version=6, reason="a log of every perpetual order formed, sent or not",
               apply=_perp_order_log),
+    Migration(version=7, reason="what options cost each day, which cannot be fetched later",
+              apply=_vol_snapshot),
 )
 
 

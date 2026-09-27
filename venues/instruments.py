@@ -38,6 +38,30 @@ class Instrument:
     quantity_dp: int
 
 
+#: The index underlyings the options desk trades, as Fyers spells them.
+#:
+#: Written here because the backend needed a list and only the frontend had one:
+#: anything server-side that wants "the underlyings" - the volatility recorder,
+#: for one - had nowhere to read them from, and a second copy in Python would be
+#: a second copy to keep in step.
+#:
+#: They are indices rather than instruments in the sense above, which is why they
+#: carry no precision: nothing places an order in an index, only in options on
+#: one. The names match the desk's own labels.
+OPTION_UNDERLYINGS: tuple[tuple[str, str], ...] = (
+    ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+    ("NSE:NIFTYBANK-INDEX", "BANK NIFTY"),
+    ("NSE:FINNIFTY-INDEX", "FIN NIFTY"),
+    ("NSE:MIDCPNIFTY-INDEX", "MIDCAP NIFTY"),
+    ("BSE:SENSEX-INDEX", "SENSEX"),
+)
+
+
+def option_underlyings() -> tuple[str, ...]:
+    """Just the symbols, for anything iterating over them."""
+    return tuple(symbol for symbol, _ in OPTION_UNDERLYINGS)
+
+
 #: The three the desk starts with. Their names come from the venue's own
 #: exchangeInfo: XAU is "Gold Derivatives", CL is "Crude Oil Futures" - the
 #: WTI contract, which is what "USOIL" means elsewhere.
