@@ -1120,8 +1120,14 @@ export interface RrgIndexOption {
 
 export interface RrgOptions {
   indices: RrgIndexOption[];
+  /** Listed apart from the things to plot: the Sensex publishes no constituent
+      list, so it can only ever be a benchmark. */
+  benchmarks: { id: string; name: string }[];
   timeframes: string[];
   benchmark: string;
+  window: number;
+  window_min: number;
+  window_max: number;
 }
 
 export interface RrgPoint {

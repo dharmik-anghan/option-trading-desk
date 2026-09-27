@@ -17,6 +17,9 @@ const QUADRANTS: { id: Quadrant; name: string; says: string }[] = [
 /** How many periods of tail to offer. Five is a week of daily, a month of weekly. */
 const TAILS = [3, 5, 8, 12, 20];
 
+/** Milliseconds a replay spends on each period. */
+const STEP_MS = 120;
+
 /**
  * Relative rotation.
  *
@@ -35,6 +38,12 @@ export function Rrg({ onHome }: Props) {
   const [options, setOptions] = useState<RrgOptions | null>(null);
   const [indexId, setIndexId] = useState("SECTORS");
   const [timeframe, setTimeframe] = useState("daily");
+  // Exposed rather than fixed, because they change the answer. The same sector
+  // reads leading at a window of 14, improving at 21 and weakening on weekly
+  // bars, from identical prices — so a graph that cannot be reconciled with
+  // another one is a graph nobody can check.
+  const [benchmark, setBenchmark] = useState("NIFTY50");
+  const [window_, setWindow] = useState(14);
   const [tail, setTail] = useState(8);
   const [back, setBack] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -53,7 +62,7 @@ export function Rrg({ onHome }: Props) {
     let current = true;
     setLoading(true);
     setError(null);
-    void getRrg({ index_id: indexId, timeframe })
+    void getRrg({ index_id: indexId, timeframe, benchmark, window: window_ })
       .then((s) => {
         if (!current) return;
         setSnapshot(s);
@@ -71,7 +80,7 @@ export function Rrg({ onHome }: Props) {
     return () => {
       current = false;
     };
-  }, [indexId, timeframe]);
+  }, [indexId, timeframe, benchmark, window_]);
 
   // How far back replay can go: the shortest path, less the tail, so every
   // series still has something to draw at the far end.
@@ -81,20 +90,29 @@ export function Rrg({ onHome }: Props) {
     return Math.max(0, shortest - tail - 1);
   }, [snapshot, tail]);
 
-  const step = useRef<number | null>(null);
+  // Driven by the frame clock rather than a timer. An interval fires whether or
+  // not the last frame finished, so a heavy snapshot makes the steps bunch up -
+  // which is what made replay feel like it was struggling rather than running.
+  const frame = useRef<number | null>(null);
   useEffect(() => {
     if (!playing) return;
-    step.current = window.setInterval(() => {
-      setBack((b) => {
-        if (b <= 0) {
-          setPlaying(false);
-          return 0;
-        }
-        return b - 1;
-      });
-    }, 220);
+    let last = performance.now();
+    const tick = (now: number) => {
+      if (now - last >= STEP_MS) {
+        last = now;
+        setBack((b) => {
+          if (b <= 0) {
+            setPlaying(false);
+            return 0;
+          }
+          return b - 1;
+        });
+      }
+      frame.current = requestAnimationFrame(tick);
+    };
+    frame.current = requestAnimationFrame(tick);
     return () => {
-      if (step.current !== null) window.clearInterval(step.current);
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
     };
   }, [playing]);
 
@@ -172,6 +190,34 @@ export function Rrg({ onHome }: Props) {
             <option value="daily">daily</option>
             <option value="weekly">weekly</option>
           </select>
+        </label>
+
+        <label>
+          Against
+          <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
+            {(options?.benchmarks ?? []).map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Window
+          <input
+            className="win"
+            type="number"
+            min={options?.window_min ?? 5}
+            max={options?.window_max ?? 60}
+            value={window_}
+            onChange={(e) => {
+              const lo = options?.window_min ?? 5;
+              const hi = options?.window_max ?? 60;
+              setWindow(Math.min(hi, Math.max(lo, Number(e.target.value))));
+            }}
+            title="Periods each number is normalised over. It moves things between quadrants."
+          />
         </label>
 
         <label>

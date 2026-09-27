@@ -3003,6 +3003,10 @@ a.nitem:hover .nhead {
   border-radius: 2px;
   padding: 3px 5px;
 }
+.rrgpage input.win {
+  width: 52px;
+  font-variant-numeric: tabular-nums;
+}
 .rrgpage input[type="range"] {
   width: 180px;
   padding: 0;
@@ -3046,6 +3050,10 @@ a.nitem:hover .nhead {
   /* Capped, because the graph is square: at the full width of the page it is
      also the full height of one, and everything else falls below the fold. */
   max-width: 620px;
+  /* Square whatever the column does, rather than trusting the viewBox to be
+     honoured once a height lands on it from elsewhere. */
+  aspect-ratio: 1 / 1;
+  height: auto;
   margin: 0 auto;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -3073,9 +3081,29 @@ a.nitem:hover .nhead {
 .rrg .dot {
   cursor: default;
 }
+/* The head slides between periods rather than jumping, which is what makes a
+   replay read as rotation rather than as a slideshow. Skipped for anyone who
+   asked not to be moved at. */
+.rrg .dot .head,
+.rrg .dot .tag {
+  transition: cx 110ms linear, cy 110ms linear, x 110ms linear, y 110ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rrg .dot .head,
+  .rrg .dot .tag {
+    transition: none;
+  }
+}
 .rrg .dot .tail {
-  stroke-width: 1.4;
+  stroke-width: 1.5;
   fill: none;
+  stroke-opacity: 0.45;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.rrg .dot.on .tail {
+  stroke-opacity: 0.9;
+  stroke-width: 2;
 }
 .rrg .dot .head {
   stroke: var(--panel);

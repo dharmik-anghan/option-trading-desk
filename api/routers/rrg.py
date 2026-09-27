@@ -46,11 +46,21 @@ DEFAULT_POINTS = 120
 
 
 class Options(BaseModel):
-    """What can be asked for."""
+    """What can be asked for.
+
+    Benchmarks are listed separately from the things to plot, because they are
+    not the same set: the Sensex publishes no constituent list so it can only be
+    a benchmark, and "all sectors" is only ever something to plot.
+    """
 
     indices: list[dict[str, Any]]
+    benchmarks: list[dict[str, str]]
     timeframes: list[str]
     benchmark: str
+    #: The default normalising window, and the range that is accepted.
+    window: int
+    window_min: int
+    window_max: int
 
 
 class PathPoint(BaseModel):
@@ -120,8 +130,16 @@ def options() -> Options:
         )
     return Options(
         indices=listed,
+        benchmarks=[
+            {"id": spec.id, "name": spec.name}
+            for spec in INDICES
+            if not spec.is_sector
+        ],
         timeframes=["daily", "weekly"],
         benchmark=DEFAULT_BENCHMARK,
+        window=DEFAULT_WINDOW,
+        window_min=5,
+        window_max=60,
     )
 
 
@@ -137,8 +155,8 @@ def snapshot(
     """The rotation graph for one index against one benchmark."""
     if timeframe not in ("daily", "weekly"):
         raise HTTPException(status_code=400, detail="timeframe is daily or weekly")
-    if not 2 <= window <= 200:
-        raise HTTPException(status_code=400, detail="window has to be between 2 and 200")
+    if not 5 <= window <= 60:
+        raise HTTPException(status_code=400, detail="window has to be between 5 and 60")
     points = max(2, min(500, points))
 
     mark = index(benchmark)
@@ -202,6 +220,15 @@ def snapshot(
                 quadrant=str(Quadrant.of(tail[-1].ratio, tail[-1].momentum)),
             )
         )
+
+    # Said out loud, because it is the difference between two charts that look
+    # like they disagree. The same sector can read leading at a window of 14,
+    # improving at 21 and weakening on weekly bars, from identical prices - so a
+    # result that does not carry its settings cannot be reconciled with anything.
+    caveats.append(
+        f"Measured against {mark.name} over a {window}-period window on {timeframe} "
+        "bars. Another benchmark or window will move things between quadrants"
+    )
 
     if missing:
         caveats.append(
