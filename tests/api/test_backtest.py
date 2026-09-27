@@ -427,3 +427,100 @@ def test_a_chart_is_still_drawn_for_a_strategy_that_will_not_run(
 
     assert body["candles"]
     assert body["lines"] == []
+
+
+def test_a_pivot_gap_percentile_can_be_traded_on(stocked: TestClient) -> None:
+    """The squeeze reading: enter when the previous day's range was among the
+    narrowest of the window."""
+    request = {**_crossover(), "interval": "1h"}
+    request["spec"] = {
+        "name": "Squeeze",
+        "long_entry": {
+            "all": [
+                {
+                    "left": {
+                        "kind": "indicator",
+                        "name": "pivot_gap_rank",
+                        "length": 20,
+                        "tf": "1d",
+                    },
+                    "op": "below",
+                    "right": 20,
+                }
+            ]
+        },
+        "long_exit": {
+            "all": [{"left": {"kind": "price", "field": "close"}, "op": "below", "right": 0}]
+        },
+    }
+
+    body = stocked.post("/api/backtest/run", json=request).json()
+
+    assert "pivot gap percentile over 20 1d below 20" in body["reads"]
+
+
+def test_a_pivot_gap_line_is_not_drawn_on_the_price_axis(stocked: TestClient) -> None:
+    """A percentile running 0 to 100 on a chart scaled to Bitcoin would sit on the
+    floor and flatten every candle above it."""
+    spec = {
+        "name": "Squeeze",
+        "long_entry": {
+            "all": [
+                {
+                    "left": {"kind": "indicator", "name": "pivot_gap_rank", "length": 5},
+                    "op": "below",
+                    "right": 20,
+                },
+                {
+                    "left": {"kind": "indicator", "name": "ema", "length": 5},
+                    "op": "above",
+                    "right": 0,
+                },
+            ]
+        },
+        "long_exit": {
+            "all": [{"left": {"kind": "price", "field": "close"}, "op": "below", "right": 0}]
+        },
+    }
+
+    body = stocked.post(
+        "/api/backtest/candles",
+        json={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-01T12:00:00+00:00",
+            "end": "2026-01-01T18:00:00+00:00",
+            "spec": spec,
+        },
+    ).json()
+
+    on_price = {line["label"]: line["on_price"] for line in body["lines"]}
+
+    assert on_price["EMA 5"] is True
+    assert on_price["Pivot gap percentile 5"] is False
+
+
+def test_pivot_gap_takes_no_period(stocked: TestClient) -> None:
+    """It averages nothing, so a period of zero is not a mistake to refuse."""
+    request = {**_crossover()}
+    request["spec"] = {
+        "name": "Gap",
+        "long_entry": {
+            "all": [
+                {
+                    "left": {"kind": "indicator", "name": "pivot_gap", "length": 0},
+                    "op": "above",
+                    "right": 5,
+                }
+            ]
+        },
+        "long_exit": {
+            "all": [{"left": {"kind": "price", "field": "close"}, "op": "below", "right": 0}]
+        },
+    }
+
+    response = stocked.post("/api/backtest/run", json=request)
+
+    assert response.status_code == 200
+    assert "pivot gap % above 5" in response.json()["reads"]

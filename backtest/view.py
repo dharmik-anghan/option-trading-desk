@@ -27,7 +27,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from analytics.indicators import Line, Pivots, atr, closes, ema, pivots, rsi, sma
+from analytics.indicators import (
+    Line,
+    Pivots,
+    atr,
+    closes,
+    ema,
+    pivot_gap,
+    pivot_gap_rank,
+    pivots,
+    rsi,
+    sma,
+)
 from backtest.resample import closes_at, resample
 from marketdata.models import Bar, Interval
 
@@ -87,6 +98,14 @@ class Frame:
     def atr(self, length: int = 14, ago: int = 0) -> float | None:
         return self._at(("atr", length), ago)
 
+    def pivot_gap(self, ago: int = 0) -> float | None:
+        """The S1-R1 width, as a percentage of the pivot."""
+        return self._at(("pivot_gap", 0), ago)
+
+    def pivot_gap_rank(self, length: int = 60, ago: int = 0) -> float | None:
+        """Where that width stands among the last `length` periods, 0 to 100."""
+        return self._at(("pivot_gap_rank", length), ago)
+
     def price(self, field: str, ago: int = 0) -> float | None:
         """One of a bar's four prices, `ago` closed bars back."""
         bar = self.ago(ago)
@@ -128,6 +147,10 @@ class Frame:
         name, length = key
         if name == "atr":
             return atr(self.bars, length)
+        if name == "pivot_gap":
+            return pivot_gap(self.bars)
+        if name == "pivot_gap_rank":
+            return pivot_gap_rank(self.bars, length)
         prices = closes(self.bars)
         if name == "sma":
             return sma(prices, length)

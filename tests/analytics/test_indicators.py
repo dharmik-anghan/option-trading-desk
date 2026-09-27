@@ -12,7 +12,19 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from analytics.indicators import Line, atr, closes, ema, pivots, rsi, sma, true_range
+from analytics.indicators import (
+    Line,
+    atr,
+    closes,
+    ema,
+    percentile_rank,
+    pivot_gap,
+    pivot_gap_rank,
+    pivots,
+    rsi,
+    sma,
+    true_range,
+)
 from marketdata.models import Bar
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -256,3 +268,102 @@ def test_rsi_against_wilders_published_example() -> None:
     # and it keeps tracking the published shape from there
     assert line[15] == pytest.approx(66.25, abs=0.01)
     assert line[16] == pytest.approx(66.48, abs=0.01)
+
+
+# --------------------------------------------------------------------------
+# The pivot gap, and what it actually measures
+# --------------------------------------------------------------------------
+
+
+def test_the_s1_to_r1_width_is_the_previous_range() -> None:
+    """The identity worth knowing before trusting the name.
+
+    R1 = 2P - L and S1 = 2P - H, so R1 - S1 = H - L exactly. The pivot cancels,
+    and this is a volatility measure wearing a pivot's name.
+    """
+    yesterday = _bars([(95.0, 112.0, 88.0, 103.0)])[0]
+
+    levels = pivots(yesterday)
+
+    assert levels.r1 - levels.s1 == pytest.approx(yesterday.high - yesterday.low)
+
+
+def test_pivot_gap_is_that_width_over_the_pivot() -> None:
+    """High 110, low 90, close 100: pivot 100, range 20, so 20%."""
+    bars = _bars([(95.0, 110.0, 90.0, 100.0), (100.0, 101.0, 99.0, 100.0)])
+
+    line = pivot_gap(bars)
+
+    assert line[0] is None  # nothing before the first bar to take a pivot from
+    assert line[1] == pytest.approx(20.0)
+
+
+def test_pivot_gap_is_comparable_across_price_levels() -> None:
+    """The reason for dividing by the pivot at all: the same proportional range
+    at two very different prices has to read the same."""
+    cheap = _bars([(95.0, 110.0, 90.0, 100.0), (100.0, 100.0, 100.0, 100.0)])
+    dear = _bars([(950.0, 1100.0, 900.0, 1000.0), (1000.0, 1000.0, 1000.0, 1000.0)])
+
+    assert pivot_gap(cheap)[1] == pytest.approx(pivot_gap(dear)[1])
+
+
+def test_percentile_rank_puts_the_lowest_at_zero_and_the_highest_at_one_hundred() -> None:
+    values: list[float | None] = [5.0, 4.0, 3.0, 2.0, 1.0, 0.5, 9.0]
+
+    line = percentile_rank(values, 5)
+
+    assert line[:5] == [None] * 5
+    assert line[5] == 0.0  # lower than all five before it
+    assert line[6] == 100.0  # higher than all five before it
+
+
+def test_percentile_rank_counts_only_what_is_strictly_below() -> None:
+    """A day that ties the quietest in the window reads as 0, not just above it."""
+    values: list[float | None] = [1.0, 2.0, 3.0, 4.0, 1.0]
+
+    assert percentile_rank(values, 4)[4] == 0.0
+
+
+def test_percentile_rank_is_measured_against_what_came_before() -> None:
+    """Not against a window including today, which could never reach its own
+    extremes."""
+    values: list[float | None] = [10.0, 20.0, 30.0, 40.0]
+
+    line = percentile_rank(values, 2)
+
+    # at index 2, the two before it are 10 and 20, and 30 beats both
+    assert line[2] == 100.0
+
+
+def test_percentile_rank_needs_a_full_window() -> None:
+    """A rank against three days when sixty were asked for is not a rank."""
+    values: list[float | None] = [1.0, 2.0, 3.0]
+
+    assert percentile_rank(values, 60) == [None, None, None]
+
+
+def test_percentile_rank_skips_bars_with_nothing_to_rank() -> None:
+    values: list[float | None] = [1.0, 2.0, 3.0, None]
+
+    assert percentile_rank(values, 3)[3] is None
+
+
+def test_a_squeeze_reads_near_zero() -> None:
+    """The setup this exists for: a quiet day after a run of wide ones."""
+    wide = [(100.0, 110.0, 90.0, 100.0)] * 20
+    quiet = [(100.0, 100.5, 99.5, 100.0)]
+    bars = _bars(wide + quiet + [(100.0, 100.0, 100.0, 100.0)])
+
+    rank = pivot_gap_rank(bars, 10)
+
+    assert rank[-1] == 0.0
+
+
+def test_the_gap_and_its_rank_cannot_see_the_bar_they_are_on() -> None:
+    """The same rule every other indicator here follows."""
+    bars = _walk(300)
+
+    everything = pivot_gap_rank(bars, 20)
+    truncated = pivot_gap_rank(bars[:150], 20)
+
+    assert everything[:150] == truncated

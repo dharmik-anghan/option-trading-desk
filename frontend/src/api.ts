@@ -870,9 +870,18 @@ export function getBarSeries(): Promise<BarSeries[]> {
 
 // --- Backtesting -----------------------------------------------------------
 
+/** What an indicator operand can name. */
+export type IndicatorName = "ema" | "sma" | "rsi" | "atr" | "pivot_gap" | "pivot_gap_rank";
+
 /** One side of a comparison: an indicator, a price, a pivot level, or a number. */
 export type Operand =
-  | { kind: "indicator"; name: "ema" | "sma" | "rsi" | "atr"; length: number; ago?: number; tf?: string }
+  | {
+      kind: "indicator";
+      name: IndicatorName;
+      length: number;
+      ago?: number;
+      tf?: string;
+    }
   | { kind: "price"; field: "open" | "high" | "low" | "close"; ago?: number; tf?: string }
   | { kind: "pivot"; level: string; ago?: number; tf?: string }
   | { kind: "value"; value: number };
@@ -1034,6 +1043,10 @@ export interface IndicatorLine {
   name: string;
   length: number;
   interval: string | null;
+  /** Whether it is a price and belongs on the price axis. An RSI runs 0–100 and
+      a pivot-gap percentile likewise; drawn against price they would flatten
+      every candle into a line at the bottom of the chart. */
+  on_price: boolean;
   /** Null where the indicator was not yet defined, or — on a higher timeframe —
       repeated across the bars for which that value was the newest closed one. */
   values: (number | null)[];

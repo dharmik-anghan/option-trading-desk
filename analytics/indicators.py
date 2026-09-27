@@ -221,6 +221,82 @@ def pivots(previous: Bar) -> Pivots:
     )
 
 
+def pivot_gap(bars: Sequence[Bar]) -> Line:
+    """The distance from S1 to R1, as a percentage of the pivot.
+
+    Worth being straight about what this measures, because the algebra is not
+    obvious and the name suggests something it is not. With standard pivots
+    R1 = 2P - L and S1 = 2P - H, so:
+
+        R1 - S1 = (2P - L) - (2P - H) = H - L
+
+    The pivot cancels exactly. The S1-R1 width *is* the previous period's range,
+    and nothing about the pivot formula survives into it. Dividing by the pivot is
+    what makes the figure worth having: a 2,000 point range is wide on Bitcoin at
+    30,000 and narrow at 120,000, and only the percentage is comparable across a
+    three-year window.
+
+    So this is a volatility measure wearing a pivot's name. That is fine - a
+    narrow prior range before an expansion is one of the older setups there is -
+    but a rule built on it should know it is trading volatility rather than
+    anything about support and resistance.
+
+    Causal by construction: the value at bar `i` comes from bar `i - 1`, which is
+    the same rule the pivot levels themselves follow.
+    """
+    out: Line = [None] * len(bars)
+    for i in range(1, len(bars)):
+        previous = bars[i - 1]
+        pivot = (previous.high + previous.low + previous.close) / 3.0
+        if pivot <= 0:
+            continue
+        out[i] = (previous.high - previous.low) / pivot * 100.0
+    return out
+
+
+def percentile_rank(values: Sequence[float | None], length: int) -> Line:
+    """Where each value stands among the `length` before it, from 0 to 100.
+
+    0 means nothing in the window was lower - today is the narrowest, the
+    quietest, the smallest of the last `length`. 100 means nothing was higher.
+
+    Compared against the *previous* `length` values and not against a window that
+    includes today, so the answer is "how does today compare with what came
+    before" rather than a figure that can never quite reach its own extremes.
+    Strictly less than, so a day that ties the quietest in the window reads as 0
+    rather than as slightly above it.
+
+    Undefined until there are `length` earlier values to compare against, and at
+    any bar whose own value is undefined - a rank against nothing is not zero.
+    """
+    _check(length)
+    out: Line = [None] * len(values)
+    for i in range(length, len(values)):
+        current = values[i]
+        if current is None:
+            continue
+        window = [v for v in values[i - length : i] if v is not None]
+        if len(window) < length:
+            continue
+        below = sum(1 for v in window if v < current)
+        out[i] = below / length * 100.0
+    return out
+
+
+def pivot_gap_rank(bars: Sequence[Bar], length: int = 60) -> Line:
+    """How today's S1-R1 width compares with the last `length` periods.
+
+    The squeeze reading: a rank near 0 says the previous period's range was among
+    the narrowest of the window, which is the condition a range expansion tends to
+    follow. Near 100 says the opposite, and a rule that enters on a breakout there
+    is buying after the move rather than before it.
+
+    Read on the timeframe the pivots are drawn on - daily, for a daily pivot - so
+    `length` counts days rather than bars of whatever is being traded.
+    """
+    return percentile_rank(pivot_gap(bars), length)
+
+
 def closes(bars: Sequence[Bar]) -> list[float]:
     """Closing prices, the input most of these want."""
     return [b.close for b in bars]

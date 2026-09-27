@@ -1,4 +1,4 @@
-import type { Operand } from "../../api";
+import type { IndicatorName, Operand } from "../../api";
 
 interface Props {
   value: Operand;
@@ -9,11 +9,20 @@ interface Props {
 }
 
 const INDICATORS = [
-  { id: "ema", name: "EMA" },
-  { id: "sma", name: "SMA" },
-  { id: "rsi", name: "RSI" },
-  { id: "atr", name: "ATR" },
+  { id: "ema", name: "EMA", period: "Period" },
+  { id: "sma", name: "SMA", period: "Period" },
+  { id: "rsi", name: "RSI", period: "Period" },
+  { id: "atr", name: "ATR", period: "Period" },
+  { id: "pivot_gap", name: "Pivot gap %", period: "" },
+  {
+    id: "pivot_gap_rank",
+    name: "Pivot gap percentile",
+    period: "How many previous periods to rank against",
+  },
 ] as const;
+
+/** Which indicators take no period at all. */
+const NO_PERIOD = new Set(["pivot_gap"]);
 
 const FIELDS = ["close", "open", "high", "low"] as const;
 const LEVELS = ["S3", "S2", "S1", "P", "R1", "R2", "R3"] as const;
@@ -59,9 +68,15 @@ export function OperandPicker({ value, onChange, intervals, traded }: Props) {
         <>
           <select
             value={value.name}
-            onChange={(e) =>
-              onChange({ ...value, name: e.target.value as "ema" | "sma" | "rsi" | "atr" })
-            }
+            onChange={(e) => {
+              const picked = e.target.value as IndicatorName;
+              // Sixty when switching to the percentile: a quarter's worth of
+              // daily pivots. Carrying a 9 across from an EMA would rank today
+              // against nine days, which is too short a window to call anything
+              // a low.
+              const length = picked === "pivot_gap_rank" ? 60 : value.length || 14;
+              onChange({ ...value, name: picked, length });
+            }}
           >
             {INDICATORS.map((i) => (
               <option key={i.id} value={i.id}>
@@ -69,14 +84,18 @@ export function OperandPicker({ value, onChange, intervals, traded }: Props) {
               </option>
             ))}
           </select>
-          <input
-            className="num"
-            type="number"
-            min={1}
-            value={value.length}
-            onChange={(e) => onChange({ ...value, length: Math.max(1, Number(e.target.value)) })}
-            title="Period"
-          />
+          {!NO_PERIOD.has(value.name) && (
+            <input
+              className="num"
+              type="number"
+              min={1}
+              value={value.length}
+              onChange={(e) =>
+                onChange({ ...value, length: Math.max(1, Number(e.target.value)) })
+              }
+              title={INDICATORS.find((i) => i.id === value.name)?.period ?? "Period"}
+            />
+          )}
         </>
       )}
 

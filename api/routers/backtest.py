@@ -179,6 +179,10 @@ class LineOut(BaseModel):
     length: int
     #: The timeframe it is read on, when that is not the one being traded.
     interval: str | None
+    #: Whether this is a price and belongs on the price axis. An RSI runs 0-100
+    #: and a pivot-gap percentile likewise; drawn against price they would each
+    #: flatten every candle into a line at the bottom of the chart.
+    on_price: bool
     #: Null wherever the indicator was not yet defined, or - on a higher
     #: timeframe - repeated across the bars for which that value was the newest
     #: one that had closed. Which is exactly what the rule saw.
@@ -332,12 +336,23 @@ def _lines(
     out: list[LineOut] = []
     for (name, length, interval), values in collected.items():
         where = f" {interval}" if interval and interval != size else ""
+        # These two are on their own scale - a percentage of price, and a rank
+        # from 0 to 100 - so drawing them against the price axis would flatten
+        # every candle on the chart. Named plainly; the frontend keeps them off
+        # the price panel.
+        if name == "pivot_gap":
+            label = f"Pivot gap %{where}"
+        elif name == "pivot_gap_rank":
+            label = f"Pivot gap percentile {length}{where}"
+        else:
+            label = f"{name.upper()} {length}{where}"
         out.append(
             LineOut(
-                label=f"{name.upper()} {length}{where}",
+                label=label,
                 name=name,
                 length=length,
                 interval=str(interval) if interval else None,
+                on_price=name in ("ema", "sma"),
                 values=values,
             )
         )
@@ -353,6 +368,10 @@ def _read(frame: Frame, name: str, length: int) -> float | None:
         return frame.rsi(length)
     if name == "atr":
         return frame.atr(length)
+    if name == "pivot_gap":
+        return frame.pivot_gap()
+    if name == "pivot_gap_rank":
+        return frame.pivot_gap_rank(length)
     return None
 
 

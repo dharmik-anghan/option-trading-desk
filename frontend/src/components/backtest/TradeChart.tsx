@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getBacktestCandles } from "../../api";
 import type { BacktestTrade, Candle, IndicatorLine, StrategySpec } from "../../api";
 import { CandleChart } from "../CandleChart";
+import { Oscillator } from "./Oscillator";
 import type { Overlay } from "../CandleChart";
 
 interface Props {
@@ -75,8 +76,12 @@ export function TradeChart({ trade, source, symbol, interval, spec, onClose }: P
       { at: trade.closed_at, price: trade.exit_price, kind: "exit", side: long ? "long" : "short" },
     ],
     band: { from: trade.opened_at, to: trade.closed_at },
-    lines: lines.map((l) => ({ label: l.label, values: l.values })),
+    // Only the ones that are prices. The rest get their own panel below, or a
+    // percentile running 0 to 100 would sit on the floor of a chart scaled to
+    // Bitcoin and flatten every candle above it.
+    lines: lines.filter((l) => l.on_price).map((l) => ({ label: l.label, values: l.values })),
   };
+  const oscillators = lines.filter((l) => !l.on_price);
 
   return (
     <section className="tradechart">
@@ -123,6 +128,12 @@ export function TradeChart({ trade, source, symbol, interval, spec, onClose }: P
           overlay={overlay}
         />
       )}
+
+      {candles !== null &&
+        candles.length > 0 &&
+        oscillators.map((line) => (
+          <Oscillator key={line.label} line={line} colour={lines.indexOf(line)} />
+        ))}
     </section>
   );
 }

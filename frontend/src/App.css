@@ -2656,3 +2656,42 @@ a.nitem:hover .nhead {
 .bt .tradechart .key.i2::before { background: var(--i2); }
 .bt .tradechart .key.i3::before { background: var(--i3); }
 .bt .tradechart .key.i4::before { background: var(--i4); }
+
+/* An indicator that is not a price, under the candles on its own scale. */
+.bt .osc {
+  display: block;
+  width: 100%;
+  height: 76px;
+  margin-top: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.osc .osclabel {
+  font-size: 9px;
+  fill: var(--dim);
+}
+.osc .oscguide {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.osc .oscaxis,
+.osc .osclast {
+  font-size: 9px;
+  fill: var(--dim);
+}
+.osc .osclast {
+  fill: var(--fg);
+}
+.osc .oscline {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.osc .oscline.i0 { stroke: var(--i0); }
+.osc .oscline.i1 { stroke: var(--i1); }
+.osc .oscline.i2 { stroke: var(--i2); }
+.osc .oscline.i3 { stroke: var(--i3); }
+.osc .oscline.i4 { stroke: var(--i4); }

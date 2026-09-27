@@ -38,8 +38,15 @@ from backtest.sessions import PRESETS, WEEKDAYS, Session, preset
 from backtest.view import Frame, View
 from marketdata.models import Interval
 
-#: Indicators an operand may name, against how many arguments they take.
-INDICATORS = ("ema", "sma", "rsi", "atr")
+#: Indicators an operand may name.
+#:
+#: `pivot_gap` and `pivot_gap_rank` take a period that means something different
+#: from the others: it is how many previous periods the rank is measured against,
+#: not a smoothing length, and `pivot_gap` itself ignores it entirely.
+INDICATORS = ("ema", "sma", "rsi", "atr", "pivot_gap", "pivot_gap_rank")
+
+#: Which of them do not average anything, so a period of 1 is not a mistake.
+UNSMOOTHED = frozenset({"pivot_gap"})
 
 #: A bar's four prices.
 FIELDS = ("open", "high", "low", "close")
@@ -126,6 +133,10 @@ class Operand:
             return frame.rsi(self.length, self.ago)
         if self.name == "atr":
             return frame.atr(self.length, self.ago)
+        if self.name == "pivot_gap":
+            return frame.pivot_gap(self.ago)
+        if self.name == "pivot_gap_rank":
+            return frame.pivot_gap_rank(self.length, self.ago)
         raise SpecError(f"there is no indicator called {self.name!r}")
 
     def _arithmetic(self, view: View) -> float | None:
@@ -156,6 +167,10 @@ class Operand:
             assert self.left and self.right
             return f"({self.left.describe()} {self.op} {self.right.describe()})"
         if self.kind == "indicator":
+            if self.name == "pivot_gap":
+                return f"pivot gap %{where}{back}"
+            if self.name == "pivot_gap_rank":
+                return f"pivot gap percentile over {self.length}{where}{back}"
             return f"{self.name.upper()} {self.length}{where}{back}"
         if self.kind == "price":
             return f"{self.name}{where}{back}"
@@ -463,7 +478,7 @@ def operand(raw: Any) -> Operand:
                 f"pick one of {', '.join(INDICATORS)}"
             )
         length = _whole(raw.get("length", 14), "length")
-        if length < 1:
+        if length < 1 and name not in UNSMOOTHED:
             raise SpecError(f"{name.upper()} needs a period of at least 1")
         return Operand(kind="indicator", name=name, length=length, ago=ago, interval=interval)
     if kind == "pivot":
