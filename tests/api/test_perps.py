@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
@@ -18,8 +18,8 @@ from fastapi.testclient import TestClient
 
 from api.routers import perps as perps_router
 from broker.errors import BrokerError
+from broker.models import Candle, OrderResult, Tick
 from broker.models import OrderRequest as BrokerOrderRequest
-from broker.models import OrderResult, Tick
 from broker.shark.models import ContractSpec, PerpPosition
 from streaming import TickHub
 
@@ -138,14 +138,20 @@ class Stub:
         #: (symbol, side, quantity) for each close asked of this stub.
         self.closed: list[tuple[str, str, float]] = []
         self.refuse_close: str | None = None
+        self.history: list[Candle] = []
 
     def get_contracts(self) -> dict[str, ContractSpec]:
         """The real venue's published limits, copied once into SPECS above."""
         return SPECS
 
     def get_history(self, symbol: str, resolution: str, date_from: object, date_to: object) -> list:  # type: ignore[type-arg]
-        """No candles from a stub; the parsers are tested against real ones."""
-        return []
+        """Whatever a test put in `history`, and nothing by default.
+
+        Empty is right for most of these: the parsers are tested against real
+        responses in tests/broker/. A test that needs a series - anything about
+        drawing on the chart - fills this in.
+        """
+        return self.history
 
     def place_order(self, order: BrokerOrderRequest) -> OrderResult:
         if self.refuse_order is not None:
@@ -739,3 +745,79 @@ class TestClosingAPosition:
         # a short closes by buying
         assert row["side"] == "BUY"
         assert row["quantity"] == 0.002
+
+
+def _stub_candles(n: int = 120) -> list[Candle]:
+    """A rising series for the chart tests to draw on."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    return [
+        Candle(
+            timestamp=start + timedelta(hours=i),
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.5 + i,
+            volume=1.0,
+        )
+        for i in range(n)
+    ]
+
+
+def test_candles_carry_the_indicators_that_were_asked_for(
+    client: TestClient, stub_venue: Stub
+) -> None:
+    """The desk's chart draws lines through the same code a backtest reads them
+    with, so the EMA here and the EMA a rule trades on are the same number."""
+    stub_venue.history = _stub_candles()
+
+    response = client.get(
+        "/api/perps/candles/BTCUSDT",
+        params={"resolution": "60", "days": 5, "indicators": "ema:5,rsi:14"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    labels = {line["label"]: line for line in body["lines"]}
+    assert set(labels) == {"EMA 5", "RSI 14"}
+    for line in body["lines"]:
+        assert len(line["values"]) == len(body["candles"])
+    # an RSI is 0-100 and would be a flat line along the bottom of a price chart
+    assert labels["EMA 5"]["on_price"] is True
+    assert labels["RSI 14"]["on_price"] is False
+
+
+def test_candles_without_indicators_carry_none(client: TestClient) -> None:
+    body = client.get("/api/perps/candles/BTCUSDT", params={"resolution": "60"}).json()
+
+    assert body["lines"] == []
+
+
+def test_an_unreadable_indicator_is_dropped_rather_than_refusing_the_chart(
+    client: TestClient, stub_venue: Stub
+) -> None:
+    """A chart is worth drawing without a line somebody mistyped. The endpoint
+    that has to be strict about this is the one that runs a strategy."""
+    stub_venue.history = _stub_candles()
+
+    response = client.get(
+        "/api/perps/candles/BTCUSDT",
+        params={"resolution": "60", "indicators": "ema:20,macd:9,ema:notanumber"},
+    )
+
+    assert response.status_code == 200
+    assert [line["label"] for line in response.json()["lines"]] == ["EMA 20"]
+
+
+def test_an_indicator_cannot_be_read_on_a_shorter_timeframe_than_the_chart(
+    client: TestClient, stub_venue: Stub
+) -> None:
+    """The same rule the backtester enforces, for the same reason: a five-minute
+    line on an hourly chart would be showing bars the chart does not have."""
+    stub_venue.history = _stub_candles()
+
+    response = client.get(
+        "/api/perps/candles/BTCUSDT",
+        params={"resolution": "60", "indicators": "ema:20:5m,ema:50:4h"},
+    )
+
+    assert [line["label"] for line in response.json()["lines"]] == ["EMA 50 4h"]

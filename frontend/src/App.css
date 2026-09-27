@@ -2657,11 +2657,16 @@ a.nitem:hover .nhead {
 .bt .tradechart .key.i3::before { background: var(--i3); }
 .bt .tradechart .key.i4::before { background: var(--i4); }
 
-/* An indicator that is not a price, under the candles on its own scale. */
-.bt .osc {
+/* An indicator that is not a price, under the candles on its own scale.
+   Unscoped: this is drawn on the trading desk as well as in the backtester, and
+   the version that was scoped to .bt left the desk's copy with no height at all
+   - an SVG with a viewBox and no size fills whatever it is given and scales its
+   contents with it, which turned a 9px label into a headline. */
+.osc {
   display: block;
   width: 100%;
   height: 76px;
+  flex: none;
   margin-top: 4px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -2695,3 +2700,133 @@ a.nitem:hover .nhead {
 .osc .oscline.i2 { stroke: var(--i2); }
 .osc .oscline.i3 { stroke: var(--i3); }
 .osc .oscline.i4 { stroke: var(--i4); }
+
+/* ── Choosing indicators on a live chart ───────────────────────────────────
+   A small popover off the chart header rather than a rail: lines are chosen
+   once and then looked at for weeks, so the control should be out of the way
+   the rest of the time. */
+.indmenu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 20;
+  width: 300px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+}
+.indmenu > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--grid);
+  font-family: var(--u);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.indmenu > header .sp {
+  flex: 1;
+}
+.indmenu .indrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+}
+.indmenu .indrow + .indrow {
+  border-top: 1px dashed var(--grid);
+}
+.indmenu select,
+.indmenu input {
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 2px 4px;
+  min-width: 0;
+}
+.indmenu select {
+  flex: 1;
+}
+.indmenu input.num {
+  width: 48px;
+}
+.indmenu .dot {
+  width: 9px;
+  height: 2px;
+  flex: none;
+}
+.indmenu .dot.i0 { background: var(--i0); }
+.indmenu .dot.i1 { background: var(--i1); }
+.indmenu .dot.i2 { background: var(--i2); }
+.indmenu .dot.i3 { background: var(--i3); }
+.indmenu .dot.i4 { background: var(--i4); }
+.indmenu .drop {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.indmenu .drop:hover {
+  color: var(--sell);
+  border-color: var(--line);
+}
+.indmenu .off {
+  margin: 2px 0 6px;
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+}
+.indmenu .adds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--grid);
+}
+.indmenu .adds button {
+  font: inherit;
+  font-size: 10px;
+  padding: 2px 7px;
+  color: var(--you);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.indmenu .adds button:hover {
+  border-color: var(--you);
+}
+.indmenu .say {
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--dim);
+}
+/* The oscillator panel sits inside the chart body on the desk, so it must not
+   grow the panel - the candles give up the height instead. */
+/* The body is the popover's frame, so it has to be a positioning context. */
+.chartpb {
+  /* The popover over the chart is positioned against this. */
+  position: relative;
+  /* And a column, so an oscillator panel sits under the candles rather than
+     beside them: the body was a plain flex row, which put the two side by side
+     and squeezed the chart into a strip. */
+  flex-direction: column;
+}
+.chartpb .osc {
+  margin-top: 3px;
+}

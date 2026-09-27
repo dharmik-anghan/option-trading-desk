@@ -681,6 +681,21 @@ export function getPerpsDesk(): Promise<PerpsDesk> {
   return getJson<PerpsDesk>("/api/perps");
 }
 
+/** One indicator from the strategy, aligned bar for bar with the candles. */
+export interface IndicatorLine {
+  label: string;
+  name: string;
+  length: number;
+  interval: string | null;
+  /** Whether it is a price and belongs on the price axis. An RSI runs 0–100 and
+      a pivot-gap percentile likewise; drawn against price they would flatten
+      every candle into a line at the bottom of the chart. */
+  on_price: boolean;
+  /** Null where the indicator was not yet defined, or — on a higher timeframe —
+      repeated across the bars for which that value was the newest closed one. */
+  values: (number | null)[];
+}
+
 export interface CandlesResponse {
   /** Whose candles these are. On a chart with an order ticket beside it this is not
       decoration: a price from a source you are not trading is the wrong price. */
@@ -688,15 +703,23 @@ export interface CandlesResponse {
   /** Why the series may be short or stale, when there is a reason worth saying. */
   note: string;
   candles: Candle[];
+  /** Indicators that were asked for, computed by the backend through the same
+      code a backtest reads them with — so the EMA drawn here and the EMA a rule
+      would trade on are the same number. */
+  lines: IndicatorLine[];
 }
 
 export function getPerpCandles(
   symbol: string,
   resolution: string,
   days: number,
+  /** "ema:20,ema:50,rsi:14" — or with a timeframe, "ema:50:4h". */
+  indicators = "",
 ): Promise<CandlesResponse> {
+  const query = new URLSearchParams({ resolution, days: String(days) });
+  if (indicators) query.set("indicators", indicators);
   return getJson<CandlesResponse>(
-    `/api/perps/candles/${encodeURIComponent(symbol)}?resolution=${resolution}&days=${days}`,
+    `/api/perps/candles/${encodeURIComponent(symbol)}?${query}`,
   );
 }
 
@@ -1035,21 +1058,6 @@ export interface BacktestResult {
   skipped_too_small: number;
   skipped_unaffordable: number;
   caveats: string[];
-}
-
-/** One indicator from the strategy, aligned bar for bar with the candles. */
-export interface IndicatorLine {
-  label: string;
-  name: string;
-  length: number;
-  interval: string | null;
-  /** Whether it is a price and belongs on the price axis. An RSI runs 0–100 and
-      a pivot-gap percentile likewise; drawn against price they would flatten
-      every candle into a line at the bottom of the chart. */
-  on_price: boolean;
-  /** Null where the indicator was not yet defined, or — on a higher timeframe —
-      repeated across the bars for which that value was the newest closed one. */
-  values: (number | null)[];
 }
 
 export interface WindowResponse {

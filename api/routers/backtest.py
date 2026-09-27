@@ -22,12 +22,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backtest.engine import Execution, run
+from backtest.lines import compute
 from backtest.market import FundingSchedule, PerpetualMarket
 from backtest.metrics import Metrics, measure
 from backtest.resample import resample
 from backtest.rules import SpecRule
 from backtest.spec import SpecError, StrategySpec, parse
-from backtest.view import Frame, build, wind
 from marketdata import BarService, Interval
 from marketdata.models import Bar
 from marketdata.store import BarStore
@@ -313,66 +313,21 @@ def _lines(
 ) -> list[LineOut]:
     """Each indicator's value at each bar of the window.
 
-    Walked through the engine's own view so that a higher-timeframe line is what
-    the rule actually saw: the newest value that had *closed* by that bar, held
-    flat until the next one closes. Drawing the true hourly value against a
-    five-minute bar inside that hour would draw information the rule did not
-    have, which is the same lie the engine exists to avoid - just in pixels.
+    Through `backtest.lines`, which the trading desk's own chart also uses: two
+    charts in the same app disagreeing about where an EMA 20 sits would be worse
+    than either being wrong alone.
     """
-    wanted = spec.indicators()
-    context = tuple(i for _, _, i in wanted if i is not None and i != size)
-    view, cursors = build(bars, size, tuple(dict.fromkeys(context)))
-
-    collected: dict[tuple[str, int, Interval | None], list[float | None]] = {
-        key: [] for key in wanted
-    }
-    for i in inside:
-        wind(view, cursors, i)
-        for key in wanted:
-            name, length, interval = key
-            frame = view.frame(interval) if interval and interval != size else view.base
-            collected[key].append(_read(frame, name, length))
-
-    out: list[LineOut] = []
-    for (name, length, interval), values in collected.items():
-        where = f" {interval}" if interval and interval != size else ""
-        # These two are on their own scale - a percentage of price, and a rank
-        # from 0 to 100 - so drawing them against the price axis would flatten
-        # every candle on the chart. Named plainly; the frontend keeps them off
-        # the price panel.
-        if name == "pivot_gap":
-            label = f"Pivot gap %{where}"
-        elif name == "pivot_gap_rank":
-            label = f"Pivot gap percentile {length}{where}"
-        else:
-            label = f"{name.upper()} {length}{where}"
-        out.append(
-            LineOut(
-                label=label,
-                name=name,
-                length=length,
-                interval=str(interval) if interval else None,
-                on_price=name in ("ema", "sma"),
-                values=values,
-            )
+    return [
+        LineOut(
+            label=drawn.label,
+            name=drawn.name,
+            length=drawn.length,
+            interval=str(drawn.interval) if drawn.interval else None,
+            on_price=drawn.on_price,
+            values=drawn.values,
         )
-    return out
-
-
-def _read(frame: Frame, name: str, length: int) -> float | None:
-    if name == "ema":
-        return frame.ema(length)
-    if name == "sma":
-        return frame.sma(length)
-    if name == "rsi":
-        return frame.rsi(length)
-    if name == "atr":
-        return frame.atr(length)
-    if name == "pivot_gap":
-        return frame.pivot_gap()
-    if name == "pivot_gap_rank":
-        return frame.pivot_gap_rank(length)
-    return None
+        for drawn in compute(bars, size, spec.indicators(), inside)
+    ]
 
 
 @router.post("/run", response_model=RunResponse)

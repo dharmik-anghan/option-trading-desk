@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getBacktestCandles } from "../../api";
 import type { BacktestTrade, Candle, IndicatorLine, StrategySpec } from "../../api";
 import { CandleChart } from "../CandleChart";
-import { Oscillator } from "./Oscillator";
+import { Oscillator } from "../Oscillator";
 import type { Overlay } from "../CandleChart";
 
 interface Props {

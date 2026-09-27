@@ -1,4 +1,4 @@
-import type { IndicatorLine } from "../../api";
+import type { IndicatorLine } from "../api";
 
 interface Props {
   line: IndicatorLine;

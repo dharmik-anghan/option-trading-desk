@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { PerpsDesk as Desk } from "../api";
 import { getPerpCandles } from "../api";
 import { useLive } from "../useLive";
 import { CandleChart } from "./CandleChart";
+import { IndicatorButton, IndicatorMenu, asQuery, remembered } from "./IndicatorPicker";
+import type { Pick } from "./IndicatorPicker";
+import { Oscillator } from "./Oscillator";
 
 interface Props {
   desk: Desk | null;
@@ -37,6 +40,19 @@ const FRAMES: { label: string; resolution: string; days: number }[] = [
  */
 export function PerpsChart({ desk, selected, last }: Props) {
   const [frame, setFrame] = useState(FRAMES[2]);
+  // Remembered across reloads: an indicator set is a way of looking at a market
+  // rather than a per-visit choice, and having to put the same two EMAs back on
+  // every morning is the kind of small friction that stops a chart being used.
+  const [picks, setPicks] = useState<Pick[]>(remembered);
+  const [picking, setPicking] = useState(false);
+  const indicators = useMemo(() => asQuery(picks), [picks]);
+
+  // Only timeframes above this chart's, because a line cannot be read on a
+  // shorter one than the bars it is drawn against.
+  const higher = useMemo(() => {
+    const here = FRAMES.findIndex((f) => f.label === frame.label);
+    return FRAMES.slice(here + 1).map((f) => f.label);
+  }, [frame.label]);
 
   // Through the same hook everything else polls with, rather than a hand-rolled
   // effect: it drops a response that arrived after its request was superseded,
@@ -47,11 +63,14 @@ export function PerpsChart({ desk, selected, last }: Props) {
   // appears without a reload. Cheap at this rate, and the live price line covers
   // everything that happens inside the current bar.
   const candles = useLive(
-    () => getPerpCandles(selected, frame.resolution, frame.days),
+    () => getPerpCandles(selected, frame.resolution, frame.days, indicators),
     CANDLES_MS,
-    [selected, frame.resolution, frame.days],
+    [selected, frame.resolution, frame.days, indicators],
   );
   const rows = candles.data?.candles ?? [];
+  const lines = candles.data?.lines ?? [];
+  const onPrice = lines.filter((l) => l.on_price);
+  const oscillators = lines.filter((l) => !l.on_price);
 
   const instrument = desk?.instruments.find((i) => i.symbol === selected);
   const dp = instrument?.price_dp ?? 2;
@@ -64,6 +83,11 @@ export function PerpsChart({ desk, selected, last }: Props) {
           {last === null ? "no price yet" : `${last.toFixed(dp)} ${desk?.quote_currency ?? ""}`}
         </span>
         <span className="sp" />
+        <IndicatorButton
+          count={picks.length}
+          open={picking}
+          onToggle={() => setPicking((p) => !p)}
+        />
         <div className="frames" role="tablist" aria-label="Timeframe">
           {FRAMES.map((f) => (
             <button
@@ -80,6 +104,17 @@ export function PerpsChart({ desk, selected, last }: Props) {
       </div>
 
       <div className="pb chartpb">
+        {/* Over the chart rather than under the button: the header scrolls
+            sideways when it runs out of room, and anything positioned inside a
+            scrolling box is clipped by it. */}
+        {picking && (
+          <IndicatorMenu
+            picks={picks}
+            onChange={setPicks}
+            higher={higher}
+            onClose={() => setPicking(false)}
+          />
+        )}
         {candles.error && !rows.length && (
           <p className="err">Candles unavailable: {candles.error.message}</p>
         )}
@@ -95,8 +130,15 @@ export function PerpsChart({ desk, selected, last }: Props) {
             seriesId={`${selected}:${frame.resolution}`}
             last={last}
             dp={dp}
+            overlay={{
+              lines: onPrice.map((l) => ({ label: l.label, values: l.values })),
+            }}
           />
         )}
+        {rows.length > 0 &&
+          oscillators.map((line) => (
+            <Oscillator key={line.label} line={line} colour={lines.indexOf(line)} />
+          ))}
       </div>
 
       <div className="chartfoot">
