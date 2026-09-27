@@ -25,6 +25,20 @@ from marketdata.models import Bar, Interval
 
 
 @dataclass(frozen=True)
+class SideSummary:
+    """One side of the book, on its own."""
+
+    trades: int
+    wins: int
+    gross: float
+    net: float
+
+    @property
+    def win_rate(self) -> float:
+        return self.wins / self.trades if self.trades else 0.0
+
+
+@dataclass(frozen=True)
 class Metrics:
     """What a run came to."""
 
@@ -56,6 +70,11 @@ class Metrics:
     average_bars_held: float
     #: How each trade ended. The most diagnostic thing in here.
     endings: dict[str, int]
+    #: Longs and shorts kept apart. A strategy written both ways is really two
+    #: strategies sharing a name, and they rarely work equally: one side usually
+    #: carries the whole result, which a single figure cannot show. It is also
+    #: how you notice a side that never traded at all.
+    by_side: dict[str, SideSummary]
 
     @property
     def win_rate(self) -> float:
@@ -109,7 +128,22 @@ def measure(
         worst=min((t.net for t in trades), default=0.0),
         average_bars_held=(held / len(trades) / interval.seconds) if trades else 0.0,
         endings=endings,
+        by_side=_by_side(trades),
     )
+
+
+def _by_side(trades: Sequence[Trade]) -> dict[str, SideSummary]:
+    """Longs and shorts, separately. Only sides that actually traded."""
+    out: dict[str, SideSummary] = {}
+    for side in {t.side for t in trades}:
+        mine = [t for t in trades if t.side is side]
+        out[str(side)] = SideSummary(
+            trades=len(mine),
+            wins=sum(1 for t in mine if t.won),
+            gross=sum(t.gross for t in mine),
+            net=sum(t.net for t in mine),
+        )
+    return out
 
 
 def max_drawdown(equity: Sequence[float]) -> float:

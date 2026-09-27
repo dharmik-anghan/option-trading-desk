@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getBarSeries, runBacktest } from "../api";
-import type { BacktestResult, BarSeries, Group, Level, StrategySpec } from "../api";
+import type { BacktestResult, BarSeries, Group, Level, Sizing, StrategySpec } from "../api";
 import { ConditionList } from "./backtest/ConditionList";
 import { LevelPicker } from "./backtest/LevelPicker";
 import { RunResult } from "./backtest/RunResult";
@@ -69,6 +69,16 @@ export function Backtesting({ onHome }: Props) {
   const [leverage, setLeverage] = useState(1);
   const [slippage, setSlippage] = useState(1);
   const [maker, setMaker] = useState(false);
+  // How each position is sized. "quantity" is the lot you would type into the
+  // ticket; the venue's own floors sit beside it, because a size it would refuse
+  // is not a size a result may assume.
+  const [sizing, setSizing] = useState<Sizing>("equity");
+  const [risk, setRisk] = useState(100);
+  const [lot, setLot] = useState(0.002);
+  const [notional, setNotional] = useState(1000);
+  const [minQuantity, setMinQuantity] = useState(0.002);
+  const [minNotional, setMinNotional] = useState(115);
+  const [quantityDp, setQuantityDp] = useState(3);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +127,13 @@ export function Backtesting({ onHome }: Props) {
       leverage,
       slippage_bps: slippage,
       maker_entry: maker,
+      sizing,
+      risk: risk / 100,
+      quantity: lot,
+      notional,
+      min_quantity: minQuantity,
+      min_notional: minNotional,
+      quantity_dp: quantityDp,
     })
       .then((r) => {
         setResult(r);
@@ -207,6 +224,57 @@ export function Backtesting({ onHome }: Props) {
             <small>USDT</small>
           </div>
           <div className="row">
+            <label>Size each</label>
+            <select value={sizing} onChange={(e) => setSizing(e.target.value as Sizing)}>
+              <option value="equity">as a share of the account</option>
+              <option value="quantity">as a fixed lot</option>
+              <option value="notional">as a fixed amount of money</option>
+            </select>
+          </div>
+          {sizing === "equity" && (
+            <div className="row">
+              <label />
+              <input
+                className="num"
+                type="number"
+                min={1}
+                max={100}
+                value={risk}
+                onChange={(e) =>
+                  setRisk(Math.min(100, Math.max(1, Number(e.target.value))))
+                }
+              />
+              <small>% of the account — it compounds, so a losing run trades smaller</small>
+            </div>
+          )}
+          {sizing === "quantity" && (
+            <div className="row">
+              <label />
+              <input
+                className="num wide"
+                type="number"
+                min={0}
+                step="0.001"
+                value={lot}
+                onChange={(e) => setLot(Math.max(0, Number(e.target.value)))}
+              />
+              <small>contracts, every trade — the lot you would type in</small>
+            </div>
+          )}
+          {sizing === "notional" && (
+            <div className="row">
+              <label />
+              <input
+                className="num wide"
+                type="number"
+                min={0}
+                value={notional}
+                onChange={(e) => setNotional(Math.max(0, Number(e.target.value)))}
+              />
+              <small>USDT at work, whatever the account is worth</small>
+            </div>
+          )}
+          <div className="row">
             <label>Leverage</label>
             <input
               className="num"
@@ -229,6 +297,41 @@ export function Backtesting({ onHome }: Props) {
               onChange={(e) => setSlippage(Math.max(0, Number(e.target.value)))}
             />
             <small>basis points, always against you</small>
+          </div>
+          <div className="row">
+            <label>Smallest</label>
+            <input
+              className="num wide"
+              type="number"
+              min={0}
+              step="0.001"
+              value={minQuantity}
+              onChange={(e) => setMinQuantity(Math.max(0, Number(e.target.value)))}
+              title="The venue's minimum quantity"
+            />
+            <input
+              className="num"
+              type="number"
+              min={0}
+              value={minNotional}
+              onChange={(e) => setMinNotional(Math.max(0, Number(e.target.value)))}
+              title="The venue's minimum order value, which usually binds first"
+            />
+            <small>lot / USDT the venue accepts</small>
+          </div>
+          <div className="row">
+            <label>Decimals</label>
+            <input
+              className="num"
+              type="number"
+              min={0}
+              max={8}
+              value={quantityDp}
+              onChange={(e) =>
+                setQuantityDp(Math.min(8, Math.max(0, Number(e.target.value))))
+              }
+            />
+            <small>a quantity is rounded down to this, never up</small>
           </div>
           <div className="row">
             <label>Entries</label>

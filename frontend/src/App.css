@@ -2307,3 +2307,123 @@ a.nitem:hover .nhead {
 .bt .held-wrap table.held {
   margin-top: 10px;
 }
+
+/* ── The trade log ─────────────────────────────────────────────────────────
+   Sixteen columns, because the question is usually about one of them. Scrolls
+   sideways rather than wrapping: a row that wraps stops being a row. */
+.bt .tradelog {
+  margin-top: 24px;
+}
+.bt .tradelog > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.bt .tradelog h3 {
+  margin: 0;
+  font-family: var(--u);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.bt .tradelog .sp {
+  flex: 1;
+}
+.bt .tradelog header button,
+.bt .tradelog .more {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  color: var(--you);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.bt .tradelog .more {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px;
+}
+.bt .tradelog .scroll {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.bt .tradelog table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.bt .tradelog thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-family: var(--u);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--head);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.bt .tradelog td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--grid);
+}
+.bt .tradelog th.n,
+.bt .tradelog td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bt .tradelog td.dim {
+  color: var(--dim);
+}
+.bt .tradelog td.lng {
+  color: var(--up);
+}
+.bt .tradelog td.sht {
+  color: var(--sell);
+}
+.bt .tradelog td.bad {
+  color: var(--dn);
+  font-weight: 600;
+}
+.bt .tradelog td.why {
+  color: var(--dim);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bt .tradelog tbody tr:hover td {
+  background: var(--selbg);
+}
+.bt .tradelog tfoot td {
+  position: sticky;
+  bottom: 0;
+  background: var(--head);
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+.bt table.where.sides thead th {
+  font-family: var(--u);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+.bt table.where.sides td.n,
+.bt table.where.sides th.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -27,6 +27,7 @@ holds no opinion about strategy.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -58,6 +59,15 @@ class Market(Protocol):
     #: Units per unit of quantity. One for a perpetual quoted in coins; where an
     #: option's or a future's lot size goes.
     multiplier: float
+    #: Smallest quantity the venue accepts.
+    min_quantity: float
+    #: Smallest order value, in the quote currency. Usually the binding one: a
+    #: venue can allow 0.001 BTC and still demand 115 USDT of it.
+    min_notional: float
+
+    def round_quantity(self, quantity: float) -> float:
+        """Down to the venue's step. A size it would not accept is not a size."""
+        ...
 
     def notional(self, quantity: float, price: float) -> float:
         """What a quantity is worth at a price, in the quote currency."""
@@ -157,6 +167,23 @@ class PerpetualMarket:
     #: Contracts per unit of quantity. One for a perpetual quoted in coins; the
     #: place an option's lot size goes.
     multiplier: float = 1.0
+    #: Shark's floors for BTCUSDT, which is the only pair with stored history.
+    #: Fetched per contract by the desk; written down here so a backtest of an
+    #: instrument nobody has fetched still refuses a size nobody could place.
+    min_quantity: float = 0.001
+    min_notional: float = 0.0
+    #: Decimal places the venue accepts in a quantity.
+    quantity_dp: int = 3
+
+    def round_quantity(self, quantity: float) -> float:
+        """Down to the venue's step, never up.
+
+        Rounding up can put an order above the margin that was just checked for
+        it. Being one step small costs a rounding error; being one step large
+        costs a rejection.
+        """
+        step = 10.0**-self.quantity_dp
+        return math.floor(quantity / step) * step
 
     def notional(self, quantity: float, price: float) -> float:
         return abs(quantity) * price * self.multiplier

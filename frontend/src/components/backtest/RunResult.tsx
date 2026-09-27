@@ -1,4 +1,5 @@
 import type { BacktestResult } from "../../api";
+import { TradeLog } from "./TradeLog";
 
 interface Props {
   result: BacktestResult;
@@ -107,7 +108,8 @@ export function RunResult({ result }: Props) {
           {Object.entries(m.endings)
             .map(([why, n]) => `${n} by ${why}`)
             .join(", ")}
-          . Held {pct(m.exposure)} of the time.
+          . Held {pct(m.exposure)} of the time, {m.average_bars_held.toFixed(0)} bars a trade
+          {result.reversals > 0 && `, turning round ${result.reversals.toLocaleString()} times`}.
         </p>
       )}
 
@@ -117,40 +119,36 @@ export function RunResult({ result }: Props) {
         </p>
       ))}
 
-      {result.trades.length > 0 && (
-        <details className="log">
-          <summary>
-            Trades ({result.trades.length === result.trades_total
-              ? result.trades_total.toLocaleString()
-              : `last ${result.trades.length} of ${result.trades_total.toLocaleString()}`}
-            )
-          </summary>
-          <table>
-            <thead>
-              <tr>
-                <th>Opened</th>
-                <th>Side</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Why</th>
-                <th>Net</th>
+      {Object.keys(m.by_side).length > 0 && (
+        <table className="where sides">
+          <caption>Each side on its own</caption>
+          <thead>
+            <tr>
+              <th />
+              <th className="n">Trades</th>
+              <th className="n">Won</th>
+              <th className="n">Gross</th>
+              <th className="n">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(m.by_side).map(([side, s]) => (
+              <tr key={side}>
+                <th>{side}s</th>
+                <td className="n">{s.trades.toLocaleString()}</td>
+                <td className="n">{pct(s.win_rate)}</td>
+                <td className={`n ${s.gross >= 0 ? "up" : "dn"}`}>{money(s.gross)}</td>
+                <td className={`n ${s.net >= 0 ? "up" : "dn"}`}>{money(s.net)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {[...result.trades].reverse().map((t, i) => (
-                <tr key={i}>
-                  <td>{t.opened_at.slice(0, 16).replace("T", " ")}</td>
-                  <td>{t.side}</td>
-                  <td className="n">{t.entry.toFixed(1)}</td>
-                  <td className="n">{t.exit_price.toFixed(1)}</td>
-                  <td>{t.why}</td>
-                  <td className={`n ${t.net >= 0 ? "up" : "dn"}`}>{t.net.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
+            ))}
+          </tbody>
+        </table>
       )}
+
+      {result.trades.length > 0 && (
+        <TradeLog trades={result.trades} total={result.trades_total} quote="USDT" />
+      )}
+
     </div>
   );
 }

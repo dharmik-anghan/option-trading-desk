@@ -19,7 +19,7 @@ one leg only, or a share's borrow cost, all belong behind `Market`.
 
 from backtest.engine import Execution, Result, Rule, run
 from backtest.market import Costs, FundingSchedule, Market, PerpetualMarket, Side
-from backtest.metrics import Metrics, measure
+from backtest.metrics import Metrics, SideSummary, measure
 from backtest.models import Action, Exit, Intent, Position, Trade
 from backtest.view import Frame, View
 
@@ -36,6 +36,7 @@ __all__ = [
     "PerpetualMarket",
     "Position",
     "Result",
+    "SideSummary",
     "Rule",
     "Side",
     "Trade",

@@ -23,7 +23,8 @@ def _trade(gross: float, *, fees: float = 0.0, funding: float = 0.0, minutes: in
         entry=100.0,
         exit_price=100.0 + gross,
         why=Exit.RULE,
-        reason="",
+        entry_reason="a condition",
+        exit_reason="another condition",
         costs=Costs(fees=fees, funding=funding),
         gross=gross,
     )
@@ -86,7 +87,8 @@ def test_endings_are_counted_by_kind() -> None:
         _trade(1.0),
         Trade(
             side=Side.LONG, quantity=1.0, opened_at=START, closed_at=START,
-            entry=100.0, exit_price=80.0, why=Exit.LIQUIDATION, reason="",
+            entry=100.0, exit_price=80.0, why=Exit.LIQUIDATION,
+            entry_reason="a condition", exit_reason="the venue closed it",
             costs=Costs(), gross=-20.0,
         ),
     ]

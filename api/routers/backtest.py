@@ -35,9 +35,11 @@ router = APIRouter(tags=["backtest"], prefix="/api/backtest")
 #: step, few enough to send.
 CURVE_POINTS = 1200
 
-#: Trades sent back. A five-minute rule can make tens of thousands, and nobody
-#: reads past the first page of those.
-MAX_TRADES = 400
+#: Trades sent back. Raised well above what anyone scrolls, because the point of
+#: a trade log is to be searched and totalled rather than read - and a run that
+#: made two thousand trades should hand over two thousand rather than a sample
+#: that cannot be added up.
+MAX_TRADES = 5000
 
 
 class RunRequest(BaseModel):
@@ -53,24 +55,57 @@ class RunRequest(BaseModel):
     leverage: float = Field(default=1.0, gt=0, le=150)
     slippage_bps: float = Field(default=1.0, ge=0, le=100)
     maker_entry: bool = False
+    #: "equity" - a fraction of the account; "quantity" - a fixed lot;
+    #: "notional" - a fixed amount of money at work.
+    sizing: str = "equity"
+    risk: float = Field(default=1.0, gt=0, le=1)
+    quantity: float = Field(default=0.0, ge=0)
+    notional: float = Field(default=0.0, ge=0)
+    #: The venue's floors, so a run refuses a size nobody could place.
+    min_quantity: float = Field(default=0.001, ge=0)
+    min_notional: float = Field(default=0.0, ge=0)
+    quantity_dp: int = Field(default=3, ge=0, le=8)
     #: Whose funding to charge. Empty means none, which is only honest for an
     #: instrument that has none.
     funding_source: str = "binance"
 
 
 class TradeOut(BaseModel):
+    """One round trip, in full.
+
+    Everything needed to reconstruct it: when, which way, at what prices, how
+    much, why it was taken, why it ended, and where every unit of money went.
+    """
+
     side: str
     opened_at: str
     closed_at: str
     entry: float
     exit_price: float
     quantity: float
+    #: Position value at entry, in the quote currency.
+    notional: float
     why: str
-    reason: str
+    #: The condition that opened it, in the words it was built with.
+    entry_reason: str
+    #: What closed it - the exit condition, or the stop, target or liquidation.
+    exit_reason: str
     gross: float
     fees: float
     funding: float
     slippage: float
+    net: float
+    #: Net as a fraction of the margin the position required.
+    net_pct: float
+    #: How long it was held, in bars of the traded size.
+    bars_held: float
+
+
+class SideOut(BaseModel):
+    trades: int
+    wins: int
+    win_rate: float
+    gross: float
     net: float
 
 
@@ -92,6 +127,8 @@ class MetricsOut(BaseModel):
     best: float
     worst: float
     endings: dict[str, int]
+    by_side: dict[str, SideOut]
+    average_bars_held: float
 
 
 class RunResponse(BaseModel):
@@ -111,6 +148,10 @@ class RunResponse(BaseModel):
     curve: list[list[float]]
     trades: list[TradeOut]
     trades_total: int
+    #: Positions closed and reopened the other way on the same signal.
+    reversals: int
+    skipped_too_small: int
+    skipped_unaffordable: int
     #: Anything a reader has to know to judge the numbers.
     caveats: list[str]
 
@@ -178,21 +219,35 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
                 "held for days pays it, so this reads better than it would have been"
             )
 
-    market = PerpetualMarket(symbol=body.symbol, funding=funding)
-    result = run(
-        bars,
-        SpecRule(spec),
-        market,
-        interval=size,
-        execution=Execution(
-            capital=body.capital,
-            leverage=body.leverage,
-            slippage_bps=body.slippage_bps,
-            maker_entry=body.maker_entry,
-        ),
+    market = PerpetualMarket(
+        symbol=body.symbol,
+        funding=funding,
+        min_quantity=body.min_quantity,
+        min_notional=body.min_notional,
+        quantity_dp=body.quantity_dp,
     )
+    execution = Execution(
+        capital=body.capital,
+        sizing=body.sizing,
+        risk=body.risk,
+        quantity=body.quantity,
+        notional=body.notional,
+        leverage=body.leverage,
+        slippage_bps=body.slippage_bps,
+        maker_entry=body.maker_entry,
+    )
+    result = run(bars, SpecRule(spec), market, interval=size, execution=execution)
     metrics = measure(result.trades, result.equity, bars, result.capital, size)
     caveats.extend(result.caveats)
+    # A side that was declared and never traded is the kind of thing a result
+    # should say out loud. It usually means the strategy contradicts itself, or
+    # that every signal for that side was consumed by the other side's exit.
+    for side, declared in (("long", spec.long_entry), ("short", spec.short_entry)):
+        if declared is not None and side not in metrics.by_side:
+            caveats.append(
+                f"This strategy declares {side} entries but never took one, so the result "
+                f"is the other side alone"
+            )
     if body.maker_entry:
         caveats.append(
             "Entries are resting limit orders, filled only where a bar traded through "
@@ -212,8 +267,11 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         final=result.final,
         metrics=_metrics_out(metrics),
         curve=_thinned(bars, result.equity),
-        trades=[_trade_out(t) for t in result.trades[-MAX_TRADES:]],
+        trades=[_trade_out(t, size, execution) for t in result.trades[-MAX_TRADES:]],
         trades_total=len(result.trades),
+        reversals=result.reversals,
+        skipped_too_small=result.skipped_too_small,
+        skipped_unaffordable=result.skipped_unaffordable,
         caveats=caveats,
     )
 
@@ -294,10 +352,19 @@ def _metrics_out(m: Metrics) -> MetricsOut:
         best=m.best,
         worst=m.worst,
         endings=m.endings,
+        average_bars_held=m.average_bars_held,
+        by_side={
+            side: SideOut(
+                trades=s.trades, wins=s.wins, win_rate=s.win_rate, gross=s.gross, net=s.net
+            )
+            for side, s in m.by_side.items()
+        },
     )
 
 
-def _trade_out(t: Any) -> TradeOut:
+def _trade_out(t: Any, interval: Interval, execution: Execution) -> TradeOut:
+    notional = t.quantity * t.entry
+    margin = notional / execution.leverage if execution.leverage else notional
     return TradeOut(
         side=str(t.side),
         opened_at=t.opened_at.isoformat(),
@@ -305,11 +372,18 @@ def _trade_out(t: Any) -> TradeOut:
         entry=t.entry,
         exit_price=t.exit_price,
         quantity=t.quantity,
+        notional=notional,
         why=str(t.why),
-        reason=t.reason,
+        entry_reason=t.entry_reason,
+        exit_reason=t.exit_reason,
         gross=t.gross,
         fees=t.costs.fees,
         funding=t.costs.funding,
         slippage=t.costs.slippage,
         net=t.net,
+        # Against the margin the position tied up rather than against the whole
+        # account: at 10x a 1% move is 10% of what was committed, and reporting
+        # it as 1% would describe a different trade.
+        net_pct=t.net / margin if margin else 0.0,
+        bars_held=t.bars_held / interval.seconds,
     )

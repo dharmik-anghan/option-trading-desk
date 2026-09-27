@@ -80,8 +80,24 @@ class Execution:
 
     #: Money to trade with, in the market's quote currency.
     capital: float = 1000.0
-    #: Fraction of capital committed as margin per trade.
+    #: How a position is sized. Three answers, because they are three different
+    #: questions and conflating them hides which one a result depends on:
+    #:
+    #:   "equity"   a fraction of what the account is worth now, so the run
+    #:              compounds and a losing run trades smaller
+    #:   "quantity" a fixed number of contracts every time - the lot you would
+    #:              actually type into the ticket
+    #:   "notional" a fixed amount of money at work, whatever the account is
+    #:
+    #: Compounding flatters a rule that worked early and punishes one that
+    #: worked late, which is why a fixed size is often the more honest test.
+    sizing: str = "equity"
+    #: For "equity": the fraction committed as margin per trade.
     risk: float = 1.0
+    #: For "quantity": contracts per trade, in the instrument's own units.
+    quantity: float = 0.0
+    #: For "notional": the position's value in the quote currency.
+    notional: float = 0.0
     leverage: float = 1.0
     #: How far the fill lands from the price it was decided at, in basis points,
     #: always against you. Not a guess that can be checked, which is why it is a
@@ -118,6 +134,14 @@ class Result:
     #: Anything the reader has to know to judge the numbers - a funding proxy, a
     #: position still open at the end, a window shorter than the warm-up.
     caveats: list[str] = field(default_factory=list)
+    #: Signals that could not be taken: below the venue's minimum, or more than
+    #: the account could post margin for. Counted rather than ignored, because a
+    #: rule whose trades were mostly unaffordable did not really return what the
+    #: curve says.
+    skipped_too_small: int = 0
+    skipped_unaffordable: int = 0
+    #: Positions closed and immediately opened the other way on the same bar.
+    reversals: int = 0
 
     @property
     def final(self) -> float:
@@ -151,25 +175,43 @@ def run(
     view, cursors = build(bars, interval, rule.context)
     equity = settings.capital
     position: Position | None = None
-    #: What the rule asked for at the previous bar's close, waiting to be filled
-    #: at this bar's open. The one-bar delay, made physical.
-    pending: Intent | None = None
+    #: What was decided at the previous bar's close, waiting to be filled at this
+    #: bar's open. The one-bar delay, made physical.
+    #:
+    #: Two of them, because closing and opening the other way on the same signal
+    #: is one decision. Without that the engine cannot turn round: the signal
+    #: that closes a short is usually the same signal that opens a long, and if
+    #: the entry is only considered after the exit has been filled then by the
+    #: next bar the crossing has passed and the trade is never taken. A
+    #: long-and-short crossover ran for three years and took shorts only.
+    pending_exit: Intent | None = None
+    pending_enter: Intent | None = None
     #: The price a resting entry would sit at, when entering as a maker.
     pending_limit: float | None = None
 
     for i, bar in enumerate(bars):
         # --- act on what was decided last bar, at this bar's open -----------
-        if pending is not None:
-            if pending.action is Action.ENTER and position is None:
-                position = _open(pending, bar, market, settings, equity, limit=pending_limit)
-            elif pending.action is Action.EXIT and position is not None:
-                equity, trade = _close(
-                    position, bar.open, bar.ts, Exit.RULE, pending.reason, market, settings, equity
-                )
-                result.trades.append(trade)
-                position = None
-            pending = None
-            pending_limit = None
+        reversing = pending_exit is not None and pending_enter is not None
+        if pending_exit is not None and position is not None:
+            equity, trade = _close(
+                position, bar.open, bar.ts, Exit.RULE, pending_exit.reason, market, settings,
+                equity,
+            )
+            result.trades.append(trade)
+            position = None
+        if pending_enter is not None and position is None:
+            position, why_not = _open(
+                pending_enter, bar, market, settings, equity, limit=pending_limit
+            )
+            if why_not == "small":
+                result.skipped_too_small += 1
+            elif why_not == "afford":
+                result.skipped_unaffordable += 1
+            elif reversing and position is not None:
+                result.reversals += 1
+        pending_exit = None
+        pending_enter = None
+        pending_limit = None
 
         # --- what the bar did to an open position ---------------------------
         if position is not None:
@@ -178,7 +220,7 @@ def run(
             if ending is not None:
                 price, why = ending
                 equity, trade = _close(
-                    position, price, bar.ts, why, position.reason, market, settings, equity
+                    position, price, bar.ts, why, _said(why), market, settings, equity
                 )
                 result.trades.append(trade)
                 position = None
@@ -187,13 +229,32 @@ def run(
         wind(view, cursors, i)
         if position is None:
             intent = rule.entry(view)
-            pending = intent if intent.action is Action.ENTER else None
-            pending_limit = bar.close if (pending and settings.maker_entry) else None
+            pending_enter = intent if intent.action is Action.ENTER else None
         else:
-            intent = rule.exit(view, position)
-            pending = intent if intent.action is Action.EXIT else None
+            leaving = rule.exit(view, position)
+            if leaving.action is Action.EXIT:
+                pending_exit = leaving
+                # And, on the same bar, whether the rule wants the other side.
+                # Only the other side: an entry agreeing with the position we are
+                # closing is a contradiction, and re-entering what was just exited
+                # would be churn the strategy did not ask for.
+                turning = rule.entry(view)
+                if turning.action is Action.ENTER and turning.side is position.side.opposite:
+                    pending_enter = turning
+        pending_limit = bar.close if (pending_enter and settings.maker_entry) else None
 
         result.equity.append(_equity_now(equity, position, bar.close, market))
+
+    if result.skipped_too_small:
+        result.caveats.append(
+            f"{result.skipped_too_small:,} signals were below the venue's minimum size and "
+            "were not taken"
+        )
+    if result.skipped_unaffordable:
+        result.caveats.append(
+            f"{result.skipped_unaffordable:,} signals needed more margin than the account "
+            "had and were not taken"
+        )
 
     if position is not None:
         last = bars[-1]
@@ -202,7 +263,7 @@ def run(
             last.close,
             last.ts,
             Exit.END_OF_DATA,
-            "the data ran out",
+            _said(Exit.END_OF_DATA),
             market,
             settings,
             equity,
@@ -215,6 +276,16 @@ def run(
         )
 
     return result
+
+
+def _said(why: Exit) -> str:
+    """What to write against a close nobody's condition asked for."""
+    return {
+        Exit.STOP: "the stop was reached",
+        Exit.TARGET: "the target was reached",
+        Exit.LIQUIDATION: "the venue closed it",
+        Exit.END_OF_DATA: "the data ran out",
+    }.get(why, "")
 
 
 def _slipped(price: float, side: Side, settings: Execution, *, opening: bool) -> float:
@@ -236,10 +307,17 @@ def _open(
     equity: float,
     *,
     limit: float | None = None,
-) -> Position | None:
+) -> tuple[Position | None, str]:
+    """Open a position, or say why not.
+
+    The second half of the pair matters as much as the first. A signal that could
+    not be taken - below the venue's minimum, or more margin than the account had
+    - is not the same as a signal that did not happen, and counting them is what
+    stops a curve describing trades nobody could have placed.
+    """
     side = intent.side
     if side is None:
-        return None
+        return None, "none"
 
     if limit is None:
         price = _slipped(bar.open, side, settings, opening=True)
@@ -250,20 +328,18 @@ def _open(
         # of it cleared.
         through = bar.low < limit if side is Side.LONG else bar.high > limit
         if not through:
-            return None
+            return None, "unfilled"
         price = limit
     if price <= 0:
-        return None
+        return None, "none"
 
-    # Size from equity rather than from starting capital, so a run compounds and a
-    # losing run trades smaller - which is what an account actually does.
-    committed = max(0.0, equity) * settings.risk
-    if committed <= 0:
-        return None
-    notional = committed * settings.leverage
-    quantity = notional / (price * market.multiplier)
+    quantity = _size(market, settings, price, equity)
     if quantity <= 0:
-        return None
+        return None, "none"
+    if quantity < market.min_quantity or market.notional(quantity, price) < market.min_notional:
+        return None, "small"
+    if market.margin(quantity, price, settings.leverage) > max(0.0, equity):
+        return None, "afford"
 
     fee = market.fee(quantity, price, maker=limit is not None, opening=True, side=side)
     slippage = abs(price - bar.open) * quantity * market.multiplier
@@ -278,7 +354,27 @@ def _open(
         reason=intent.reason,
         costs=Costs(fees=fee, slippage=slippage),
         carried_to=bar.ts,
-    )
+    ), "opened"
+
+
+def _size(market: Market, settings: Execution, price: float, equity: float) -> float:
+    """How many contracts, by whichever rule was chosen.
+
+    Rounded down to the venue's precision. Down rather than to nearest, because
+    rounding up can put an order above the margin just checked for it, and the
+    cost of being one step small is a rounding error while the cost of being one
+    step large is a rejected order.
+    """
+    if settings.sizing == "quantity":
+        wanted = settings.quantity
+    elif settings.sizing == "notional":
+        wanted = settings.notional / (price * market.multiplier)
+    else:
+        # A fraction of what the account is worth now, so the run compounds and a
+        # losing run trades smaller - which is what an account actually does.
+        committed = max(0.0, equity) * settings.risk
+        wanted = committed * settings.leverage / (price * market.multiplier)
+    return market.round_quantity(wanted)
 
 
 def _carry(position: Position, bar: Bar, market: Market, interval: Interval) -> Position:
@@ -327,7 +423,7 @@ def _close(
     price: float,
     at: datetime,
     why: Exit,
-    reason: str,
+    exit_reason: str,
     market: Market,
     settings: Execution,
     equity: float,
@@ -356,7 +452,8 @@ def _close(
         entry=position.entry,
         exit_price=filled,
         why=why,
-        reason=reason,
+        entry_reason=position.reason,
+        exit_reason=exit_reason,
         costs=costs,
         gross=gross,
     )

@@ -913,6 +913,8 @@ export interface StrategySpec {
   target?: Level | null;
 }
 
+export type Sizing = "equity" | "quantity" | "notional";
+
 export interface BacktestRequest {
   spec: StrategySpec;
   source: string;
@@ -923,6 +925,17 @@ export interface BacktestRequest {
   leverage: number;
   slippage_bps: number;
   maker_entry: boolean;
+  /** How each position is sized. */
+  sizing: Sizing;
+  /** For "equity": the fraction of the account committed as margin. */
+  risk: number;
+  /** For "quantity": the lot, in the instrument's own units. */
+  quantity: number;
+  /** For "notional": the position's value in the quote currency. */
+  notional: number;
+  min_quantity: number;
+  min_notional: number;
+  quantity_dp: number;
 }
 
 export interface BacktestMetrics {
@@ -943,6 +956,17 @@ export interface BacktestMetrics {
   best: number;
   worst: number;
   endings: Record<string, number>;
+  by_side: Record<string, SideSummary>;
+  average_bars_held: number;
+}
+
+/** One side of the book on its own — a strategy written both ways is two strategies. */
+export interface SideSummary {
+  trades: number;
+  wins: number;
+  win_rate: number;
+  gross: number;
+  net: number;
 }
 
 export interface BacktestTrade {
@@ -952,13 +976,21 @@ export interface BacktestTrade {
   entry: number;
   exit_price: number;
   quantity: number;
+  /** Position value at entry, in the quote currency. */
+  notional: number;
   why: string;
-  reason: string;
+  /** The condition that opened it, in the words it was built with. */
+  entry_reason: string;
+  /** What closed it — the exit condition, or the stop, target or liquidation. */
+  exit_reason: string;
   gross: number;
   fees: number;
   funding: number;
   slippage: number;
   net: number;
+  /** Net against the margin the position tied up, not against the whole account. */
+  net_pct: number;
+  bars_held: number;
 }
 
 export interface BacktestResult {
@@ -978,6 +1010,10 @@ export interface BacktestResult {
   curve: [number, number][];
   trades: BacktestTrade[];
   trades_total: number;
+  /** Positions closed and reopened the other way on the same signal. */
+  reversals: number;
+  skipped_too_small: number;
+  skipped_unaffordable: number;
   caveats: string[];
 }
 

@@ -79,7 +79,15 @@ class Trade:
     entry: float
     exit_price: float
     why: Exit
-    reason: str
+    #: The condition that opened it, in the words it was built with.
+    entry_reason: str
+    #: What closed it. A rule's own exit says which condition fired; a stop, a
+    #: target or a liquidation says so instead.
+    #:
+    #: Two fields rather than one, because a single `reason` was silently both:
+    #: the entry's words when a stop closed the trade and the exit's words when
+    #: the rule did. A log column cannot be labelled honestly against that.
+    exit_reason: str
     costs: Costs
     #: Before costs: what the move was worth.
     gross: float

@@ -388,3 +388,192 @@ def test_sizing_compounds_from_equity_rather_than_starting_capital() -> None:
 
     first, second = result.trades
     assert second.quantity * second.entry < first.quantity * first.entry
+
+
+# --------------------------------------------------------------------------
+# Turning round
+# --------------------------------------------------------------------------
+
+
+class Reversing:
+    """Long on an up bar, short on a down one, and out of the other on the same
+    signal - the shape of every crossover strategy written both ways."""
+
+    name = "reversing"
+    context: tuple[Interval, ...] = ()
+
+    def __init__(self, longs: set[int], shorts: set[int]):
+        self.longs = longs
+        self.shorts = shorts
+
+    def entry(self, view: View) -> Intent:
+        i = view.base._cursor
+        if i in self.longs:
+            return Intent.enter(Side.LONG, reason="up")
+        if i in self.shorts:
+            return Intent.enter(Side.SHORT, reason="down")
+        return Intent.nothing()
+
+    def exit(self, view: View, position: Position) -> Intent:
+        i = view.base._cursor
+        leaving = self.shorts if position.side is Side.LONG else self.longs
+        return Intent.exit("flip") if i in leaving else Intent.nothing()
+
+
+def test_a_position_can_close_and_open_the_other_way_on_one_signal() -> None:
+    """The bug this was written for.
+
+    The signal that closes a short is usually the same signal that opens a long.
+    If the entry is only considered after the exit has been filled, then by the
+    next bar the crossing has passed and the trade is never taken - so a
+    long-and-short crossover ran for three years and took shorts only.
+    """
+    bars = _flat(8)
+    rule = Reversing(longs={4}, shorts={1})
+
+    result = run(bars, rule, _market(), interval=M5, execution=FREE)
+
+    assert [t.side for t in result.trades] == [Side.SHORT, Side.LONG]
+    assert result.reversals == 1
+
+
+def test_a_reversal_closes_and_opens_at_the_same_price() -> None:
+    """Both legs are filled at the next bar's open, because it is one decision."""
+    bars = _bars([(100.0, 100.0, 100.0, 100.0)] * 3 + [(120.0, 120.0, 120.0, 120.0)] * 4)
+    rule = Reversing(longs={2}, shorts={0})
+
+    result = run(bars, rule, _market(), interval=M5, execution=FREE)
+
+    closed, opened = result.trades[0], result.trades[1]
+    assert closed.closed_at == opened.opened_at
+    assert closed.exit_price == opened.entry
+
+
+def test_an_entry_agreeing_with_the_position_being_closed_is_ignored() -> None:
+    """Re-entering what was just exited is churn the strategy did not ask for."""
+
+    class Contradictory:
+        name = "contradictory"
+        context: tuple[Interval, ...] = ()
+
+        def entry(self, view: View) -> Intent:
+            return Intent.enter(Side.LONG)
+
+        def exit(self, view: View, position: Position) -> Intent:
+            return Intent.exit("out") if view.base._cursor == 2 else Intent.nothing()
+
+    result = run(_flat(8), Contradictory(), _market(), interval=M5, execution=FREE)
+
+    assert result.reversals == 0
+    # out at bar 3, and back in on the next bar's own entry rather than as a flip
+    assert len(result.trades) == 2
+
+
+# --------------------------------------------------------------------------
+# Sizing
+# --------------------------------------------------------------------------
+
+
+def test_a_fixed_lot_is_traded_whatever_the_account_is_worth() -> None:
+    """The lot you would actually type into the ticket."""
+    bars = _bars([(100.0, 100.0, 100.0, 100.0)] * 3 + [(50.0, 50.0, 50.0, 50.0)] * 4)
+    rule = Scripted(
+        {0: Intent.enter(Side.LONG), 4: Intent.enter(Side.LONG)},
+        {1: Intent.exit(), 5: Intent.exit()},
+    )
+
+    result = run(
+        bars, rule, _market(), interval=M5,
+        execution=Execution(capital=1000.0, sizing="quantity", quantity=0.5, slippage_bps=0.0),
+    )
+
+    assert [t.quantity for t in result.trades] == [0.5, 0.5]
+
+
+def test_a_fixed_notional_buys_fewer_contracts_as_the_price_rises() -> None:
+    bars = _bars([(100.0, 100.0, 100.0, 100.0)] * 3 + [(200.0, 200.0, 200.0, 200.0)] * 4)
+    rule = Scripted(
+        {0: Intent.enter(Side.LONG), 4: Intent.enter(Side.LONG)},
+        {1: Intent.exit(), 5: Intent.exit()},
+    )
+
+    result = run(
+        bars, rule, _market(), interval=M5,
+        execution=Execution(capital=1000.0, sizing="notional", notional=100.0,
+                            slippage_bps=0.0),
+    )
+
+    assert [t.quantity for t in result.trades] == [1.0, 0.5]
+
+
+def test_a_quantity_is_rounded_down_to_what_the_venue_accepts() -> None:
+    """Rounding up can put an order above the margin just checked for it."""
+    market = _market(quantity_dp=2)
+
+    assert market.round_quantity(0.12789) == pytest.approx(0.12)
+
+
+def test_a_signal_below_the_venues_minimum_is_counted_rather_than_taken() -> None:
+    """A curve must not describe trades nobody could have placed."""
+    market = _market(min_quantity=1.0)
+
+    result = run(
+        _flat(6), Scripted({0: Intent.enter(Side.LONG)}), market, interval=M5,
+        execution=Execution(capital=1000.0, sizing="quantity", quantity=0.01),
+    )
+
+    assert result.trades == []
+    assert result.skipped_too_small == 1
+    assert any("minimum size" in c for c in result.caveats)
+
+
+def test_a_signal_the_account_cannot_post_margin_for_is_counted_not_taken() -> None:
+    result = run(
+        _flat(6), Scripted({0: Intent.enter(Side.LONG)}), _market(), interval=M5,
+        execution=Execution(capital=10.0, sizing="quantity", quantity=5.0, leverage=1.0),
+    )
+
+    assert result.trades == []
+    assert result.skipped_unaffordable == 1
+    assert any("more margin than the account had" in c for c in result.caveats)
+
+
+def test_a_minimum_notional_can_bind_where_a_minimum_quantity_does_not() -> None:
+    """A venue can allow 0.001 BTC and still demand 115 USDT of it."""
+    market = _market(min_quantity=0.001, min_notional=115.0)
+
+    result = run(
+        _flat(6), Scripted({0: Intent.enter(Side.LONG)}), market, interval=M5,
+        execution=Execution(capital=1000.0, sizing="quantity", quantity=0.01),
+    )
+
+    assert result.skipped_too_small == 1
+
+
+def test_a_trade_records_why_it_opened_and_why_it_closed_separately() -> None:
+    """One field was silently both, and no log column could be labelled honestly.
+
+    A stop closing a long used to file the *entry's* words as the reason, so the
+    log showed a long "taken because" of the condition that had closed it.
+    """
+    bars = _bars([(100.0, 100.0, 100.0, 100.0)] * 2 + [(100.0, 100.0, 80.0, 90.0),
+                  (100.0, 100.0, 100.0, 100.0)])
+    rule = Scripted({0: Intent.enter(Side.LONG, stop=90.0, reason="the entry fired")})
+
+    stopped = run(bars, rule, _market(), interval=M5, execution=FREE).trades[0]
+
+    assert stopped.why is Exit.STOP
+    assert stopped.entry_reason == "the entry fired"
+    assert stopped.exit_reason == "the stop was reached"
+
+
+def test_a_rule_exit_records_the_condition_that_closed_it() -> None:
+    rule = Scripted(
+        {0: Intent.enter(Side.LONG, reason="the entry fired")},
+        {2: Intent.exit("the exit fired")},
+    )
+
+    closed = run(_flat(6), rule, _market(), interval=M5, execution=FREE).trades[0]
+
+    assert closed.entry_reason == "the entry fired"
+    assert closed.exit_reason == "the exit fired"
