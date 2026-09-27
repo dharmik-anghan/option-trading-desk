@@ -40,6 +40,8 @@ interface Props {
   perps: PerpsDesk | null;
   /** Whether this page is receiving pushed prices. */
   pushing: boolean;
+  /** The alerts bell and its panel, built by the page that owns the data. */
+  alerts?: React.ReactNode;
 }
 
 export function Toolbar({
@@ -64,6 +66,7 @@ export function Toolbar({
   onHome,
   perps,
   pushing,
+  alerts,
 }: Props) {
   const name = UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol;
   const net = portfolio?.total_pnl ?? null;
@@ -186,6 +189,7 @@ export function Toolbar({
         <button className="tbtn" onClick={onPause} aria-label={paused ? "Resume updates" : "Pause updates"}>
           {paused ? "▶" : "❚❚"}
         </button>
+        {alerts}
         <button
           className="tbtn"
           onClick={onTheme}

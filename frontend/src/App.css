@@ -7,12 +7,15 @@
   display: grid;
   gap: 5px;
   padding: 5px;
-  grid-template-columns: 286px minmax(0, 1fr) 366px;
+  /* Two columns since the alert log moved into the header. It was a third of
+     the screen showing a second copy of what Telegram had already delivered,
+     and the chart is the thing that wanted the room. */
+  grid-template-columns: 286px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
-    "tb tb tb"
-    "left baskets alerts"
-    "left chain alerts";
+    "tb tb"
+    "left baskets"
+    "left chain";
 }
 
 .panel {
@@ -82,7 +85,6 @@
   grid-area: chain;
 }
 .a-alerts {
-  grid-area: alerts;
 }
 
 /* ---------- market context strip ----------
@@ -3202,4 +3204,98 @@ a.nitem:hover .nhead {
   margin-top: 20px;
   color: var(--dim);
   font-size: 12px;
+}
+
+/* ── Alerts, as a count in the header ──────────────────────────────────────
+   They reach Telegram the moment they fire, so the log here is a second copy
+   of something already read on a phone. A count says that in the space it
+   deserves, and opens the log when it matters. */
+.bellwrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.bell {
+  position: relative;
+  width: 28px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.bell svg {
+  width: 15px;
+  height: 15px;
+}
+.bell .body {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+}
+.bell .clapper {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+.bell:hover,
+.bell.on {
+  color: var(--fg);
+  border-color: var(--line);
+}
+.bell.new {
+  color: var(--you);
+}
+.bell.off {
+  color: var(--dn);
+}
+.bell .count {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-family: var(--u);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  color: var(--you-fg);
+  background: var(--you);
+  border-radius: 7px;
+}
+.bell .live {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mkt);
+}
+/* Covers the desk so a click anywhere shuts the panel. Under the panel and
+   over everything else. */
+.bellaway {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+/* Fixed to the viewport rather than to the bell, because the toolbar is a
+   `.panel` and every panel on this desk hides its overflow - an absolutely
+   positioned popover inside one is clipped to a sliver, which is what the
+   first attempt drew. */
+.bellwrap .a-alerts {
+  position: fixed;
+  top: 64px;
+  right: 8px;
+  z-index: 41;
+  width: 380px;
+  max-height: min(660px, calc(100vh - 78px));
+  box-shadow: var(--shadow);
 }

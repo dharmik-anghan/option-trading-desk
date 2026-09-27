@@ -23,6 +23,7 @@ import { PositionsRail } from "./components/PositionsRail";
 import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
+import { AlertsBell } from "./components/AlertsBell";
 import { PerpsChart } from "./components/PerpsChart";
 import { PerpsPositions } from "./components/PerpsPositions";
 import { PerpsTicket } from "./components/PerpsTicket";
@@ -87,6 +88,9 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // A failed write, shown rather than only logged. Not seeing why a threshold
   // would not save is most of what makes it feel broken.
   const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
+  // The log is a second copy of what Telegram already delivered, so it lives
+  // behind a count in the header rather than in a column of its own.
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const shownTopics = newsTopics ?? (onPerps ? ["crypto", "commodities"] : ["india"]);
 
   const health = useLive(getHealth, HEALTH_MS, [], paused, 0);
@@ -296,6 +300,45 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         onHome={onHome}
         perps={onPerps ? (perps.data ?? null) : null}
         pushing={streamed.connected}
+        alerts={
+          <div className="bellwrap">
+            <AlertsBell
+              alerts={alerts.data?.alerts ?? []}
+              activeCount={alerts.data?.active.length ?? 0}
+              watching={alerts.data?.watcher.running ?? false}
+              open={alertsOpen}
+              onToggle={() => setAlertsOpen((o) => !o)}
+            />
+            {alertsOpen && (
+              <>
+                {/* Clicking anywhere else shuts it. A panel that only closes by
+                    the button it opened from is a panel people leave open. */}
+                <div className="bellaway" onClick={() => setAlertsOpen(false)} />
+                <AlertsPanel
+                  alerts={alerts.data?.alerts ?? []}
+                  activeCount={alerts.data?.active.length ?? 0}
+                  watches={alerts.data?.watches ?? []}
+                  symbols={
+                    onPerps
+                      ? (perps.data?.instruments ?? []).map((i) => ({
+                          id: i.symbol,
+                          name: i.name,
+                        }))
+                      : UNDERLYINGS
+                  }
+                  telegram={alerts.data?.watcher.telegram ?? false}
+                  watching={alerts.data?.watcher.running ?? false}
+                  saveError={alertSaveError}
+                  trouble={alerts.data?.watcher.last_error ?? null}
+                  onClear={onClear}
+                  onAddWatch={onAddWatch}
+                  onToggleWatch={onToggleWatch}
+                  onDeleteWatch={onDeleteWatch}
+                />
+              </>
+            )}
+          </div>
+        }
       />
 
       <div id="left">
@@ -350,25 +393,6 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
           onTopics={setNewsTopics}
         />
       </div>
-
-      <AlertsPanel
-        alerts={alerts.data?.alerts ?? []}
-        activeCount={alerts.data?.active.length ?? 0}
-        watches={alerts.data?.watches ?? []}
-        symbols={
-          onPerps
-            ? (perps.data?.instruments ?? []).map((i) => ({ id: i.symbol, name: i.name }))
-            : UNDERLYINGS
-        }
-        telegram={alerts.data?.watcher.telegram ?? false}
-        watching={alerts.data?.watcher.running ?? false}
-        saveError={alertSaveError}
-        trouble={alerts.data?.watcher.last_error ?? null}
-        onClear={onClear}
-        onAddWatch={onAddWatch}
-        onToggleWatch={onToggleWatch}
-        onDeleteWatch={onDeleteWatch}
-      />
 
       {onPerps ? (
         <PerpsChart
