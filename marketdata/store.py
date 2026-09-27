@@ -71,6 +71,24 @@ CREATE TABLE IF NOT EXISTS series_fetch (
     note       VARCHAR     NOT NULL,
     PRIMARY KEY (source, symbol, interval)
 );
+
+-- Funding payments on a perpetual, as a rate per settlement.
+--
+-- Not bars, and not derivable from them: funding is what longs pay shorts to
+-- keep the contract near spot, and over a six-month backtest it can exceed the
+-- gross profit of a short-horizon rule outright. A result computed without it is
+-- not a conservative result, it is a wrong one.
+--
+-- Keyed by source like everything else here, because the venue we trade
+-- publishes no history and the rate stored against "binance" is a proxy for
+-- Shark's - one that has to be labelled as such wherever it is used.
+CREATE TABLE IF NOT EXISTS funding (
+    source VARCHAR   NOT NULL,
+    symbol VARCHAR   NOT NULL,
+    ts     TIMESTAMP NOT NULL,
+    rate   DOUBLE    NOT NULL,
+    PRIMARY KEY (source, symbol, ts)
+);
 """
 
 
@@ -136,6 +154,38 @@ class BarStore:
                 [series.source, series.symbol, str(series.interval)],
             )
         return len(bars)
+
+    def write_funding(
+        self, source: str, symbol: str, rates: Sequence[tuple[datetime, float]]
+    ) -> int:
+        """Store funding rates, replacing any already held for the same moment."""
+        if not rates:
+            return 0
+        latest = dict(rates)
+        values = ",".join(
+            f"(TIMESTAMP '{_to_db(at).isoformat(sep=' ')}',{rate!r})"
+            for at, rate in latest.items()
+        )
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO funding "
+                f"SELECT ?, ?, ts, rate FROM (VALUES {values}) AS incoming(ts, rate)",
+                [source, symbol],
+            )
+        return len(latest)
+
+    def read_funding(
+        self, source: str, symbol: str, *, start: datetime | None = None
+    ) -> list[tuple[datetime, float]]:
+        """Funding rates in time order."""
+        sql = "SELECT ts, rate FROM funding WHERE source = ? AND symbol = ?"
+        params: list[object] = [source, symbol]
+        if start is not None:
+            sql += " AND ts >= ?"
+            params.append(_to_db(start))
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY ts", params).fetchall()
+        return [(_from_db(row[0]), float(row[1])) for row in rows]
 
     def note_fetch(
         self, series: Series, *, ok: bool, note: str = "", at: datetime | None = None

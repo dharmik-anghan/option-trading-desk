@@ -27,14 +27,72 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+import time  # noqa: E402
+
 import duckdb  # noqa: E402
 
 from marketdata.backfill import backfill, resume_from  # noqa: E402
 from marketdata.binance import BinanceBars, binance_symbol  # noqa: E402
+from marketdata.funding import BinanceFunding, funding_symbol  # noqa: E402
 from marketdata.models import Interval, Series  # noqa: E402
 from marketdata.store import BarStore  # noqa: E402
 
 DEFAULT_STORE = REPO_ROOT / "data" / "bars.duckdb"
+
+
+def _funding(symbol: str, start: datetime, store_path: Path, *, dry_run: bool) -> int:
+    """Funding settlements, paged the same way bars are.
+
+    Separate from the bar backfill because it is a different shape of data on a
+    different schedule - eight-hourly whatever the bar size - but it belongs to the
+    same instrument, so it lives behind the same command.
+    """
+    mapped = funding_symbol(symbol)
+    if mapped is None:
+        print(f"no funding source is mapped for {symbol} (see marketdata/funding.py)")
+        return 2
+
+    print(f"{symbol} funding from {start:%Y-%m-%d}")
+    if dry_run:
+        settlements = int((datetime.now(UTC) - start).total_seconds() / (8 * 3600))
+        pages = settlements // 1000 + 1
+        print(f"  to fetch: about {settlements:,} settlements in {pages} requests")
+        return 0
+
+    try:
+        store = BarStore(store_path)
+    except duckdb.IOException:
+        print(f"{store_path.name} is open in another process - stop the desk first.")
+        return 1
+
+    source = BinanceFunding()
+    at = start
+    written = 0
+    try:
+        while True:
+            rows = source.fetch_from(mapped, at)
+            if not rows:
+                break
+            written += store.write_funding("binance", symbol, rows)
+            newest = rows[-1][0]
+            print(f"  {written:>7,} settlements  through {newest:%Y-%m-%d %H:%M}", flush=True)
+            following = newest + timedelta(seconds=1)
+            if following <= at:
+                break
+            at = following
+            time.sleep(0.25)
+        held = store.read_funding("binance", symbol)
+        if held:
+            print(
+                f"\n{len(held):,} settlements held, "
+                f"{held[0][0]:%Y-%m-%d} to {held[-1][0]:%Y-%m-%d}"
+            )
+    except KeyboardInterrupt:
+        print("\nStopped. What was fetched is kept; run again to continue.")
+        return 130
+    finally:
+        store.close()
+    return 0
 
 
 def main() -> int:
@@ -47,6 +105,11 @@ def main() -> int:
         "--restart",
         action="store_true",
         help="fetch the whole window again instead of continuing from what is held",
+    )
+    parser.add_argument(
+        "--funding",
+        action="store_true",
+        help="fetch funding settlements for this symbol instead of bars",
     )
     parser.add_argument(
         "--dry-run",
@@ -70,6 +133,9 @@ def main() -> int:
 
     series = Series(source="binance", symbol=args.symbol, interval=interval)
     wanted_start = datetime.now(UTC) - timedelta(days=args.days)
+
+    if args.funding:
+        return _funding(args.symbol, wanted_start, args.store, dry_run=args.dry_run)
 
     try:
         store = BarStore(args.store)
