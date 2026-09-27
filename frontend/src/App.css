@@ -200,6 +200,13 @@
   gap: 5px;
   min-height: 0;
   min-width: 0;
+  /* Scrolls inside itself. Without this the rail's panels stack past the
+     bottom of the window, the whole grid grows with them, and the columns
+     beside it - which have nothing more to show - leave a screen-high band of
+     empty page under them. The desk is meant to fit the window, so the column
+     with more to say than room scrolls rather than the page. */
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 #left > .panel {
   flex: none;
@@ -635,6 +642,20 @@ tr.total td {
   font-weight: 500;
   letter-spacing: 0.05em;
 }
+/* Two header rows, and sticking each cell at `top: 0` stacked them on top of
+   one another - so "Calls" and "Puts" sat hidden under the column names for as
+   long as this table has had them. The second row is offset by the height of
+   the first, which is measured rather than assumed: a guessed offset leaves a
+   sliver of scrolling rows showing between the two, and the first row's height
+   moves with the font. */
+.chain thead tr.sides th {
+  top: 0;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.chain thead tr.heads th {
+  top: var(--sides-h, 19px);
+}
 .chain th.side.c {
   text-align: right;
   padding-right: 10px;
@@ -654,6 +675,35 @@ tr.total td {
 }
 .chain td.oi {
   background-repeat: no-repeat;
+}
+
+/* The chain in the book column, where it has about 366px and thirteen columns
+   would not fit. The columns themselves are chosen in the component; what is
+   left here is the header, which is three control groups and an expiry picker
+   on one line that used to scroll sideways out of sight. It wraps onto two
+   lines instead - a control you cannot see is a control you do not have. */
+.a-chain.tight .ph {
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow-x: visible;
+  gap: 6px;
+  row-gap: 5px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+/* The select already reads "29-09-2026 · monthly". The label and the tag beside
+   it say the same thing twice, and here that costs a line. */
+.a-chain.tight .expiry label,
+.a-chain.tight .expiry .tag {
+  display: none;
+}
+.a-chain.tight .chain th,
+.a-chain.tight .chain td {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.a-chain.tight .chain th {
+  font-size: 10.5px;
 }
 .leg {
   display: inline-block;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { OptionChain, OptionChainRow, Position } from "../api";
 import { BUILDUP_LABEL, buildup, compact, int, isOpening, num, signed } from "../format";
 
@@ -27,10 +27,55 @@ interface StrikeRow {
   pe: OptionChainRow | null;
 }
 
-const COLS: Record<View, string[]> = {
-  trading: ["oi", "iv", "delta", "bid", "ask", "ltp"],
-  oi: ["oi", "doi", "oichp", "volume", "buildup", "ltp", "chgp"],
-  greeks: ["iv", "delta", "gamma", "theta", "vega", "ltp"],
+/** How much room the chain has, which decides how much of it is shown. */
+type Room = "narrow" | "mid" | "wide";
+
+/* The chain is mirrored - every column appears twice, once per side - so it
+   costs twice what its column count suggests, and it moved into a 380px book
+   column where all thirteen of them could not fit. It used to scroll sideways
+   there, which put the puts off-screen: a chain you have to scroll to see the
+   other half of is not a chain, it is two lists.
+
+   So each view names what it shows at each width rather than trimming a single
+   list, because which columns to keep is a judgement, not an arithmetic. The
+   last entry is the one nearest the strike, and the sets are chosen so the
+   inner columns never move as the panel widens. */
+const COLS: Record<View, Record<Room, string[]>> = {
+  trading: {
+    narrow: ["oi", "ltp"],
+    mid: ["oi", "iv", "delta", "ltp"],
+    wide: ["oi", "iv", "delta", "bid", "ask", "ltp"],
+  },
+  oi: {
+    narrow: ["oi", "doi"],
+    mid: ["oi", "doi", "oichp", "buildup"],
+    wide: ["oi", "doi", "oichp", "volume", "buildup", "ltp", "chgp"],
+  },
+  greeks: {
+    narrow: ["delta", "ltp"],
+    mid: ["iv", "delta", "theta", "ltp"],
+    wide: ["iv", "delta", "gamma", "theta", "vega", "ltp"],
+  },
+};
+
+/** Roughly what a column of figures needs, plus the strike column between the
+    sides. Measured against the rendered table rather than guessed: six columns
+    a side at 54px is the width the chain had when it was the full page. */
+const COL_PX = 54;
+const STRIKE_PX = 66;
+
+function roomFor(width: number): Room {
+  if (width >= 6 * 2 * COL_PX + STRIKE_PX) return "wide";
+  if (width >= 4 * 2 * COL_PX + STRIKE_PX) return "mid";
+  return "narrow";
+}
+
+/** Short enough for the book column, where three of these sit beside the
+    expiry and the strike count. */
+const VIEW_LABEL: Record<View, [long: string, short: string]> = {
+  trading: ["Trading", "Trade"],
+  oi: ["Open interest", "OI"],
+  greeks: ["Greeks", "Greeks"],
 };
 
 const HEAD: Record<string, string> = {
@@ -65,7 +110,41 @@ export function OptionChainPanel({
   onDepth,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const sidesRef = useRef<HTMLTableRowElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   const centred = useRef<string | null>(null);
+
+  // Measured, not guessed from a breakpoint: the same panel is a 380px rail on
+  // the options desk and most of the window when the layout collapses to one
+  // column, and a media query cannot tell those apart.
+  const [room, setRoom] = useState<Room>("wide");
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const watch = new ResizeObserver(([entry]) => {
+      setRoom(roomFor(entry.contentRect.width));
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+
+  // Both header rows stick, and the second has to be offset by the height of
+  // the first or they land on top of each other. Measured, because a constant
+  // that is a pixel short leaves a strip of scrolling rows between them.
+  // Re-attached when the table appears or the panel opens, since neither row
+  // exists before then.
+  const hasChain = chain !== null;
+  useLayoutEffect(() => {
+    const row = sidesRef.current;
+    const table = tableRef.current;
+    if (!row || !table) return;
+    const watch = new ResizeObserver(([entry]) => {
+      table.style.setProperty("--sides-h", `${entry.contentRect.height}px`);
+    });
+    watch.observe(row);
+    return () => watch.disconnect();
+  }, [open, hasChain]);
 
   const { rows, atm, maxCeOi, maxPeOi, hasGreeks } = useMemo(() => {
     if (!chain) return { rows: [] as StrikeRow[], atm: 0, maxCeOi: 1, maxPeOi: 1, hasGreeks: false };
@@ -112,11 +191,14 @@ export function OptionChainPanel({
     return m;
   }, [positions]);
 
-  const cols = COLS[view];
+  const cols = COLS[view][room];
   const spot = chain?.underlying_ltp ?? 0;
 
   return (
-    <section className={`panel a-chain${open ? "" : " shut"}`}>
+    <section
+      ref={panelRef}
+      className={`panel a-chain${open ? "" : " shut"}${room === "narrow" ? " tight" : ""}`}
+    >
       <div className="ph">
         <button
           className="disclose"
@@ -164,7 +246,7 @@ export function OptionChainPanel({
           <div className="seg sm" role="group" aria-label="Columns">
             {(["trading", "oi", "greeks"] as View[]).map((v) => (
               <button key={v} aria-pressed={view === v} onClick={() => onView(v)}>
-                {v === "trading" ? "Trading" : v === "oi" ? "Open interest" : "Greeks"}
+                {VIEW_LABEL[v][room === "wide" ? 0 : 1]}
               </button>
             ))}
           </div>
@@ -184,9 +266,9 @@ export function OptionChainPanel({
           </p>
         )}
         {chain && (
-          <table className="chain">
+          <table className="chain" ref={tableRef}>
             <thead>
-              <tr>
+              <tr className="sides" ref={sidesRef}>
                 <th className="side c" colSpan={cols.length}>
                   Calls
                 </th>
@@ -195,7 +277,7 @@ export function OptionChainPanel({
                   Puts
                 </th>
               </tr>
-              <tr>
+              <tr className="heads">
                 {cols.map((c) => (
                   <th key={`c-${c}`}>{HEAD[c]}</th>
                 ))}
