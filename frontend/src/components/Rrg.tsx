@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRrg, getRrgOptions } from "../api";
 import type { Quadrant, RrgOptions, RrgSnapshot } from "../api";
 import { RrgChart } from "./rrg/RrgChart";
+import { BackButton } from "./BackButton";
 
 interface Props {
   onHome: () => void;
@@ -158,9 +159,7 @@ export function Rrg({ onHome }: Props) {
   return (
     <main className="rrgpage">
       <header>
-        <button className="uphome" onClick={onHome} title="Back to the three desks">
-          ←
-        </button>
+        <BackButton onClick={onHome} />
         <h1>Rotation</h1>
         <p>
           Where each one stands against {snapshot?.benchmark_name ?? "the benchmark"}, and

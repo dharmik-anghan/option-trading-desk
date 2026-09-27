@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getBarSeries, runBacktest } from "../api";
+import { BackButton } from "./BackButton";
 import type {
   BacktestResult,
   BarSeries,
@@ -160,9 +161,7 @@ export function Backtesting({ onHome }: Props) {
   return (
     <main className="bt">
       <header>
-        <button className="uphome" onClick={onHome} title="Back to the three desks">
-          ←
-        </button>
+        <BackButton onClick={onHome} />
         <h1>Backtesting</h1>
         <p>
           {series === null

@@ -1718,29 +1718,53 @@ a.nitem:hover .nhead {
   color: var(--dn);
 }
 
-/* ── The way out of a desk ─────────────────────────────────────────────────
-   A hairline square rather than a labelled button: it sits ahead of the desk
-   title, where a back control is expected, and the desk's own name says where
-   it would take you. */
+/* ── Up one level ─────────────────────────────────────────────────────────
+   A chevron, not a boxed button. In a box it was the heaviest thing in the
+   corner and the least important control on the desk, sitting louder than
+   the desk's own name beside it. Tucked against whatever follows it so the
+   two read as one cluster. */
 .uphome {
   flex: none;
+  align-self: center;
   width: 22px;
   height: 22px;
-  margin-right: 10px;
+  margin: 0 2px 0 -2px;
+  padding: 0;
   display: grid;
   place-items: center;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
   color: var(--dim);
   background: transparent;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 3px;
   cursor: pointer;
+  transition: color 120ms ease, transform 120ms ease;
+}
+.uphome svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .uphome:hover {
   color: var(--fg);
-  border-color: var(--dim);
+  /* The nudge is the affordance. A border would only say a second time what
+     the arrow already says. */
+  transform: translateX(-2px);
+}
+.uphome:focus-visible {
+  outline: 2px solid var(--you);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .uphome {
+    transition: color 120ms ease;
+  }
+  .uphome:hover {
+    transform: none;
+  }
 }
 
 /* ── Home ──────────────────────────────────────────────────────────────────

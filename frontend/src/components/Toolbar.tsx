@@ -1,4 +1,5 @@
 import { UNDERLYINGS } from "../api";
+import { BackButton } from "./BackButton";
 import type {
   CalendarEvent,
   Health,
@@ -98,9 +99,7 @@ export function Toolbar({
       <div className="tb">
       {/* Out of this desk. Small and first, in the place a page's way back
           normally is, because it is not part of reading the market. */}
-      <button className="uphome" onClick={onHome} title="Back to the three desks">
-        ←
-      </button>
+      <BackButton onClick={onHome} />
 
       {/* The title is the switch. First thing in the bar, because it reframes
           everything to the right of it: the instruments, the panels, and the
