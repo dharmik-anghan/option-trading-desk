@@ -1697,10 +1697,14 @@ a.nitem:hover .nhead {
 .candlewrap .candles.dragging {
   cursor: grabbing;
 }
-/* The price axis is draggable, so it says so. */
+/* Both axes are draggable, so they say so. */
 .cscale {
   fill: transparent;
   cursor: ns-resize;
+}
+.ctime {
+  fill: transparent;
+  cursor: ew-resize;
 }
 
 .candlewrap .zoom {

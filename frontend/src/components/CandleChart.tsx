@@ -130,6 +130,8 @@ export function CandleChart({
   // looks equally volatile when it is always scaled to its own extremes.
   const [priceZoom, setPriceZoom] = useState(1);
   const scaling = useRef<{ y: number; zoom: number } | null>(null);
+  // The same gesture on the other axis: how many bars fit across the plot.
+  const timing = useRef<{ x: number; bars: number; end: number } | null>(null);
   // The drawing area, measured rather than assumed. The viewBox is fixed and
   // the element scales to fit it, so a box taller than the viewBox's aspect
   // letterboxes: the candles sit in a band with empty space above and below,
@@ -214,6 +216,14 @@ export function CandleChart({
   const overAxis = (event: { clientX: number }, box: DOMRect) =>
     box.width > 0 && (event.clientX - box.left) / box.width > (PAD.left + plotW) / W;
 
+  /** True when it is over the time axis along the bottom. The price axis wins
+      the corner where the two meet, which is what every charting package does
+      and what a hand reaching for one of them expects. */
+  const overTime = (event: { clientX: number; clientY: number }, box: DOMRect) =>
+    box.height > 0 &&
+    !overAxis(event, box) &&
+    (event.clientY - box.top) / box.height > (PAD.top + plotH) / H;
+
   const stretch = (factor: number) =>
     setPriceZoom((z) => Math.min(PRICE_ZOOM.max, Math.max(PRICE_ZOOM.min, z * factor)));
 
@@ -235,22 +245,50 @@ export function CandleChart({
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!total) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (overAxis(event, event.currentTarget.getBoundingClientRect())) {
+    const box = event.currentTarget.getBoundingClientRect();
+    if (overAxis(event, box)) {
       scaling.current = { y: event.clientY, zoom: priceZoom };
+      return;
+    }
+    if (overTime(event, box)) {
+      timing.current = { x: event.clientX, bars: showing, end: endIndex };
       return;
     }
     drag.current = { x: event.clientX, end: endIndex };
     setDragging(true);
   };
 
-  /** Back to the range the bars need. Double-click, as everywhere else. */
+  /** Back to what fits. Double-click an axis, as everywhere else. */
   const onDoubleClick = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (overAxis(event, event.currentTarget.getBoundingClientRect())) setPriceZoom(1);
+    const box = event.currentTarget.getBoundingClientRect();
+    if (overAxis(event, box)) setPriceZoom(1);
+    else if (overTime(event, box)) {
+      setBars(null);
+      setEnd(null);
+    }
   };
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const held = drag.current;
     const box = event.currentTarget.getBoundingClientRect();
+
+    const squeezing = timing.current;
+    if (squeezing !== null) {
+      if (!box.width) return;
+      // Right widens the bars and left packs more in, which is the direction
+      // the hand expects: dragging the time scale to the left pulls more
+      // history onto the screen.
+      const moved = (event.clientX - squeezing.x) / box.width;
+      const next = Math.max(
+        MIN_BARS,
+        Math.min(total, Math.round(squeezing.bars * Math.exp(-moved * 2))),
+      );
+      setBars(next);
+      // The right-hand edge stays put, so the newest bar does not walk off
+      // while the scale is being adjusted.
+      setEnd(squeezing.end);
+      return;
+    }
 
     const stretching = scaling.current;
     if (stretching !== null) {
@@ -301,6 +339,7 @@ export function CandleChart({
   const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
     drag.current = null;
     scaling.current = null;
+    timing.current = null;
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -386,17 +425,43 @@ export function CandleChart({
     return PAD.left + index * step + step / 2;
   };
 
+  // The window's own edges in time, for deciding whether something that
+  // happened between two moments is on screen at all.
+  const firstAt = shown.length ? Date.parse(shown[0].at) : NaN;
+  const lastAt = shown.length ? Date.parse(shown[shown.length - 1].at) : NaN;
+
+  /**
+   * Where a span between two moments falls on the x axis, or null when it
+   * falls outside the window entirely.
+   *
+   * The null case is the point. `xOf` answers null both for a moment before
+   * the first bar on screen and for one after the last, and the caller used to
+   * turn those into the left and right edges of the plot - so a break that had
+   * happened and finished long before the visible window was drawn as a line
+   * across the whole chart, at a price from somewhere off to the left.
+   */
+  const spanOf = (fromAt: string, toAt: string): { x1: number; x2: number } | null => {
+    const a = Date.parse(fromAt);
+    const b = Date.parse(toAt);
+    if (Number.isNaN(a) || Number.isNaN(b) || !shown.length) return null;
+    if (b < firstAt || a > lastAt) return null;
+    return {
+      // Clamped rather than dropped when only one end is off screen: a break
+      // whose origin has scrolled away still began somewhere to the left.
+      x1: a < firstAt ? PAD.left : (xOf(fromAt) ?? PAD.left),
+      x2: b > lastAt ? PAD.left + plotW : (xOf(toAt) ?? PAD.left + plotW),
+    };
+  };
+
   const marks = (overlay?.marks ?? [])
     .map((mark) => ({ ...mark, x: xOf(mark.at) }))
     .filter((mark): mark is typeof mark & { x: number } => mark.x !== null);
 
   const band = (() => {
     if (!overlay?.band) return null;
-    const from = xOf(overlay.band.from);
-    const to = xOf(overlay.band.to);
-    if (from === null) return null;
-    const right = to ?? PAD.left + plotW;
-    return { x: from, width: Math.max(1, right - from) };
+    const span = spanOf(overlay.band.from, overlay.band.to);
+    if (span === null) return null;
+    return { x: span.x1, width: Math.max(1, span.x2 - span.x1) };
   })();
 
   // Four gridlines: enough to read a level off, few enough not to be a net.
@@ -478,7 +543,7 @@ export function CandleChart({
         </span>
         <span className="sp" />
         <span className="dim">
-          drag to pan · scroll to zoom · drag the price axis to stretch it
+          drag to pan · scroll to zoom · drag an axis to stretch it
         </span>
       </div>
       <svg
@@ -515,16 +580,15 @@ export function CandleChart({
         />
       )}
 
-      {/* A level that only existed between two moments. Clamped to the plot so
-          a break whose origin scrolled off the left still starts at the edge
-          rather than vanishing. */}
+      {/* A level that only existed between two moments. Off-screen ones are
+          dropped rather than clamped into a line across the chart. */}
       {(overlay?.segments ?? []).map((seg, n) => {
-        const from = xOf(seg.from) ?? PAD.left;
-        const to = xOf(seg.to) ?? PAD.left + plotW;
+        const span = spanOf(seg.from, seg.to);
+        if (span === null) return null;
         return (
           <g key={`${n}-${seg.from}-${seg.to}`} className={`clevel ${seg.kind}`}>
-            <line x1={from} x2={to} y1={y(seg.price)} y2={y(seg.price)} />
-            <text x={from + 3} y={y(seg.price) - 4} className="clevellabel">
+            <line x1={span.x1} x2={span.x2} y1={y(seg.price)} y2={y(seg.price)} />
+            <text x={span.x1 + 3} y={y(seg.price) - 4} className="clevellabel">
               {seg.label}
             </text>
           </g>
@@ -641,6 +705,13 @@ export function CandleChart({
         width={PAD.right}
         height={plotH}
         className="cscale"
+      />
+      <rect
+        x={PAD.left}
+        y={PAD.top + plotH}
+        width={plotW}
+        height={PAD.bottom}
+        className="ctime"
       />
 
       {last !== null && (
