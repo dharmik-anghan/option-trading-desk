@@ -10,6 +10,7 @@ import {
   getQuotes,
   getMarketContext,
   getVolatility,
+  getStructure,
   getEvents,
   getNews,
   describeError,
@@ -21,6 +22,7 @@ import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
 import { PositionsRail } from "./components/PositionsRail";
+import { StructurePanel } from "./components/StructurePanel";
 import { VolPanel } from "./components/VolPanel";
 import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
@@ -67,6 +69,9 @@ const ALERTS_MS = 20000;
 // Implied volatility is a statement about a session, and every pass is a chain
 // fetch. Once a minute is far more often than the number changes meaningfully.
 const VOL_MS = 60000;
+// Structure changes when a bar closes. The smallest size shown is fifteen
+// minutes, so this is already several times faster than it can move.
+const STRUCTURE_MS = 120000;
 // Faster than the rest: this one reads prices the stream already delivered, so a
 // poll costs the backend a dictionary lookup rather than a venue request.
 // Slow, because prices arrive on their own now. What is left here changes on the
@@ -97,6 +102,11 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // The log is a second copy of what Telegram already delivered, so it lives
   // behind a count in the header rather than in a column of its own.
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // How many bars either side a turn has to beat, and which size is charted.
+  // The only real parameter in the structure reading, so it is on the panel
+  // rather than buried.
+  const [k, setK] = useState(2);
+  const [charted, setCharted] = useState("1d");
   const shownTopics = newsTopics ?? (onPerps ? ["crypto", "commodities"] : ["india"]);
 
   const health = useLive(getHealth, HEALTH_MS, [], paused, 0);
@@ -145,6 +155,16 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   const events = useLive(() => getEvents(45, "HM"), EVENTS_MS, [], paused, 2400);
   // Implied volatility moves on the scale of a session rather than a tick, and
   // each pass is a chain fetch - so this is the slowest poll on the desk.
+  // Structure changes when a bar closes, not when a tick arrives, and the
+  // smallest size on it is fifteen minutes. Reading it every couple of minutes
+  // is already far more often than it can change.
+  const structure = useLive(
+    () => getStructure(symbol, k, charted),
+    STRUCTURE_MS,
+    [symbol, k, charted],
+    paused || onPerps,
+    3000,
+  );
   const vol = useLive(
     () => getVolatility(symbol),
     VOL_MS,
@@ -292,7 +312,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   }, [portfolio]);
 
   return (
-    <div className="ws">
+    <div className={onPerps ? "ws perps" : "ws"}>
       <Toolbar
         symbol={symbol}
         spot={spot}
@@ -422,6 +442,18 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
           onTopics={setNewsTopics}
         />
       </div>
+
+      {!onPerps && (
+        <StructurePanel
+          structure={structure.data}
+          error={blockingOnly(structure.error)}
+          loading={structure.loading}
+          k={k}
+          onK={setK}
+          charted={charted}
+          onCharted={setCharted}
+        />
+      )}
 
       {onPerps ? (
         <PerpsChart

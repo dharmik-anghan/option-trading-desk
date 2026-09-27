@@ -99,6 +99,13 @@ export function CandleChart({
   const [bars, setBars] = useState<number | null>(null);
   const [end, setEnd] = useState<number | null>(null);
   const drag = useRef<{ x: number; end: number } | null>(null);
+  // The drawing area, measured rather than assumed. The viewBox is fixed and
+  // the element scales to fit it, so a box taller than the viewBox's aspect
+  // letterboxes: the candles sit in a band with empty space above and below,
+  // which is exactly what the structure panel looked like. Measuring lets the
+  // viewBox match the box, so the chart fills whatever it is given.
+  const box = useRef<SVGSVGElement | null>(null);
+  const [measured, setMeasured] = useState<number | null>(null);
   // The bar under the cursor, as an index into the whole series, and where the
   // cursor sits vertically as a fraction of the plot. Both null when the pointer
   // is elsewhere, which is what hides the crosshair.
@@ -112,7 +119,9 @@ export function CandleChart({
   // under the cursor. The viewBox is fixed and the element is scaled to fit, so
   // everything here is a fraction of the element rather than a pixel of it.
   const W = 1000;
-  const H = height;
+  // Scaled to the viewBox's own units: the element is W units wide however many
+  // pixels that is, so a box of 780x500 pixels is 1000x641 units.
+  const H = measured ?? height;
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
 
@@ -211,6 +220,21 @@ export function CandleChart({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
+
+  useEffect(() => {
+    const element = box.current;
+    if (element === null || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const units = Math.round((rect.height / rect.width) * W);
+      // Bounded: a collapsed panel would otherwise produce a viewBox of a few
+      // units and a chart of solid ink.
+      setMeasured(Math.max(120, Math.min(1400, units)));
+    });
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, []);
 
   useEffect(() => {
     onView?.({ start: startIndex, end: endIndex, hovered });
@@ -360,6 +384,7 @@ export function CandleChart({
         <span className="dim">drag to pan · scroll to zoom</span>
       </div>
       <svg
+      ref={box}
       className={dragging ? "candles dragging" : "candles"}
       viewBox={`0 0 ${W} ${H}`}
       role="img"

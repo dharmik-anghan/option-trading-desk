@@ -7,18 +7,142 @@
   display: grid;
   gap: 5px;
   padding: 5px;
-  /* Two columns since the alert log moved into the header. It was a third of
-     the screen showing a second copy of what Telegram had already delivered,
-     and the chart is the thing that wanted the room. */
-  /* The rail is wider than it was: the alert column went, and the positions
-     table on the perpetuals desk was being cut off at 286px with its P&L
-     column past the edge. */
-  grid-template-columns: 340px minmax(0, 1fr);
+  /* Three columns on the options desk: the rail, a chart, and the book.
+     It was two, with the structures and the chain stacked in one wide column -
+     which left a single 370px card floating in 1,150px of nothing, and left
+     the desk with no chart at all. The middle is the chart now, which is also
+     what the perpetuals desk does, so both read the same way.
+
+     The rail is wider than its original 286px because the alert column went
+     into the header and the positions table was being cut off. */
+  grid-template-columns: 340px minmax(0, 1fr) 380px;
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
+    "tb tb tb"
+    "left middle baskets"
+    "left middle chain";
+}
+/* The perpetuals desk has no book column: its positions live in the rail, and
+   a third column of nothing would be worse than the two it has. */
+.ws.perps {
+  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-areas:
     "tb tb"
-    "left baskets"
-    "left chain";
+    "left middle"
+    "left middle";
+}
+.a-structure {
+  grid-area: middle;
+}
+.structurepb {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 8px 9px;
+  gap: 8px;
+  min-height: 0;
+}
+/* The chart takes whatever is left after the size buttons and the reading
+   line, rather than sitting at a fixed height with a gap under it. */
+.structurepb .candlewrap {
+  flex: 1;
+  min-height: 0;
+}
+.structurepb .reading-structure {
+  flex: none;
+}
+
+/* One button per size, coloured by what that size says. The disagreement
+   between them is the information, so they sit side by side rather than
+   behind a dropdown. */
+.frames {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  flex: none;
+}
+.frame {
+  font: inherit;
+  text-align: left;
+  padding: 5px 7px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 0;
+}
+.frame:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.frame b {
+  display: block;
+  font-family: var(--u);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.frame span {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.frame em {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.frame.up { border-left-color: var(--up); }
+.frame.up span { color: var(--up); }
+.frame.dn { border-left-color: var(--dn); }
+.frame.dn span { color: var(--dn); }
+.frame.mixed { border-left-color: var(--mkt); }
+.frame.mixed span { color: var(--mkt); }
+.frame.none { border-left-color: var(--line); }
+.frame.none span { color: var(--dim); }
+.frame.on {
+  background: var(--selbg);
+  border-color: var(--you);
+  border-left-color: var(--you);
+}
+.kpick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.kpick input {
+  width: 40px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+.ph .sub.agree {
+  text-transform: capitalize;
+}
+.ph .sub.agree.mixed {
+  color: var(--mkt);
+  text-transform: none;
+}
+.reading-structure {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.reading-structure b {
+  color: var(--fg);
+  font-family: var(--u);
 }
 
 .panel {
@@ -1295,8 +1419,10 @@ a.nitem:hover .nhead {
 /* The chart takes the whole middle column: with no chain and no baskets there is
    nothing to share it with, and a price chart is the one thing on this desk that
    rewards the space. */
+/* The perpetuals chart fills the middle column, which on that desk is the only
+   column beside the rail. */
 .a-chart {
-  grid-area: baskets / baskets / chain / chain;
+  grid-area: middle;
 }
 .a-watch {
   min-height: 0;

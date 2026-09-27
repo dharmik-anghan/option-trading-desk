@@ -1239,3 +1239,57 @@ export interface Volatility {
 export function getVolatility(underlying: string): Promise<Volatility> {
   return getJson<Volatility>(`/api/volatility/${encodeURIComponent(underlying)}`);
 }
+
+// --- Market structure ------------------------------------------------------
+
+export interface Swing {
+  at: string;
+  kind: "high" | "low";
+  price: number;
+  /** False until k bars have printed after it — the next bar can revoke it. */
+  confirmed: boolean;
+}
+
+export interface StructureBreak {
+  at: string;
+  price: number;
+  level: number;
+  /** True when it continues the prevailing structure; false is the first crack. */
+  continuation: boolean;
+}
+
+export interface StructureFrame {
+  interval: string;
+  bars: number;
+  trend: "uptrend" | "downtrend" | "broadening" | "contracting" | "unclear";
+  says: string;
+  high_label: string | null;
+  low_label: string | null;
+  swings: Swing[];
+  last_break: StructureBreak | null;
+  /** Only on the charted timeframe, to keep the payload small. */
+  candles: { at: string; open: number; high: number; low: number; close: number }[];
+  note: string;
+}
+
+export interface MarketStructure {
+  underlying: string;
+  name: string;
+  k: number;
+  charted: string;
+  frames: StructureFrame[];
+  /** Where every size agrees, if they do. */
+  agreement: string;
+  caveats: string[];
+}
+
+export function getStructure(
+  underlying: string,
+  k: number,
+  charted: string,
+): Promise<MarketStructure> {
+  const query = new URLSearchParams({ k: String(k), charted });
+  return getJson<MarketStructure>(
+    `/api/structure/${encodeURIComponent(underlying)}?${query}`,
+  );
+}

@@ -45,6 +45,7 @@ from api.routers import (
     portfolio,
     rrg,
     strategies,
+    structure,
     system,
     volatility,
 )
@@ -240,6 +241,7 @@ for _router in (
     strategies.router,
     orders.router,
     baskets.router,
+    structure.router,
     volatility.router,
 ):
     app.include_router(_router)
