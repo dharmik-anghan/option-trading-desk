@@ -1251,6 +1251,8 @@ export interface Swing {
 }
 
 export interface StructureBreak {
+  /** When the level was set. A break is a span, not a level. */
+  from_at: string;
   at: string;
   price: number;
   level: number;

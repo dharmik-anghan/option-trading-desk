@@ -61,6 +61,8 @@ class SwingOut(BaseModel):
 
 
 class BreakOut(BaseModel):
+    #: When the level was set, and when it was taken. A break is a span.
+    from_at: str
     at: str
     price: float
     level: float
@@ -249,6 +251,7 @@ def _frame(size: Interval, bars: list[Bar], k: int, *, charted: bool) -> FrameOu
         ],
         last_break=(
             BreakOut(
+                from_at=found.last_break.from_at.isoformat(),
                 at=found.last_break.at.isoformat(),
                 price=found.last_break.price,
                 level=found.last_break.level,

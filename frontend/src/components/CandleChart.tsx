@@ -28,6 +28,16 @@ export interface Overlay {
   levels?: { price: number; label: string; kind: "entry" | "exit" | "stop" | "target" }[];
   /** A point in time and price: where a position was opened or closed. */
   marks?: { at: string; price: number; kind: "entry" | "exit"; side: "long" | "short" }[];
+  /** A level that existed between two moments rather than across the chart —
+      a broken swing runs from where it was set to where it was taken, and
+      drawing it full width states it at times it had not happened. */
+  segments?: {
+    from: string;
+    to: string;
+    price: number;
+    label: string;
+    kind: "entry" | "exit" | "stop" | "target";
+  }[];
   /** The stretch a position was held over, shaded. */
   band?: { from: string; to: string };
   /** Indicator lines, one value per candle, null where not yet defined. */
@@ -415,6 +425,22 @@ export function CandleChart({
           className="cheld"
         />
       )}
+
+      {/* A level that only existed between two moments. Clamped to the plot so
+          a break whose origin scrolled off the left still starts at the edge
+          rather than vanishing. */}
+      {(overlay?.segments ?? []).map((seg) => {
+        const from = xOf(seg.from) ?? PAD.left;
+        const to = xOf(seg.to) ?? PAD.left + plotW;
+        return (
+          <g key={`${seg.kind}-${seg.price}-${seg.from}`} className={`clevel ${seg.kind}`}>
+            <line x1={from} x2={to} y1={y(seg.price)} y2={y(seg.price)} />
+            <text x={from + 3} y={y(seg.price) - 4} className="clevellabel">
+              {seg.label}
+            </text>
+          </g>
+        );
+      })}
 
       {(overlay?.levels ?? []).map((level) => (
         <g key={`${level.kind}-${level.price}`} className={`clevel ${level.kind}`}>

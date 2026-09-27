@@ -74,6 +74,11 @@ class Break:
     price: float
     #: The swing level that was taken out.
     level: float
+    #: When that level was set. A break is a span between two moments - the
+    #: swing that made the level and the bar that took it - and drawing it as a
+    #: line across the whole chart states it at times when it had not happened
+    #: and times when it was long over.
+    from_at: datetime
     #: True when the break continues the prevailing structure - a higher high in
     #: an uptrend. False when it goes against it, which is the first sign of a
     #: turn and is usually called a change of character.
@@ -233,6 +238,7 @@ def _break(
                 at=bar.ts,
                 price=bar.close,
                 level=last_high.price,
+                from_at=last_high.at,
                 continuation=trend is not Trend.DOWN,
             )
         if last_low is not None and bar.ts > last_low.at and bar.close < last_low.price:
@@ -240,6 +246,7 @@ def _break(
                 at=bar.ts,
                 price=bar.close,
                 level=last_low.price,
+                from_at=last_low.at,
                 continuation=trend is not Trend.UP,
             )
     return found

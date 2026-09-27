@@ -139,6 +139,10 @@ export function StructurePanel({
  * One line: the level price last broke, dotted, labelled BOS when the break
  * went with the structure and CHoCH when it went against it. Nothing else.
  *
+ * Drawn from the swing that set the level to the bar that took it, not across
+ * the whole chart. A break is a span between two moments; a full-width line
+ * states the level at times before it existed and long after it was gone.
+ *
  * The first version marked every swing with a dot and the last high and low
  * with their own lines. Both were wrong. The dots were borrowed from the
  * backtest chart, where a marker means a fill - so they were labelled "buy" and
@@ -155,8 +159,10 @@ function overlayFor(frame: StructureFrame): Overlay {
   const br = frame.last_break;
   if (!br) return {};
   return {
-    levels: [
+    segments: [
       {
+        from: br.from_at,
+        to: br.at,
         price: br.level,
         label: `${br.continuation ? "BOS" : "CHoCH"} ${num(br.level, 0)}`,
         // Coloured by which way price went, not by whether the break continued
