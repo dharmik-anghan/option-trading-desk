@@ -27,12 +27,23 @@ export function int(value: number): string {
   return Math.round(value).toLocaleString("en-IN");
 }
 
-/** Signed, for anything that can go either way. Zero carries no sign. */
+/**
+ * Signed, for anything that can go either way. Zero carries no sign.
+ *
+ * Rounded to the decimals being asked for, not to two and then formatted to
+ * however many. It rounded to two first, so `signed(0.0013, 4)` printed
+ * "0.0000" — which it did on the perpetuals desk, where a 0.002 lot of gold
+ * has a profit in the fourth decimal of a dollar and the screen read zero
+ * against the venue's 0.06.
+ */
 export function signed(value: number, dp = 0): string {
   if (!Number.isFinite(value)) return "—";
-  const r = round2(value);
+  const step = 10 ** dp;
+  const r = Math.round(value * step) / step;
   const body = dp > 0 ? num(Math.abs(r), dp) : int(Math.abs(r));
-  if (Math.abs(r) < (dp > 0 ? 10 ** -dp / 2 : 0.5)) return body;
+  // Exactly zero after rounding carries no sign: "+0.00" claims a gain that
+  // the figure beside it does not show.
+  if (r === 0) return body;
   return (r > 0 ? "+" : MINUS) + body;
 }
 

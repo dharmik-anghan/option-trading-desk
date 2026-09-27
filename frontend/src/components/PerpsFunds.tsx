@@ -63,16 +63,22 @@ export function PerpsFunds({ positions, prices, quoteCurrency, moneyCurrency }: 
 
   return (
     <div className="funds">
+      {/* In the account's money first. The instrument trades in USDT, but the
+          account is funded in INR and that is what the venue's own screen
+          shows - and at two decimals of USDT a 0.002 lot of gold reads 0.00
+          however far it has moved, because the figure lives in the fourth
+          decimal. Reporting 0.00 against the venue's 0.06 is the same number
+          twice, shown once in a way nobody can use. */}
       <div className="fund">
         <small>Open profit</small>
         <b className={known ? dir(pnl) : undefined}>
-          {known ? signed(pnl, 2) : "—"}
-          <span className="unit">{quoteCurrency}</span>
+          {known ? signed(pnlInMoney, 2) : "—"}
+          <span className="unit">{moneyCurrency}</span>
         </b>
         {known && (
           <em className={dir(pnl)}>
-            {signed(pnlInMoney, 0)} {moneyCurrency}
-            {onMargin !== null && ` · ${signed(onMargin * 100, 1)}% of margin`}
+            {signed(pnl, 4)} {quoteCurrency}
+            {onMargin !== null && ` · ${signed(onMargin * 100, 2)}% of margin`}
           </em>
         )}
       </div>

@@ -126,7 +126,9 @@ export function PerpsPositions({
                 <th>Size</th>
                 <th>Entry</th>
                 <th>Now</th>
-                <th>P&amp;L</th>
+                <th title="In the account's money, which is what the venue reports">
+                  P&amp;L
+                </th>
                 <th>To liq.</th>
                 <th>Stop</th>
                 <th />
@@ -154,12 +156,18 @@ export function PerpsPositions({
                     <td
                       className={live(p) === null ? undefined : dir(live(p) as number)}
                       title={
-                        p.pnl_is_ours
-                          ? `Worked out from the price — the venue reported none. In ${quoteCurrency}.`
-                          : `As the venue reports it, in ${quoteCurrency}.`
+                        live(p) === null
+                          ? "No price yet"
+                          : `${signed(live(p) as number, 4)} ${quoteCurrency}` +
+                            (p.pnl_is_ours
+                              ? " — worked out from the streamed price, because the venue" +
+                                " reports none on an open position"
+                              : " — as the venue reports it")
                       }
                     >
-                      {live(p) === null ? "—" : signed(live(p) as number, 2)}
+                      {live(p) === null
+                        ? "—"
+                        : signed((live(p) as number) * (p.conversion_rate ?? 0), 2)}
                       {p.pnl_is_ours && <span className="dim">*</span>}
                     </td>
                     <td className={near ? "dn" : undefined} title={
@@ -266,7 +274,8 @@ export function PerpsPositions({
 
       {positions.length > 0 && (
         <p className="dim" style={{ margin: 0, padding: "4px 9px 8px", lineHeight: 1.4 }}>
-          Prices and P&amp;L in {quoteCurrency}; margin in {moneyCurrency}. An
+          Prices in {quoteCurrency}; profit and margin in {moneyCurrency}, which is
+          what the account is kept in and what the venue&rsquo;s own screen shows. An
           asterisk marks a P&amp;L we worked out rather than one the venue
           reported.
         </p>
