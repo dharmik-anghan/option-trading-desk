@@ -35,6 +35,7 @@ from api.dependencies import broker_for, get_broker, get_db_path, get_feeds
 from api.errors import broker_error_handler
 from api.routers import (
     alerts,
+    backtest,
     bars,
     baskets,
     feeds,
@@ -129,6 +130,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         except Exception:  # noqa: BLE001 - a desk without a venue still draws charts
             log.warning("could not register the perpetuals venue as a bar source")
     application.state.bar_service = bar_service
+    application.state.bar_store = bar_store
 
     def perps_broker() -> object | None:
         """The perpetuals adapter, or None when that venue is not configured.
@@ -212,6 +214,7 @@ app.add_exception_handler(BrokerError, broker_error_handler)
 for _router in (
     system.router,
     alerts.router,
+    backtest.router,
     bars.router,
     portfolio.router,
     market.router,

@@ -1,0 +1,186 @@
+"""Running a built strategy through the API.
+
+Wired to a store of its own, so these never read the real history: a test whose
+result depends on what happened to Bitcoin last Tuesday is not a test.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from api.app import app
+from marketdata import BarService, BarStore, Interval, Series
+from marketdata.models import Bar
+
+START = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture
+def stocked() -> Iterator[TestClient]:
+    """A client whose bar store holds one known, rising series."""
+    store = BarStore()
+    # A saw-tooth: rises for twenty bars, falls for ten, repeatedly. Enough for a
+    # moving-average crossover to fire without being a straight line.
+    bars: list[Bar] = []
+    price = 100.0
+    for i in range(1200):
+        price += 1.0 if i % 30 < 20 else -1.6
+        bars.append(
+            Bar(
+                ts=START + timedelta(minutes=5 * i),
+                open=price,
+                high=price + 0.5,
+                low=price - 0.5,
+                close=price,
+                volume=1.0,
+            )
+        )
+    store.write(Series("binance", "TESTUSDT", Interval.M5), bars)
+    store.write_funding("binance", "TESTUSDT", [(START + timedelta(hours=8), 0.0001)])
+
+    # Overridden inside the context, not before it: entering the client runs the
+    # app's lifespan, which opens the real bar store and would replace anything
+    # set beforehand - and on a machine where the desk is running it cannot open
+    # that file at all, so the endpoint would answer 503 instead of using this.
+    with TestClient(app) as client:
+        previous_service = getattr(app.state, "bar_service", None)
+        previous_store = getattr(app.state, "bar_store", None)
+        app.state.bar_service = BarService(
+            store, now=lambda: START + timedelta(minutes=5 * 1200)
+        )
+        app.state.bar_store = store
+        try:
+            yield client
+        finally:
+            app.state.bar_service = previous_service
+            app.state.bar_store = previous_store
+    store.close()
+
+
+def _crossover() -> dict[str, Any]:
+    fast = {"kind": "indicator", "name": "ema", "length": 5}
+    slow = {"kind": "indicator", "name": "ema", "length": 20}
+    return {
+        "spec": {
+            "name": "Test crossover",
+            "long_entry": {"all": [{"left": fast, "op": "crosses_above", "right": slow}]},
+            "long_exit": {"all": [{"left": fast, "op": "crosses_below", "right": slow}]},
+        },
+        "source": "binance",
+        "symbol": "TESTUSDT",
+        "interval": "5m",
+        "days": 10,
+        "capital": 1000.0,
+        "leverage": 1.0,
+        "slippage_bps": 1.0,
+        "maker_entry": False,
+    }
+
+
+def test_a_run_returns_a_result_that_says_what_produced_it(stocked: TestClient) -> None:
+    """A result that cannot be read back to its strategy is one nobody can check."""
+    response = stocked.post("/api/backtest/run", json=_crossover())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Test crossover"
+    assert "EMA 5 crosses above EMA 20" in body["reads"]
+    assert body["metrics"]["trades"] > 0
+    assert len(body["curve"]) > 2
+
+
+def test_every_result_carries_what_holding_would_have_done(stocked: TestClient) -> None:
+    body = stocked.post("/api/backtest/run", json=_crossover()).json()
+
+    assert "buy_and_hold" in body["metrics"]
+    assert isinstance(body["metrics"]["beat_holding"], bool)
+
+
+def test_a_longer_bar_size_is_built_from_what_is_stored(stocked: TestClient) -> None:
+    """Only 5m is held, so an hourly run has to resample rather than fail."""
+    request = {**_crossover(), "interval": "1h"}
+
+    body = stocked.post("/api/backtest/run", json=request).json()
+
+    assert body["interval"] == "1h"
+    # 1,200 five-minute bars inside ten days is 100 hours
+    assert body["bars"] == pytest.approx(100, abs=2)
+
+
+def test_a_broken_strategy_says_what_to_change(stocked: TestClient) -> None:
+    """The builder's own message, not a stack trace."""
+    request = {**_crossover()}
+    request["spec"] = {
+        "name": "Nonsense",
+        "long_entry": {
+            "all": [
+                {
+                    "left": {"kind": "indicator", "name": "macd", "length": 9},
+                    "op": "above",
+                    "right": 0,
+                }
+            ]
+        },
+        "long_exit": {
+            "all": [{"left": {"kind": "price", "field": "close"}, "op": "below", "right": 0}]
+        },
+    }
+
+    response = stocked.post("/api/backtest/run", json=request)
+
+    assert response.status_code == 400
+    assert "no indicator called" in response.json()["detail"]
+
+
+def test_a_strategy_with_no_entry_is_refused(stocked: TestClient) -> None:
+    request = {**_crossover(), "spec": {"name": "Empty"}}
+
+    response = stocked.post("/api/backtest/run", json=request)
+
+    assert response.status_code == 400
+    assert "Nothing to enter on" in response.json()["detail"]
+
+
+def test_a_symbol_with_no_history_says_how_to_get_some(stocked: TestClient) -> None:
+    request = {**_crossover(), "symbol": "NOTHINGUSDT"}
+
+    response = stocked.post("/api/backtest/run", json=request)
+
+    assert response.status_code == 404
+    assert "backfill_bars.py" in response.json()["detail"]
+
+
+def test_funding_from_another_source_is_labelled_as_a_proxy(stocked: TestClient) -> None:
+    """The venue publishes none of its own, and a result must not hide that."""
+    body = stocked.post("/api/backtest/run", json=_crossover()).json()
+
+    assert any("proxy" in c for c in body["caveats"])
+
+
+def test_the_curve_is_thinned_but_keeps_its_lowest_points(stocked: TestClient) -> None:
+    """A curve thinned by sampling loses exactly the spikes a drawdown is made of."""
+    body = stocked.post("/api/backtest/run", json=_crossover()).json()
+
+    # A drawdown is ordered: a low before a peak is not a fall from it. Comparing
+    # the global minimum with the global maximum would overstate it, which is the
+    # mistake this is checking the thinning does not make.
+    drawn = 0.0
+    peak = float("-inf")
+    for _, value in body["curve"]:
+        peak = max(peak, value)
+        drawn = max(drawn, (peak - value) / peak)
+
+    # The curve is rounded to the paisa, so it can differ in the last decimal.
+    assert body["metrics"]["max_drawdown"] == pytest.approx(drawn, abs=1e-4)
+    assert drawn > 0
+
+
+def test_leverage_beyond_the_venues_maximum_is_refused(stocked: TestClient) -> None:
+    response = stocked.post("/api/backtest/run", json={**_crossover(), "leverage": 500})
+
+    assert response.status_code == 422

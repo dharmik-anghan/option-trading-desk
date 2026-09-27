@@ -867,3 +867,120 @@ export interface BarSeries {
 export function getBarSeries(): Promise<BarSeries[]> {
   return getJson<BarSeries[]>("/api/bars/series");
 }
+
+// --- Backtesting -----------------------------------------------------------
+
+/** One side of a comparison: an indicator, a price, a pivot level, or a number. */
+export type Operand =
+  | { kind: "indicator"; name: "ema" | "sma" | "rsi" | "atr"; length: number; ago?: number; tf?: string }
+  | { kind: "price"; field: "open" | "high" | "low" | "close"; ago?: number; tf?: string }
+  | { kind: "pivot"; level: string; ago?: number; tf?: string }
+  | { kind: "value"; value: number };
+
+export type Comparison = "crosses_above" | "crosses_below" | "above" | "below" | "equals";
+
+export interface Compare {
+  left: Operand;
+  op: Comparison;
+  right: Operand;
+}
+
+/** A group of comparisons, joined one way or the other. */
+export interface Group {
+  all?: Compare[];
+  any?: Compare[];
+}
+
+export type LevelKind = "percent" | "candle" | "atr" | "pivot" | "reward";
+
+export interface Level {
+  kind: LevelKind;
+  value?: number;
+  length?: number;
+  field?: string;
+  level?: string;
+  ago?: number;
+  tf?: string;
+}
+
+export interface StrategySpec {
+  name: string;
+  long_entry?: Group | null;
+  short_entry?: Group | null;
+  long_exit?: Group | null;
+  short_exit?: Group | null;
+  stop?: Level | null;
+  target?: Level | null;
+}
+
+export interface BacktestRequest {
+  spec: StrategySpec;
+  source: string;
+  symbol: string;
+  interval: string;
+  days: number;
+  capital: number;
+  leverage: number;
+  slippage_bps: number;
+  maker_entry: boolean;
+}
+
+export interface BacktestMetrics {
+  trades: number;
+  wins: number;
+  win_rate: number;
+  total_return: number;
+  buy_and_hold: number;
+  beat_holding: boolean;
+  max_drawdown: number;
+  sharpe: number;
+  gross: number;
+  fees: number;
+  funding: number;
+  slippage: number;
+  cost_share: number | null;
+  exposure: number;
+  best: number;
+  worst: number;
+  endings: Record<string, number>;
+}
+
+export interface BacktestTrade {
+  side: string;
+  opened_at: string;
+  closed_at: string;
+  entry: number;
+  exit_price: number;
+  quantity: number;
+  why: string;
+  reason: string;
+  gross: number;
+  fees: number;
+  funding: number;
+  slippage: number;
+  net: number;
+}
+
+export interface BacktestResult {
+  name: string;
+  /** The strategy read back in words, so a result says what produced it. */
+  reads: string;
+  symbol: string;
+  source: string;
+  interval: string;
+  bars: number;
+  started: string | null;
+  ended: string | null;
+  capital: number;
+  final: number;
+  metrics: BacktestMetrics;
+  /** [unix seconds, equity], thinned for drawing. */
+  curve: [number, number][];
+  trades: BacktestTrade[];
+  trades_total: number;
+  caveats: string[];
+}
+
+export function runBacktest(request: BacktestRequest): Promise<BacktestResult> {
+  return postJson<BacktestRequest, BacktestResult>("/api/backtest/run", request);
+}
