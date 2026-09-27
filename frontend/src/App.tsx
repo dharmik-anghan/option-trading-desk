@@ -9,6 +9,7 @@ import {
   getPortfolioHistory,
   getQuotes,
   getMarketContext,
+  getVolatility,
   getEvents,
   getNews,
   describeError,
@@ -20,6 +21,7 @@ import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
 import { PositionsRail } from "./components/PositionsRail";
+import { VolPanel } from "./components/VolPanel";
 import { OptionChainPanel } from "./components/OptionChainPanel";
 import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
@@ -62,6 +64,9 @@ const HEALTH_MS = 30000;
 // The backend judges about once a minute, so polling faster only repeats an
 // answer. Slower than that and a fired alert sits unseen on screen.
 const ALERTS_MS = 20000;
+// Implied volatility is a statement about a session, and every pass is a chain
+// fetch. Once a minute is far more often than the number changes meaningfully.
+const VOL_MS = 60000;
 // Faster than the rest: this one reads prices the stream already delivered, so a
 // poll costs the backend a dictionary lookup rather than a venue request.
 // Slow, because prices arrive on their own now. What is left here changes on the
@@ -138,6 +143,15 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
     1900,
   );
   const events = useLive(() => getEvents(45, "HM"), EVENTS_MS, [], paused, 2400);
+  // Implied volatility moves on the scale of a session rather than a tick, and
+  // each pass is a chain fetch - so this is the slowest poll on the desk.
+  const vol = useLive(
+    () => getVolatility(symbol),
+    VOL_MS,
+    [symbol],
+    paused || onPerps,
+    2700,
+  );
   const history = useLive(
     () => getPortfolioHistory(7),
     BASKETS_MS,
@@ -387,6 +401,9 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
             moneyCurrency={perps.data?.money_currency ?? "INR"}
             onChanged={perps.refresh}
           />
+        )}
+        {!onPerps && (
+          <VolPanel vol={vol.data} error={blockingOnly(vol.error)} loading={vol.loading} />
         )}
         {!onPerps && (
           <PositionsRail

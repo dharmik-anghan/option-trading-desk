@@ -46,6 +46,7 @@ from api.routers import (
     rrg,
     strategies,
     system,
+    volatility,
 )
 from api.store import open_db
 from broker.errors import BrokerError
@@ -239,6 +240,7 @@ for _router in (
     strategies.router,
     orders.router,
     baskets.router,
+    volatility.router,
 ):
     app.include_router(_router)
 

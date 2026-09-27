@@ -53,6 +53,17 @@ WINDOW_DAYS = 360
 BETWEEN = 0.2
 
 
+#: Series the desk needs that are in no index's constituent list.
+#:
+#: India VIX is the reason this exists. It is not an index with members and it
+#: is not a stock, but it is the one series that makes an implied volatility
+#: reading mean anything - a figure of 12 says nothing until you know the last
+#: two years ran between 9 and 28.
+EXTRAS: tuple[tuple[str, str], ...] = (
+    ("INDIAVIX", "NSE:INDIAVIX-INDEX"),
+)
+
+
 def wanted() -> list[tuple[str, str]]:
     """Every series to fetch, as (label, symbol), indices first.
 
@@ -60,6 +71,7 @@ def wanted() -> list[tuple[str, str]]:
     leaves the graph able to draw sectors against Nifty even with no stocks.
     """
     out: list[tuple[str, str]] = [(spec.id, spec.symbol) for spec in INDICES]
+    out.extend(EXTRAS)
     seen = {symbol for _, symbol in out}
     for membership in load().values():
         for member in membership.members:

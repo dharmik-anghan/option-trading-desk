@@ -3385,3 +3385,154 @@ a.nitem:hover .nhead {
 .fund em.dn {
   color: var(--dn);
 }
+
+/* ── Is premium rich or cheap ──────────────────────────────────────────────
+   The question the desk could not answer: it showed what a position is, and
+   nothing about whether the options in it were expensive. */
+.a-vol .pb {
+  padding: 8px 9px 10px;
+}
+.volhead {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.volfig {
+  background: var(--panel);
+  padding: 7px 9px;
+}
+.volfig small {
+  display: block;
+  font-family: var(--u);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.volfig b {
+  display: block;
+  margin-top: 2px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.volfig b.up { color: var(--up); }
+.volfig b.dn { color: var(--dn); }
+.volfig em {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--dim);
+}
+.a-vol .move {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.a-vol .move b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Where a reading sits in its own past. The bar is the point: a level means
+   nothing without the range it sits in. */
+.rankbar {
+  margin-top: 12px;
+}
+.rankhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--dim);
+}
+.rankhead b {
+  font-weight: 600;
+}
+.rankbar.rich .rankhead b { color: var(--dn); }
+.rankbar.cheap .rankhead b { color: var(--up); }
+.rankbar.mid .rankhead b { color: var(--mkt); }
+.rankbar .track {
+  position: relative;
+  height: 6px;
+  margin: 5px 0 3px;
+  background: var(--grid);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.rankbar .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+}
+.rankbar.rich .fill { background: rgba(174, 40, 53, 0.35); }
+.rankbar.cheap .fill { background: rgba(10, 107, 69, 0.3); }
+.rankbar.mid .fill { background: rgba(128, 87, 6, 0.3); }
+.rankbar .here {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  background: var(--fg);
+}
+.rankfoot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.volrealised {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.volrealised th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--dim);
+  padding: 3px 8px 3px 0;
+  white-space: nowrap;
+}
+.volrealised td {
+  text-align: left;
+  padding: 3px 8px 3px 0;
+}
+.volrealised td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.volrealised tr.aside th,
+.volrealised tr.aside td {
+  color: var(--dim);
+}
+.volrealised tr.aside:first-of-type th {
+  border-top: 1px solid var(--grid);
+  padding-top: 5px;
+}
+.volrealised tr.aside:first-of-type td {
+  border-top: 1px solid var(--grid);
+  padding-top: 5px;
+}
+.volnote {
+  margin: 7px 0 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+.volcaveat {
+  margin: 10px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--mkt);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--dim);
+}

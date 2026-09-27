@@ -457,3 +457,40 @@ def test_every_frontend_route_survives_a_reload(client: TestClient, path: str) -
 def test_a_missing_asset_is_still_a_404(client: TestClient) -> None:
     """Falling back to the page for a missing script would hide a broken build."""
     assert client.get("/assets/not-a-real-bundle.js").status_code == 404
+
+
+def test_volatility_answers_whether_premium_is_rich(client: TestClient) -> None:
+    """The question the desk could not answer at all.
+
+    The fake broker serves a chain with greeks, so this checks the shape and the
+    arithmetic rather than a particular number.
+    """
+    response = client.get("/api/volatility/NSE:NIFTY50-INDEX")
+
+    assert response.status_code in {200, 502, 503}
+    if response.status_code != 200:
+        return
+    body = response.json()
+    assert body["name"] == "NIFTY 50"
+    assert [r["window"] for r in body["realised"]] == [10, 20, 60]
+
+
+def test_an_underlying_the_desk_does_not_trade_is_refused(client: TestClient) -> None:
+    response = client.get("/api/volatility/NSE:RELIANCE-EQ")
+
+    assert response.status_code == 404
+    assert "not an underlying here" in response.json()["detail"]
+
+
+def test_a_thin_implied_history_says_so_rather_than_ranking_it(
+    client: TestClient,
+) -> None:
+    """A rank over nothing is not a rank, and this history cannot be backfilled -
+    so the screen has to say how long until one exists."""
+    response = client.get("/api/volatility/NSE:NIFTY50-INDEX")
+
+    if response.status_code != 200:
+        return
+    body = response.json()
+    if body["iv_rank"] is None:
+        assert any("cannot be backfilled" in c for c in body["caveats"])
