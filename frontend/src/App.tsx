@@ -169,9 +169,9 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // smallest size on it is fifteen minutes. Reading it every couple of minutes
   // is already far more often than it can change.
   const structure = useLive(
-    () => getStructure(symbol, k, charted),
+    () => getStructure(symbol, k),
     STRUCTURE_MS,
-    [symbol, k, charted],
+    [symbol, k],
     paused || onPerps,
     3000,
   );
@@ -471,6 +471,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
           structure={structure.data}
           error={blockingOnly(structure.error)}
           loading={structure.loading}
+          underlying={symbol}
           k={k}
           onK={setK}
           charted={charted}

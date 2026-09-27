@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
@@ -69,18 +69,6 @@ class TestTheDesk:
             assert prices["XAUUSDT"]["price"] is None
         finally:
             app.state.tick_hub = None
-
-
-class TestCandles:
-    def test_an_unlisted_symbol_is_a_404(self, client: TestClient) -> None:
-        assert client.get("/api/perps/candles/DOGEUSDT").status_code == 404
-
-    def test_a_listed_symbol_reaches_the_broker(self, client: TestClient) -> None:
-        # The fake broker in these tests is the options one, so this asks only
-        # that routing and validation work - the shapes are covered by
-        # tests/broker/test_shark_parse.py against real responses.
-        response = client.get("/api/perps/candles/BTCUSDT")
-        assert response.status_code in {200, 502}
 
 
 SPECS = {
@@ -746,79 +734,3 @@ class TestClosingAPosition:
         # a short closes by buying
         assert row["side"] == "BUY"
         assert row["quantity"] == 0.002
-
-
-def _stub_candles(n: int = 120) -> list[Candle]:
-    """A rising series for the chart tests to draw on."""
-    start = datetime(2026, 1, 1, tzinfo=UTC)
-    return [
-        Candle(
-            timestamp=start + timedelta(hours=i),
-            open=100.0 + i,
-            high=101.0 + i,
-            low=99.0 + i,
-            close=100.5 + i,
-            volume=1.0,
-        )
-        for i in range(n)
-    ]
-
-
-def test_candles_carry_the_indicators_that_were_asked_for(
-    client: TestClient, stub_venue: Stub
-) -> None:
-    """The desk's chart draws lines through the same code a backtest reads them
-    with, so the EMA here and the EMA a rule trades on are the same number."""
-    stub_venue.history = _stub_candles()
-
-    response = client.get(
-        "/api/perps/candles/BTCUSDT",
-        params={"resolution": "60", "days": 5, "indicators": "ema:5,rsi:14"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    labels = {line["label"]: line for line in body["lines"]}
-    assert set(labels) == {"EMA 5", "RSI 14"}
-    for line in body["lines"]:
-        assert len(line["values"]) == len(body["candles"])
-    # an RSI is 0-100 and would be a flat line along the bottom of a price chart
-    assert labels["EMA 5"]["on_price"] is True
-    assert labels["RSI 14"]["on_price"] is False
-
-
-def test_candles_without_indicators_carry_none(client: TestClient) -> None:
-    body = client.get("/api/perps/candles/BTCUSDT", params={"resolution": "60"}).json()
-
-    assert body["lines"] == []
-
-
-def test_an_unreadable_indicator_is_dropped_rather_than_refusing_the_chart(
-    client: TestClient, stub_venue: Stub
-) -> None:
-    """A chart is worth drawing without a line somebody mistyped. The endpoint
-    that has to be strict about this is the one that runs a strategy."""
-    stub_venue.history = _stub_candles()
-
-    response = client.get(
-        "/api/perps/candles/BTCUSDT",
-        params={"resolution": "60", "indicators": "ema:20,macd:9,ema:notanumber"},
-    )
-
-    assert response.status_code == 200
-    assert [line["label"] for line in response.json()["lines"]] == ["EMA 20"]
-
-
-def test_an_indicator_cannot_be_read_on_a_shorter_timeframe_than_the_chart(
-    client: TestClient, stub_venue: Stub
-) -> None:
-    """The same rule the backtester enforces, for the same reason: a five-minute
-    line on an hourly chart would be showing bars the chart does not have."""
-    stub_venue.history = _stub_candles()
-
-    response = client.get(
-        "/api/perps/candles/BTCUSDT",
-        params={"resolution": "60", "indicators": "ema:20:5m,ema:50:4h"},
-    )
-
-    assert [line["label"] for line in response.json()["lines"]] == ["EMA 50 4h"]

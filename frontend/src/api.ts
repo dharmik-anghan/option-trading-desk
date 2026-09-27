@@ -714,17 +714,35 @@ export interface CandlesResponse {
   lines: IndicatorLine[];
 }
 
-export function getPerpCandles(
+/**
+ * Candles for any series, from the one endpoint both desks draw from.
+ *
+ * `source` names whose candles they are, and it is not a detail: a perpetual on
+ * Shark, spot on Binance and an NSE index are three different instruments, and
+ * a chart must never quietly substitute one for another.
+ *
+ * `bars` asks for the last N, which is how a panel asks for exactly the window
+ * something beside it is describing. `days` is how far back to read, and is
+ * worked out from `bars` when it is left out — the calendar arithmetic differs
+ * at every size and the caller should not have to do it.
+ */
+export function getChart(
+  source: string,
   symbol: string,
-  resolution: string,
-  days: number,
-  /** "ema:20,ema:50,rsi:14" — or with a timeframe, "ema:50:4h". */
-  indicators = "",
+  opts: {
+    interval: string;
+    days?: number;
+    bars?: number;
+    /** "ema:20,ema:50,rsi:14" — or with a timeframe, "ema:50:4h". */
+    indicators?: string;
+  },
 ): Promise<CandlesResponse> {
-  const query = new URLSearchParams({ resolution, days: String(days) });
-  if (indicators) query.set("indicators", indicators);
+  const query = new URLSearchParams({ interval: opts.interval });
+  if (opts.days) query.set("days", String(opts.days));
+  if (opts.bars) query.set("bars", String(opts.bars));
+  if (opts.indicators) query.set("indicators", opts.indicators);
   return getJson<CandlesResponse>(
-    `/api/perps/candles/${encodeURIComponent(symbol)}?${query}`,
+    `/api/chart/${encodeURIComponent(source)}/${encodeURIComponent(symbol)}?${query}`,
   );
 }
 
@@ -1272,8 +1290,6 @@ export interface StructureFrame {
   low_label: string | null;
   swings: Swing[];
   last_break: StructureBreak | null;
-  /** Only on the charted timeframe, to keep the payload small. */
-  candles: { at: string; open: number; high: number; low: number; close: number }[];
   note: string;
 }
 
@@ -1281,21 +1297,18 @@ export interface MarketStructure {
   underlying: string;
   name: string;
   k: number;
-  /** Bars each reading looks back over, the same count at every size. */
+  /** Bars each reading looks back over, the same count at every size. The chart
+      asks `/api/chart` for this many, so what is on screen is what the reading
+      was taken from. */
   lookback: number;
-  charted: string;
   frames: StructureFrame[];
   /** Where every size agrees, if they do. */
   agreement: string;
   caveats: string[];
 }
 
-export function getStructure(
-  underlying: string,
-  k: number,
-  charted: string,
-): Promise<MarketStructure> {
-  const query = new URLSearchParams({ k: String(k), charted });
+export function getStructure(underlying: string, k: number): Promise<MarketStructure> {
+  const query = new URLSearchParams({ k: String(k) });
   return getJson<MarketStructure>(
     `/api/structure/${encodeURIComponent(underlying)}?${query}`,
   );

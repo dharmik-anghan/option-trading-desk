@@ -18,8 +18,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from analytics.structure import DEFAULT_K, Structure, read
+from api.charting import days_for, series_for
 from api.deps import bar_service
-from backtest.resample import resample
 from marketdata import Interval
 from marketdata.models import Bar
 from venues import OPTION_UNDERLYINGS
@@ -69,14 +69,6 @@ class BreakOut(BaseModel):
     continuation: bool
 
 
-class CandleOut(BaseModel):
-    at: str
-    open: float
-    high: float
-    low: float
-    close: float
-
-
 class FrameOut(BaseModel):
     interval: str
     #: Bars the reading was taken from, which is also what the chart shows.
@@ -89,8 +81,6 @@ class FrameOut(BaseModel):
     low_label: str | None
     swings: list[SwingOut]
     last_break: BreakOut | None
-    #: Only on the timeframe asked to be charted, to keep the payload small.
-    candles: list[CandleOut] = []
     #: Why this size has nothing, when it has nothing.
     note: str = ""
 
@@ -99,10 +89,10 @@ class StructureOut(BaseModel):
     underlying: str
     name: str
     k: int
-    #: Bars each reading looks back over, the same at every size.
+    #: Bars each reading looks back over, the same at every size. The chart
+    #: asks `/api/chart` for this many at whichever size is being looked at, so
+    #: what is on screen is what the reading was taken from.
     lookback: int
-    #: Which size the candles belong to.
-    charted: str
     frames: list[FrameOut]
     #: Where every size agrees, if they do. The thing worth knowing at a glance.
     agreement: str
@@ -114,7 +104,6 @@ def structure(
     request: Request,
     underlying: str,
     k: int = DEFAULT_K,
-    charted: str = "1d",
 ) -> StructureOut:
     """Market structure across every size we hold bars for."""
     listed = dict(OPTION_UNDERLYINGS)
@@ -122,10 +111,6 @@ def structure(
         raise HTTPException(status_code=404, detail=f"{underlying} is not an underlying here")
     if not 1 <= k <= 20:
         raise HTTPException(status_code=400, detail="k has to be between 1 and 20")
-    try:
-        chart_size = Interval(charted)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"{charted} is not a bar size") from None
 
     service = bar_service(request)
     if service is None:
@@ -153,7 +138,12 @@ def structure(
 
     frames: list[FrameOut] = []
     for size in SIZES:
-        bars = _bars_for(size, daily, intraday)
+        # Through the same helper the chart endpoint reads with, given the same
+        # window. Two code paths to the same bars is how a panel ends up
+        # describing swings that are not on the chart beside it.
+        bars, _note = series_for(
+            service, SOURCE, underlying, size, days_for(size, LOOKBACK), refresh=False
+        )
         if not bars:
             frames.append(
                 FrameOut(
@@ -170,7 +160,7 @@ def structure(
                 )
             )
             continue
-        frames.append(_frame(size, bars, k, charted=size == chart_size))
+        frames.append(_frame(size, bars, k))
 
     trends = {f.trend for f in frames if f.bars and f.trend != "unclear"}
     agreement = (
@@ -182,7 +172,6 @@ def structure(
         name=listed[underlying],
         k=k,
         lookback=LOOKBACK,
-        charted=str(chart_size),
         frames=frames,
         agreement=agreement,
         caveats=caveats,
@@ -214,23 +203,7 @@ def _covers(window: list[Bar]) -> str:
     return f"{days * 24:.0f} hours"
 
 
-def _bars_for(size: Interval, daily: list[Bar], intraday: list[Bar]) -> list[Bar]:
-    """Bars at one size, built from whichever stored series can make them.
-
-    Resampled rather than fetched, for the reason every other higher timeframe
-    here is: two fetched series can disagree about a boundary and nothing would
-    show it.
-    """
-    if size is Interval.D1:
-        return daily
-    if size.seconds > Interval.D1.seconds:
-        return resample(daily, size)
-    if not intraday:
-        return []
-    return intraday if size is Interval.M15 else resample(intraday, size)
-
-
-def _frame(size: Interval, bars: list[Bar], k: int, *, charted: bool) -> FrameOut:
+def _frame(size: Interval, bars: list[Bar], k: int) -> FrameOut:
     # Sliced before reading, not after. The label and the chart have to come
     # from the same bars or the panel is describing something off screen.
     window = bars[-LOOKBACK:]
@@ -260,12 +233,4 @@ def _frame(size: Interval, bars: list[Bar], k: int, *, charted: bool) -> FrameOu
             if found.last_break
             else None
         ),
-        candles=[
-            CandleOut(
-                at=b.ts.isoformat(), open=b.open, high=b.high, low=b.low, close=b.close
-            )
-            for b in window
-        ]
-        if charted
-        else [],
     )

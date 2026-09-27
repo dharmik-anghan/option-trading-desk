@@ -1,18 +1,24 @@
 import { useState } from "react";
 import type { MarketStructure, StructureFrame } from "../api";
-import { CandleChart } from "./CandleChart";
 import type { Overlay } from "./CandleChart";
+import { Chart } from "./Chart";
+import type { Frame } from "./Chart";
 import { num } from "../format";
 
 interface Props {
   structure: MarketStructure | null;
   error: Error | null;
   loading: boolean;
+  underlying: string;
   k: number;
   onK: (k: number) => void;
   charted: string;
   onCharted: (interval: string) => void;
 }
+
+//: Structure changes when a bar closes, and the smallest size shown is fifteen
+//: minutes — so this is already several times faster than it can move.
+const CANDLES_MS = 120000;
 
 /** How each reading should feel. Up and down borrow the P&L pair; the two
     mixed states get the market hue, because neither side is winning. */
@@ -36,11 +42,17 @@ const TONE: Record<string, string> = {
  * it is the only real parameter here: two is about a swing a week on a daily
  * series, and larger means fewer and more significant turns — at the price of
  * waiting longer for any of them to be confirmed.
+ *
+ * The chart is the shared one, so this desk has the same indicators, the same
+ * oscillator panes and the same crosshair as the perpetuals desk. The structure
+ * is what this panel adds to it: the size buttons carry their own reading, and
+ * the break is drawn on the price.
  */
 export function StructurePanel({
   structure,
   error,
   loading,
+  underlying,
   k,
   onK,
   charted,
@@ -49,92 +61,89 @@ export function StructurePanel({
   const [hovered, setHovered] = useState<string | null>(null);
   const frame = structure?.frames.find((f) => f.interval === charted);
 
+  const kInput = (
+    <label className="kpick" title="Bars either side a turn has to beat">
+      k
+      <input
+        type="number"
+        min={1}
+        max={20}
+        value={k}
+        onChange={(e) => onK(Math.min(20, Math.max(1, Number(e.target.value))))}
+      />
+    </label>
+  );
+
+  if (!structure) {
+    return (
+      <section className="panel a-structure">
+        <div className="ph">
+          <h2>Structure</h2>
+          <span className="sp" />
+          {kInput}
+        </div>
+        <div className="pb structurepb">
+          {error && <p className="err">{error.message}</p>}
+          {loading && !error && <p className="empty">Reading the bars…</p>}
+        </div>
+      </section>
+    );
+  }
+
+  // The chart asks for the same bar count the reading was taken from. Two
+  // windows would put the panel in the position of describing swings that are
+  // not on the chart beside it, which is what it used to do.
+  const frames: Frame[] = structure.frames.map((f) => ({
+    label: f.interval,
+    interval: f.interval,
+    bars: structure.lookback,
+    tone: TONE[f.trend],
+    says: f.bars === 0 ? "—" : f.trend,
+    detail: f.bars === 0 ? "no bars" : f.says,
+    disabled: f.bars === 0,
+    title: f.note || `${f.bars.toLocaleString()} bars — ${f.covers} · ${f.says}`,
+  }));
+  const current = frames.find((f) => f.interval === charted) ?? frames[0];
+
   return (
-    <section className="panel a-structure">
-      <div className="ph">
-        <h2>Structure</h2>
-        {structure && (
-          <span className={`sub agree ${structure.agreement === "the sizes disagree" ? "mixed" : ""}`}>
-            {structure.agreement}
-          </span>
-        )}
-        <span className="sp" />
-        {structure && (
-          <span className="sub">
-            last {structure.lookback} bars
-          </span>
-        )}
-        <label className="kpick" title="Bars either side a turn has to beat">
-          k
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={k}
-            onChange={(e) => onK(Math.min(20, Math.max(1, Number(e.target.value))))}
-          />
-        </label>
-      </div>
-
-      <div className="pb structurepb">
-        {error && <p className="err">{error.message}</p>}
-        {!structure && loading && <p className="empty">Reading the bars…</p>}
-
-        {structure && (
-          <>
-            <div className="frames" role="tablist">
-              {structure.frames.map((f) => (
-                <button
-                  key={f.interval}
-                  role="tab"
-                  aria-selected={f.interval === charted}
-                  disabled={f.bars === 0}
-                  className={`frame ${TONE[f.trend]}${f.interval === charted ? " on" : ""}`}
-                  onClick={() => onCharted(f.interval)}
-                  onMouseEnter={() => setHovered(f.interval)}
-                  onMouseLeave={() => setHovered(null)}
-                  title={
-                    f.note || `${f.bars.toLocaleString()} bars — ${f.covers} · ${f.says}`
-                  }
-                >
-                  <b>{f.interval}</b>
-                  <span>{f.bars === 0 ? "—" : f.trend}</span>
-                  <em>{f.bars === 0 ? "no bars" : f.says}</em>
-                </button>
-              ))}
-            </div>
-
-            {frame && frame.candles.length > 0 ? (
-              <CandleChart
-                candles={frame.candles.map((c) => ({ ...c, volume: 0 }))}
-                seriesId={`${structure.underlying}-${charted}-${k}`}
-                last={null}
-                dp={1}
-                height={300}
-                overlay={overlayFor(frame)}
-              />
-            ) : (
-              <p className="empty">
-                {frame?.note || "No bars stored at this size."}
-              </p>
-            )}
-
-            <Reading frame={structure.frames.find((f) => f.interval === (hovered ?? charted))} />
-
-            {structure.caveats.map((c) => (
-              <p className="volcaveat" key={c}>
-                {c}
-              </p>
-            ))}
-          </>
-        )}
-      </div>
-    </section>
+    <Chart
+      className="a-structure"
+      title="Structure"
+      sub={
+        <span className={`agree ${structure.agreement === "the sizes disagree" ? "mixed" : ""}`}>
+          {structure.agreement}
+        </span>
+      }
+      controls={
+        <>
+          <span className="sub">last {structure.lookback} bars</span>
+          {kInput}
+        </>
+      }
+      source="fyers"
+      symbol={underlying}
+      scope={`structure:${underlying}`}
+      frames={frames}
+      frame={current}
+      onFrame={(f) => onCharted(f.interval)}
+      frameStyle="tiles"
+      dp={1}
+      overlay={frame ? overlayFor(frame) : undefined}
+      everyMs={CANDLES_MS}
+      onHoverFrame={(f) => setHovered(f?.interval ?? null)}
+    >
+      <Reading frame={structure.frames.find((f) => f.interval === (hovered ?? charted))} />
+      {structure.caveats.map((c) => (
+        <p className="volcaveat" key={c}>
+          {c}
+        </p>
+      ))}
+    </Chart>
   );
 }
 
 /**
- * What goes on the chart.
+ * What this desk draws on the price, beyond the indicator lines.
  *
  * One line: the level price last broke, dotted, labelled BOS when the break
  * went with the structure and CHoCH when it went against it. Nothing else.

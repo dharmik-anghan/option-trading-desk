@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,16 +23,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 from api.dependencies import broker_for
-from api.deps import DbPathDep, bar_service
+from api.deps import DbPathDep
 from api.store import open_db
-from backtest.lines import compute, parse_wanted
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
 from broker.models import OrderRequest as BrokerOrderRequest
 from broker.models import Tick
 from broker.shark.models import ContractSpec
-from marketdata import BarService, Interval
-from marketdata.models import Bar
 from risk.perps import check_perp_order
 from settings import load_settings
 from storage.perp_order_repo import note_outcome, recent_orders, record_order
@@ -80,31 +77,6 @@ class PriceResponse(BaseModel):
     #: The venue's own 24-hour change, as a percentage. Its figure, not ours: a
     #: market with no close has no yesterday to measure against.
     change_pct: float | None
-
-
-class LineResponse(BaseModel):
-    """One indicator, aligned bar for bar with the candles."""
-
-    label: str
-    name: str
-    length: int
-    interval: str | None
-    #: Whether it is a price and belongs on the price axis. An RSI runs 0-100
-    #: and would be a flat line along the bottom of a chart scaled to Bitcoin.
-    on_price: bool
-    values: list[float | None]
-
-
-class CandlesResponse(BaseModel):
-    #: Whose candles these are. On a chart with an order ticket beside it, this is
-    #: not decoration: a price from a source you are not trading is the wrong price.
-    source: str
-    #: Why the series may be short or stale, when there is a reason worth saying.
-    note: str
-    candles: list[CandleResponse]
-    #: Whatever indicators were asked for, computed through the same code a
-    #: backtest reads them with. Empty when none were.
-    lines: list[LineResponse] = []
 
 
 class StreamStatus(BaseModel):
@@ -169,29 +141,6 @@ class DeskResponse(BaseModel):
     #: "no positions" is a dangerous thing to show wrongly.
     positions_error: str | None
     stream: StreamStatus
-
-
-#: Desk resolutions against the store's interval names.
-_INTERVAL_FOR = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "240": "4h",
-                 "D": "1d", "1D": "1d"}
-
-
-class CandleResponse(BaseModel):
-    at: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-
-
-def _bars(request: Request) -> BarService | None:
-    """The bar store's service, or None when it cannot be had.
-
-    None is a working answer here rather than a refusal: the chart falls back
-    to asking the venue, which is the whole reason the store is optional.
-    """
-    return bar_service(request)
 
 
 def _hub(request: Request) -> TickHub | None:
@@ -310,107 +259,6 @@ def desk(request: Request) -> DeskResponse:
             dropped=int(getattr(hub, "dropped", 0) or 0),
             subscribers=int(getattr(hub, "subscriber_count", 0) or 0),
         ),
-    )
-
-
-@router.get("/candles/{symbol}", response_model=CandlesResponse)
-def candles(
-    request: Request,
-    symbol: str,
-    resolution: str = "60",
-    days: int = 5,
-    indicators: str = "",
-) -> CandlesResponse:
-    """Candles for one instrument, from this venue, through the bar store.
-
-    The venue's own candles, deliberately. This chart has an order ticket beside it,
-    so it has to show the instrument the order would be in - Yahoo's gold is a dated
-    contract quoted 0.8% away from the perpetual here, and Binance's Bitcoin is spot
-    where this one carries funding.
-
-    Read through the store, which does two things. The venue serves a short window,
-    so keeping what it sends accumulates a longer history of the exact instrument
-    traded - a few hundred bars today, a few hundred overlapping tomorrow. And a
-    chart redrawn on a timeframe change stops spending a 60-per-minute budget on
-    candles already on disk.
-
-    `indicators` names lines to draw, as "ema:20,ema:50,rsi:14" - or with a
-    timeframe, "ema:50:4h". They are computed here rather than in the browser,
-    through the same code a backtest reads them with, so the EMA on this chart
-    and the EMA a rule would trade on are the same number.
-
-    Polled rather than streamed: a bar does not move until it closes, and the live
-    price is drawn over the top from the tick stream.
-    """
-    if instrument(symbol) is None:
-        raise HTTPException(status_code=404, detail=f"{symbol} is not on this desk")
-    spec = get_venue(VENUE_ID)
-    if not spec.can(Capability.HISTORY):
-        raise HTTPException(status_code=501, detail="this venue serves no history")
-
-    try:
-        interval = Interval(_INTERVAL_FOR.get(resolution, resolution))
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"{resolution} is not a bar size") from None
-
-    service = _bars(request)
-    if service is None:
-        # No store: fall back to asking the venue directly, so a desk without one
-        # still draws a chart.
-        broker = broker_for(spec)
-        try:
-            rows = broker.get_history(
-                symbol, resolution, date.today() - timedelta(days=days), date.today()
-            )
-        except BrokerError as exc:
-            raise HTTPException(status_code=502, detail=exc.message) from exc
-        from_venue = [
-            Bar(
-                ts=c.timestamp,
-                open=c.open,
-                high=c.high,
-                low=c.low,
-                close=c.close,
-                volume=c.volume,
-            )
-            for c in rows
-        ]
-        return _drawn(VENUE_ID, "", from_venue, interval, indicators)
-
-    result = service.bars(symbol, interval, days, source=VENUE_ID)
-    return _drawn(result.series.source, result.note, result.bars, interval, indicators)
-
-
-def _drawn(
-    source: str, note: str, bars: list[Bar], interval: Interval, indicators: str
-) -> CandlesResponse:
-    """Candles, with whatever lines were asked for drawn over them."""
-    wanted = parse_wanted(indicators, interval) if indicators else []
-    return CandlesResponse(
-        source=source,
-        note=note,
-        candles=[
-            CandleResponse(
-                at=b.ts.isoformat(),
-                open=b.open,
-                high=b.high,
-                low=b.low,
-                close=b.close,
-                volume=b.volume,
-            )
-            for b in bars
-        ],
-        lines=[
-            LineResponse(
-                label=drawn.label,
-                name=drawn.name,
-                length=drawn.length,
-                interval=str(drawn.interval) if drawn.interval else None,
-                on_price=drawn.on_price,
-                values=drawn.values,
-            )
-            for drawn in compute(bars, interval, wanted)
-        ],
     )
 
 

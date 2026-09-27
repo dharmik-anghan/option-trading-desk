@@ -18,12 +18,20 @@ const CHOICES: { id: IndicatorName; name: string; length: number; period: boolea
   { id: "pivot_gap_rank", name: "Pivot gap percentile", length: 60, period: true },
 ];
 
-/** Where the choice is remembered, so a chart comes back the way it was left. */
+/** Where the choice is remembered, so a chart comes back the way it was left.
+    Scoped per chart: an EMA set for Bitcoin is not a thing to put on NIFTY. */
 const KEY = "optiondesk-chart-indicators";
 
-export function remembered(): Pick[] {
+function keyFor(scope: string): string {
+  return scope ? `${KEY}:${scope}` : KEY;
+}
+
+export function remembered(scope = ""): Pick[] {
   try {
-    const saved = localStorage.getItem(KEY);
+    // Falls back to the unscoped key, which is where every chart's set was kept
+    // before there was more than one chart. Without this, splitting the key
+    // silently cleared the lines somebody had put on the perpetuals chart.
+    const saved = localStorage.getItem(keyFor(scope)) ?? localStorage.getItem(KEY);
     if (!saved) return [];
     const parsed: unknown = JSON.parse(saved);
     if (!Array.isArray(parsed)) return [];
@@ -41,9 +49,9 @@ export function remembered(): Pick[] {
   }
 }
 
-function remember(picks: Pick[]) {
+function remember(picks: Pick[], scope: string) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(picks));
+    localStorage.setItem(keyFor(scope), JSON.stringify(picks));
   } catch {
     // forgetting which lines were on is not worth failing over
   }
@@ -88,6 +96,8 @@ interface MenuProps {
   onChange: (next: Pick[]) => void;
   /** Timeframes above the one being charted, which is all a line may read. */
   higher: readonly string[];
+  /** Which chart's set this is, so two desks remember their own. */
+  scope: string;
   onClose: () => void;
 }
 
@@ -99,10 +109,10 @@ interface MenuProps {
  * a chart that computed its own would eventually disagree with it - which is the
  * one thing a chart beside an order ticket must never do.
  */
-export function IndicatorMenu({ picks, onChange, higher, onClose }: MenuProps) {
+export function IndicatorMenu({ picks, onChange, higher, scope, onClose }: MenuProps) {
   useEffect(() => {
-    remember(picks);
-  }, [picks]);
+    remember(picks, scope);
+  }, [picks, scope]);
 
   const add = (id: IndicatorName) => {
     const choice = CHOICES.find((c) => c.id === id);

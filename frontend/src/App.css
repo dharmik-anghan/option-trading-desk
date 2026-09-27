@@ -34,6 +34,20 @@
 .a-structure {
   grid-area: middle;
 }
+/* The structure panel is the shared chart with a reading around it, so its body
+   is the shared chart body. What it wants that a bare chart does not is room
+   around the size buttons and the sentence under the candles - the chart itself
+   takes whatever is left, because `.candlewrap` already grows. */
+.a-structure .chartpb {
+  padding: 7px 8px 9px;
+  gap: 8px;
+}
+.a-structure .reading-structure,
+.a-structure .volcaveat,
+.a-structure .frames {
+  flex: none;
+}
+/* Before the reading arrives there is no chart, only a line of text. */
 .structurepb {
   display: flex;
   flex-direction: column;
@@ -41,24 +55,21 @@
   gap: 8px;
   min-height: 0;
 }
-/* The chart takes whatever is left after the size buttons and the reading
-   line, rather than sitting at a fixed height with a gap under it. */
-.structurepb .candlewrap {
-  flex: 1;
-  min-height: 0;
-}
-.structurepb .reading-structure {
-  flex: none;
-}
 
-/* One button per size, coloured by what that size says. The disagreement
-   between them is the information, so they sit side by side rather than
-   behind a dropdown. */
+/* The size row on a chart, whichever desk it is. Two kinds of button sit in it
+   and the row does not care which: a plain tab on the perpetuals chart, and a
+   `.frame` tile on the structure one, which carries what that size says.
+
+   One rule, because there were two - a grid here and a flex row six hundred
+   lines down - and the later silently won wherever both applied. */
 .frames {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: flex;
   gap: 4px;
   flex: none;
+}
+.frames .frame {
+  flex: 1;
+  min-width: 0;
 }
 .frame {
   font: inherit;
@@ -127,10 +138,10 @@
   border-radius: 2px;
   padding: 1px 3px;
 }
-.ph .sub.agree {
+.ph .agree {
   text-transform: capitalize;
 }
-.ph .sub.agree.mixed {
+.ph .agree.mixed {
   color: var(--mkt);
   text-transform: none;
 }
@@ -1610,6 +1621,17 @@ a.nitem:hover .nhead {
   font-variant-numeric: tabular-nums;
 }
 
+/* Where the bars came from, when that is worth a word. Quiet: it is true of
+   most sizes on the structure chart, so it is a caption rather than a warning. */
+.chartnote {
+  margin: 0;
+  flex: none;
+  padding: 0 4px;
+  font-family: var(--u);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
 .chartfoot {
   display: flex;
   align-items: center;
@@ -1622,10 +1644,6 @@ a.nitem:hover .nhead {
 /* A stream that has stopped means every price on screen is a memory. */
 .streamdown {
   color: var(--dn);
-}
-.frames {
-  display: flex;
-  gap: 3px;
 }
 .frames .xbtn.on {
   background: var(--you);
