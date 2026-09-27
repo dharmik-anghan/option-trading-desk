@@ -26,7 +26,6 @@ const money = (v: number) =>
 export function RunResult({ result, spec }: Props) {
   const m = result.metrics;
   const [picked, setPicked] = useState<BacktestTrade | null>(null);
-  const costs = m.fees + m.funding + m.slippage;
 
   return (
     <div className="result">

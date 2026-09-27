@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import "./App.css";
 import {
   WATCHLIST,
@@ -77,6 +77,16 @@ const STRUCTURE_MS = 120000;
 // Slow, because prices arrive on their own now. What is left here changes on the
 // scale of an order being placed, not a tick.
 const PERPS_MS = 15000;
+
+interface Props {
+  /** Which venue this desk trades. "fyers" is the options desk; anything else
+      is a perpetuals desk, which has different panels. */
+  venueId: string;
+  onVenue: (id: string) => void;
+  onHome: () => void;
+  theme: Theme;
+  onTheme: () => void;
+}
 
 export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props) {
   const [symbol, setSymbol] = useState("NSE:NIFTY50-INDEX");
@@ -306,6 +316,19 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
     [perps.data, streamed.prices, now],
   );
 
+  /* Keyed by symbol, for the panels that take a price per instrument rather
+     than a list. An instrument the venue has not priced yet is left out rather
+     than carried as a null: those panels already draw a missing price, and a
+     null in a map of numbers is only a way of saying the same thing that every
+     reader has to remember to check. */
+  const priceBySymbol = useMemo(
+    () =>
+      Object.fromEntries(
+        livePrices.flatMap((p) => (p.price === null ? [] : [[p.symbol, p.price] as const])),
+      ),
+    [livePrices],
+  );
+
   const onBasketChanged = useCallback(() => {
     setBasketNonce((n) => n + 1);
     portfolio.refresh();
@@ -339,7 +362,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
           onPerps ? (
             <PerpsFunds
               positions={perps.data?.positions ?? []}
-              prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
+              prices={priceBySymbol}
               quoteCurrency={perps.data?.quote_currency ?? "USDT"}
               moneyCurrency={perps.data?.money_currency ?? "INR"}
             />
@@ -406,7 +429,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         {onPerps && (
           <PerpsTicket
             instruments={perps.data?.instruments ?? []}
-            prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
+            prices={priceBySymbol}
             symbol={perpSymbol}
             quoteCurrency={perps.data?.quote_currency ?? "USDT"}
             onPlaced={perps.refresh}
@@ -415,7 +438,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         {onPerps && (
           <PerpsPositions
             positions={perps.data?.positions ?? []}
-            prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
+            prices={priceBySymbol}
             error={perps.data?.positions_error ?? null}
             quoteCurrency={perps.data?.quote_currency ?? "USDT"}
             moneyCurrency={perps.data?.money_currency ?? "INR"}

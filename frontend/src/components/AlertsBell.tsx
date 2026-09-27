@@ -15,11 +15,15 @@ interface Props {
 /** The newest alert already seen, so a badge counts what arrived since. */
 const KEY = "optiondesk-alerts-seen";
 
-function lastSeen(): string {
+/* Epoch milliseconds, and 0 for "nothing seen yet" - the same units an alert
+   carries. It was read back and compared as a string, which made the badge
+   count every alert whenever the stored value and the alert's own timestamp
+   disagreed about type. */
+function lastSeen(): number {
   try {
-    return localStorage.getItem(KEY) ?? "";
+    return Number(localStorage.getItem(KEY)) || 0;
   } catch {
-    return "";
+    return 0;
   }
 }
 
@@ -27,7 +31,7 @@ export function markSeen(alerts: readonly Alert[]): void {
   const newest = alerts[0]?.at;
   if (!newest) return;
   try {
-    localStorage.setItem(KEY, newest);
+    localStorage.setItem(KEY, String(newest));
   } catch {
     // forgetting what was read costs a badge, not an alert
   }
