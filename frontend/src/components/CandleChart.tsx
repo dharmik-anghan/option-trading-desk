@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Candle } from "../api";
 
 interface Props {
@@ -16,6 +16,11 @@ interface Props {
       target, and the stretch of time the position was held. Optional, because a
       live chart has none of them. */
   overlay?: Overlay;
+  /** Told the window on screen and the bar under the cursor, so a panel drawn
+      underneath can show the same bars and the same moment. Without it an
+      oscillator draws the whole series while the candles are zoomed into a
+      corner of it, and the two disagree about which bar is which. */
+  onView?: (view: { start: number; end: number; hovered: number | null }) => void;
 }
 
 export interface Overlay {
@@ -46,6 +51,38 @@ const MIN_BARS = 12;
  * reader here as they do on a position, and inventing a third pair for price
  * would make the screen say that they are different ideas.
  */
+/** A time worth putting under a crosshair: the day and the minute, no more. */
+function when(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return at.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function Reading({
+  label,
+  value,
+  dp,
+  tone,
+}: {
+  label: string;
+  value: number;
+  dp: number;
+  tone?: "up" | "dn";
+}) {
+  return (
+    <span className="ohlc">
+      <em>{label}</em>
+      <b className={tone}>{value.toFixed(dp)}</b>
+    </span>
+  );
+}
+
 export function CandleChart({
   candles,
   seriesId,
@@ -53,6 +90,7 @@ export function CandleChart({
   dp,
   height = 260,
   overlay,
+  onView,
 }: Props) {
   // The window, as a count of bars and where it ends. Held as an end index so
   // that new bars arriving keep the view pinned to the right, which is what
@@ -61,9 +99,22 @@ export function CandleChart({
   const [bars, setBars] = useState<number | null>(null);
   const [end, setEnd] = useState<number | null>(null);
   const drag = useRef<{ x: number; end: number } | null>(null);
+  // The bar under the cursor, as an index into the whole series, and where the
+  // cursor sits vertically as a fraction of the plot. Both null when the pointer
+  // is elsewhere, which is what hides the crosshair.
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [cursorRatio, setCursorRatio] = useState<number | null>(null);
   // Mirrored in state because the cursor depends on it and a ref must not be
   // read during render.
   const [dragging, setDragging] = useState(false);
+
+  // Geometry first, because the pointer handlers need it to say which bar is
+  // under the cursor. The viewBox is fixed and the element is scaled to fit, so
+  // everything here is a fraction of the element rather than a pixel of it.
+  const W = 1000;
+  const H = height;
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
 
   const total = candles.length;
   const showing = Math.min(bars ?? total, total);
@@ -123,14 +174,34 @@ export function CandleChart({
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const held = drag.current;
-    if (held === null) return;
     const box = event.currentTarget.getBoundingClientRect();
+
+    if (held === null) {
+      // Not dragging: track the cursor. Measured against the plot rather than the
+      // whole element, so the bar under the pointer is the bar the pointer looks
+      // like it is over rather than one offset by the axis.
+      if (!box.width || !box.height || !shown.length) return;
+      const acrossPlot =
+        ((event.clientX - box.left) / box.width - PAD.left / W) / (plotW / W);
+      const bar = Math.floor(acrossPlot * shown.length);
+      setHovered(bar >= 0 && bar < shown.length ? startIndex + bar : null);
+      const downPlot =
+        ((event.clientY - box.top) / box.height - PAD.top / H) / (plotH / H);
+      setCursorRatio(downPlot >= 0 && downPlot <= 1 ? downPlot : null);
+      return;
+    }
+
     if (!box.width) return;
     // Bars per pixel, so a drag moves the chart by what is under the finger
     // rather than by an arbitrary step.
     const moved = ((held.x - event.clientX) / box.width) * showing;
     setBars(showing);
     setEnd(Math.max(MIN_BARS, Math.min(total, Math.round(held.end + moved))));
+  };
+
+  const onPointerLeave = () => {
+    setHovered(null);
+    setCursorRatio(null);
   };
 
   const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -140,6 +211,13 @@ export function CandleChart({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
+
+  useEffect(() => {
+    onView?.({ start: startIndex, end: endIndex, hovered });
+    // `onView` is deliberately not a dependency: a parent that rebuilds the
+    // callback each render would otherwise make this fire forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startIndex, endIndex, hovered]);
 
   const view = useMemo(() => {
     if (!shown.length) return null;
@@ -171,10 +249,6 @@ export function CandleChart({
     return <p className="empty">No candles yet.</p>;
   }
 
-  const W = 1000;
-  const H = height;
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
   const y = (price: number) =>
     PAD.top + plotH - ((price - view.min) / (view.max - view.min)) * plotH;
   // Bars share the width; a gap of a fifth keeps them readable when there are
@@ -213,8 +287,43 @@ export function CandleChart({
   // Four gridlines: enough to read a level off, few enough not to be a net.
   const ticks = [0, 1, 2, 3, 4].map((i) => view.min + ((view.max - view.min) * i) / 4);
 
+  // The bar under the cursor, as an offset into what is on screen, and the price
+  // the cursor is level with. Both only exist while the pointer is over the plot.
+  const hoverAt = hovered !== null ? hovered - startIndex : null;
+  const onBar = hoverAt !== null && hoverAt >= 0 && hoverAt < shown.length ? shown[hoverAt] : null;
+  const hoverX = hoverAt !== null ? PAD.left + hoverAt * step + step / 2 : null;
+  const cursorPrice =
+    cursorRatio === null ? null : view.max - cursorRatio * (view.max - view.min);
+
   return (
     <div className="candlewrap">
+      <div className="reading">
+        {onBar ? (
+          <>
+            <span className="when">{when(onBar.at)}</span>
+            <Reading label="O" value={onBar.open} dp={dp} />
+            <Reading label="H" value={onBar.high} dp={dp} />
+            <Reading label="L" value={onBar.low} dp={dp} />
+            <Reading
+              label="C"
+              value={onBar.close}
+              dp={dp}
+              tone={onBar.close >= onBar.open ? "up" : "dn"}
+            />
+            {(overlay?.lines ?? []).map((line, n) => {
+              const value = hoverAt === null ? null : line.values[hoverAt];
+              return typeof value === "number" ? (
+                <span key={line.label} className={`ind i${n % 5}`}>
+                  {line.label} {value.toFixed(dp)}
+                </span>
+              ) : null;
+            })}
+          </>
+        ) : (
+          <span className="dim">Hover a candle to read it.</span>
+        )}
+      </div>
+
       <div className="zoom">
         <button
           className="xbtn"
@@ -260,6 +369,7 @@ export function CandleChart({
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onPointerLeave={onPointerLeave}
     >
       {ticks.map((price) => (
         <g key={price}>
@@ -341,6 +451,42 @@ export function CandleChart({
           </text>
         </g>
       ))}
+
+      {/* The crosshair. Under the price label below so the two do not fight, and
+          over the candles so it can be followed across them. */}
+      {hoverX !== null && (
+        <line x1={hoverX} x2={hoverX} y1={PAD.top} y2={PAD.top + plotH} className="cross" />
+      )}
+      {cursorPrice !== null && (
+        <>
+          <line
+            x1={PAD.left}
+            x2={PAD.left + plotW}
+            y1={y(cursorPrice)}
+            y2={y(cursorPrice)}
+            className="cross"
+          />
+          <rect
+            x={PAD.left + plotW + 1}
+            y={y(cursorPrice) - 8}
+            width={PAD.right - 2}
+            height={16}
+            className="crossbg"
+          />
+          <text x={PAD.left + plotW + 5} y={y(cursorPrice) + 3.5} className="crosstext">
+            {cursorPrice.toFixed(dp)}
+          </text>
+        </>
+      )}
+      {onBar !== null && hoverX !== null && (
+        <text
+          x={Math.min(Math.max(hoverX, PAD.left + 34), PAD.left + plotW - 34)}
+          y={H - 5}
+          className="crosswhen"
+        >
+          {when(onBar.at)}
+        </text>
+      )}
 
       {last !== null && (
         <g>

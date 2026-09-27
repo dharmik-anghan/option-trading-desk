@@ -1863,7 +1863,9 @@ a.nitem:hover .nhead {
    A list of what history is held. Reads as a page rather than a panel, because
    nothing on it ticks. */
 .bt {
-  max-width: 900px;
+  /* Wider than it was: this page held a table when it was 900px, and now holds
+     a condition builder whose rows are a dozen controls long. */
+  max-width: 1200px;
   margin: 0 auto;
   padding: 40px 24px 48px;
 }
@@ -2060,6 +2062,13 @@ a.nitem:hover .nhead {
 .bt .operand {
   display: inline-flex;
   gap: 3px;
+}
+/* A select is as wide as its longest option, so adding "Pivot gap percentile"
+   to the list stretched every indicator dropdown and wrapped the row. Capped,
+   with the full name still readable once it is open. */
+.bt .operand select {
+  max-width: 112px;
+  text-overflow: ellipsis;
 }
 .bt .conds .off {
   margin: 6px 0 0;
@@ -2830,3 +2839,71 @@ a.nitem:hover .nhead {
 .chartpb .osc {
   margin-top: 3px;
 }
+
+/* ── Reading a chart ───────────────────────────────────────────────────────
+   A crosshair and a readout, because a chart you cannot take a number off is
+   a picture rather than an instrument. */
+.cross {
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+.crossbg {
+  fill: var(--fg);
+}
+.crosstext {
+  fill: var(--panel);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.crosswhen {
+  fill: var(--dim);
+  font-size: 9px;
+  text-anchor: middle;
+}
+.reading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 16px;
+  padding: 0 4px 2px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.reading::-webkit-scrollbar {
+  display: none;
+}
+.reading .when {
+  font-family: var(--u);
+  color: var(--dim);
+}
+.reading .ohlc em {
+  font-style: normal;
+  color: var(--dim);
+  margin-right: 3px;
+}
+.reading .ohlc b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.reading .ohlc b.up {
+  color: var(--up);
+}
+.reading .ohlc b.dn {
+  color: var(--dn);
+}
+.reading .dim {
+  color: var(--dim);
+  font-style: italic;
+}
+.reading .ind {
+  font-variant-numeric: tabular-nums;
+}
+.reading .ind.i0 { color: var(--i0); }
+.reading .ind.i1 { color: var(--i1); }
+.reading .ind.i2 { color: var(--i2); }
+.reading .ind.i3 { color: var(--i3); }
+.reading .ind.i4 { color: var(--i4); }

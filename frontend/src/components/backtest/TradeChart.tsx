@@ -44,6 +44,11 @@ const SECONDS: Record<string, number> = {
 export function TradeChart({ trade, source, symbol, interval, spec, onClose }: Props) {
   const [candles, setCandles] = useState<Candle[] | null>(null);
   const [lines, setLines] = useState<IndicatorLine[]>([]);
+  const [view, setView] = useState<{
+    start: number;
+    end: number;
+    hovered: number | null;
+  }>({ start: 0, end: 0, hovered: null });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -126,13 +131,21 @@ export function TradeChart({ trade, source, symbol, interval, spec, onClose }: P
           dp={1}
           height={300}
           overlay={overlay}
+          onView={setView}
         />
       )}
 
       {candles !== null &&
         candles.length > 0 &&
         oscillators.map((line) => (
-          <Oscillator key={line.label} line={line} colour={lines.indexOf(line)} />
+          <Oscillator
+            key={line.label}
+            line={line}
+            colour={lines.indexOf(line)}
+            start={view.start}
+            end={view.end}
+            hovered={view.hovered}
+          />
         ))}
     </section>
   );

@@ -3,6 +3,14 @@ import type { IndicatorLine } from "../api";
 interface Props {
   line: IndicatorLine;
   colour: number;
+  /** The window the candles above are showing. Without it this drew the whole
+      series while the chart was zoomed into a corner of it, and the two panels
+      disagreed about which bar was which - a crosshair on one landing somewhere
+      else on the other. */
+  start?: number;
+  end?: number;
+  /** The bar under the cursor, as an index into the whole series. */
+  hovered?: number | null;
 }
 
 /**
@@ -30,8 +38,10 @@ const GUIDES: Record<string, number[]> = {
   pivot_gap_rank: [10, 90],
 };
 
-export function Oscillator({ line, colour }: Props) {
-  const values = line.values;
+export function Oscillator({ line, colour, start, end, hovered }: Props) {
+  const from = start ?? 0;
+  const to = end ?? line.values.length;
+  const values = line.values.slice(from, to);
   const drawn = values.filter((v): v is number => typeof v === "number");
   if (!drawn.length) return null;
 
@@ -62,7 +72,16 @@ export function Oscillator({ line, colour }: Props) {
   });
 
   const guides = GUIDES[line.name] ?? [];
-  const last = [...values].reverse().find((v): v is number => typeof v === "number");
+  // The hovered value if the cursor is over this window, and the newest
+  // otherwise - so the number on the right is always about a bar you can see.
+  const at = hovered !== null && hovered !== undefined ? hovered - from : null;
+  const underCursor = at !== null && at >= 0 && at < values.length ? values[at] : null;
+  const last =
+    typeof underCursor === "number"
+      ? underCursor
+      : [...values].reverse().find((v): v is number => typeof v === "number");
+  const hoverX =
+    at !== null && at >= 0 && at < values.length ? PAD.left + at * step + step / 2 : null;
 
   return (
     <svg className="osc" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img">
@@ -83,8 +102,11 @@ export function Oscillator({ line, colour }: Props) {
           </text>
         </g>
       ))}
+      {hoverX !== null && (
+        <line x1={hoverX} x2={hoverX} y1={PAD.top} y2={PAD.top + plotH} className="cross" />
+      )}
       <path d={path.join(" ")} className={`oscline i${colour % 5}`} />
-      {last !== undefined && (
+      {last !== undefined && last !== null && (
         <text x={PAD.left + plotW + 4} y={y(last) + 3} className="osclast">
           {last.toFixed(bounds ? 0 : 2)}
         </text>

@@ -45,6 +45,13 @@ export function PerpsChart({ desk, selected, last }: Props) {
   // every morning is the kind of small friction that stops a chart being used.
   const [picks, setPicks] = useState<Pick[]>(remembered);
   const [picking, setPicking] = useState(false);
+  // What the candle chart is showing and where the cursor is, so the panels
+  // underneath draw the same bars and the same moment.
+  const [view, setView] = useState<{
+    start: number;
+    end: number;
+    hovered: number | null;
+  }>({ start: 0, end: 0, hovered: null });
   const indicators = useMemo(() => asQuery(picks), [picks]);
 
   // Only timeframes above this chart's, because a line cannot be read on a
@@ -133,11 +140,19 @@ export function PerpsChart({ desk, selected, last }: Props) {
             overlay={{
               lines: onPrice.map((l) => ({ label: l.label, values: l.values })),
             }}
+            onView={setView}
           />
         )}
         {rows.length > 0 &&
           oscillators.map((line) => (
-            <Oscillator key={line.label} line={line} colour={lines.indexOf(line)} />
+            <Oscillator
+              key={line.label}
+              line={line}
+              colour={lines.indexOf(line)}
+              start={view.start}
+              end={view.end}
+              hovered={view.hovered}
+            />
           ))}
       </div>
 
