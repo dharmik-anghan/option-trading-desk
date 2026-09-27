@@ -25,6 +25,7 @@ import { BasketsPanel } from "./components/BasketsPanel";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { AlertsBell } from "./components/AlertsBell";
 import { PerpsChart } from "./components/PerpsChart";
+import { PerpsFunds } from "./components/PerpsFunds";
 import { PerpsPositions } from "./components/PerpsPositions";
 import { PerpsTicket } from "./components/PerpsTicket";
 import { PerpsWatch } from "./components/PerpsWatch";
@@ -300,6 +301,16 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         onHome={onHome}
         perps={onPerps ? (perps.data ?? null) : null}
         pushing={streamed.connected}
+        funds={
+          onPerps ? (
+            <PerpsFunds
+              positions={perps.data?.positions ?? []}
+              prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
+              quoteCurrency={perps.data?.quote_currency ?? "USDT"}
+              moneyCurrency={perps.data?.money_currency ?? "INR"}
+            />
+          ) : null
+        }
         alerts={
           <div className="bellwrap">
             <AlertsBell
@@ -370,6 +381,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         {onPerps && (
           <PerpsPositions
             positions={perps.data?.positions ?? []}
+            prices={Object.fromEntries(livePrices.map((p) => [p.symbol, p.price]))}
             error={perps.data?.positions_error ?? null}
             quoteCurrency={perps.data?.quote_currency ?? "USDT"}
             moneyCurrency={perps.data?.money_currency ?? "INR"}

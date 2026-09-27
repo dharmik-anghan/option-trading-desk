@@ -222,6 +222,7 @@ def _position(**over: object) -> PerpPosition:
         "liquidation_price": 4730.0,
         "margin_type": "ISOLATED",
         "margin": 5.0,
+        "margin_in_margin_asset": 510.0,
         "margin_asset": "INR",
         "unrealized_pnl": None,
         "unrealized_pnl_in_margin_asset": None,

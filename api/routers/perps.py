@@ -126,8 +126,15 @@ class PositionResponse(BaseModel):
     price: float | None
     leverage: float
     margin_type: str
-    #: Margin posted, in `margin_currency` - not the currency the price is in.
+    #: Margin posted, in the quote currency.
     margin: float
+    #: The same, in the margin currency - what the account is actually debited.
+    #: The venue reports both and they differ by the conversion rate, so one
+    #: labelled as the other is out by a factor of a hundred.
+    margin_in_margin_asset: float | None
+    #: Quote currency per unit of margin currency, so the desk can work profit
+    #: out live from a streamed price and still show it in the account's money.
+    conversion_rate: float | None
     #: In the quote asset. Taken from the venue when it reports one, worked out
     #: from the price when it does not - and `pnl_is_ours` says which, because a
     #: figure we derived should not be presented as the venue's.
@@ -267,6 +274,8 @@ def desk(request: Request) -> DeskResponse:
                         leverage=p.leverage,
                         margin_type=p.margin_type,
                         margin=p.margin,
+                        margin_in_margin_asset=p.margin_in_margin_asset,
+                        conversion_rate=p.conversion_rate,
                         unrealized_pnl=pnl,
                         pnl_is_ours=ours,
                         liquidation_price=p.liquidation_price,

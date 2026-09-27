@@ -1,9 +1,14 @@
 import { useState } from "react";
 import type { PerpPosition } from "../api";
+import { livePnl } from "./PerpsFunds";
 import { closePerpPosition, setProtection } from "../api";
 import { dir, num, pct, signed } from "../format";
 
 interface Props {
+  /** Streamed prices, so profit moves between polls rather than four times a
+      minute. The venue reports no mark price on an open position, so this is
+      the only thing that makes the column live. */
+  prices?: Record<string, number>;
   positions: readonly PerpPosition[];
   error: string | null;
   /** What the prices are in. */
@@ -29,11 +34,17 @@ const CLOSE_TO_LIQUIDATION = 0.1;
  */
 export function PerpsPositions({
   positions,
+  prices,
   error,
   quoteCurrency,
   moneyCurrency,
   onChanged,
 }: Props) {
+  // From the stream where there is one. The venue sends no mark price and no
+  // profit on an open position, so a figure taken from the poll alone would sit
+  // still between requests - which reads as a desk that has stopped working.
+  const live = (p: PerpPosition) => livePnl(p, prices?.[p.symbol]);
+
   const [editing, setEditing] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [stop, setStop] = useState("");
@@ -141,14 +152,14 @@ export function PerpsPositions({
                     <td className="dim">{num(p.entry_price, 2)}</td>
                     <td>{p.price === null ? "—" : num(p.price, 2)}</td>
                     <td
-                      className={p.unrealized_pnl === null ? undefined : dir(p.unrealized_pnl)}
+                      className={live(p) === null ? undefined : dir(live(p) as number)}
                       title={
                         p.pnl_is_ours
                           ? `Worked out from the price — the venue reported none. In ${quoteCurrency}.`
                           : `As the venue reports it, in ${quoteCurrency}.`
                       }
                     >
-                      {p.unrealized_pnl === null ? "—" : signed(p.unrealized_pnl, 2)}
+                      {live(p) === null ? "—" : signed(live(p) as number, 2)}
                       {p.pnl_is_ours && <span className="dim">*</span>}
                     </td>
                     <td className={near ? "dn" : undefined} title={

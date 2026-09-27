@@ -42,6 +42,8 @@ interface Props {
   pushing: boolean;
   /** The alerts bell and its panel, built by the page that owns the data. */
   alerts?: React.ReactNode;
+  /** What is open and what it is doing. Only the perpetuals desk has one. */
+  funds?: React.ReactNode;
 }
 
 export function Toolbar({
@@ -67,6 +69,7 @@ export function Toolbar({
   perps,
   pushing,
   alerts,
+  funds,
 }: Props) {
   const name = UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol;
   const net = portfolio?.total_pnl ?? null;
@@ -157,6 +160,10 @@ export function Toolbar({
       )}
 
       <div className="tbsp" />
+
+      {/* The perpetuals desk's equivalent of the booked/MTM cluster: what is
+          open, what it is worth, and what it is doing. Absent when nothing is. */}
+      {funds}
 
       {/* Booked + MTM = Net, so they read as one cluster: no dividers between
           the two parts, one divider before the sum. */}

@@ -226,12 +226,14 @@ def parse_perp_position(row: dict[str, Any]) -> PerpPosition:
         liquidation_price=_opt_num(row.get("liquidationPrice")),
         margin_type=str(row.get("marginType") or ""),
         margin=_opt_num(row.get("margin")) or 0.0,
+        margin_in_margin_asset=_opt_num(row.get("marginInMarginAsset")),
         margin_asset=str(row.get("marginAsset") or ""),
         unrealized_pnl=unrealized,
         unrealized_pnl_in_margin_asset=unrealized_margin,
         position_id=str(row.get("positionId") or row.get("id") or ""),
         take_profit_orders=int(_opt_num(row.get("takeProfitOrdersQty")) or 0),
         stop_loss_orders=int(_opt_num(row.get("stopLossOrdersQty")) or 0),
+        conversion_rate=_opt_num(row.get("marginConversionRate")),
     )
 
 

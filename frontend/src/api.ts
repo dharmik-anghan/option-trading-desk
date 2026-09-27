@@ -545,6 +545,11 @@ export interface PerpPosition {
   margin_type: string;
   /** In the desk's money currency, not the currency the price is in. */
   margin: number;
+  /** The same in the account's money — what it is actually debited. */
+  margin_in_margin_asset: number | null;
+  /** Margin currency per unit of quote currency, for showing a live figure in
+      the money the account is kept in. */
+  conversion_rate: number | null;
   unrealized_pnl: number | null;
   /** True when we worked the P&L out from the price because the venue gave none.
       A figure we derived should not be shown as the venue's. */

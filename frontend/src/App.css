@@ -10,7 +10,10 @@
   /* Two columns since the alert log moved into the header. It was a third of
      the screen showing a second copy of what Telegram had already delivered,
      and the chart is the thing that wanted the room. */
-  grid-template-columns: 286px minmax(0, 1fr);
+  /* The rail is wider than it was: the alert column went, and the positions
+     table on the perpetuals desk was being cut off at 286px with its P&L
+     column past the edge. */
+  grid-template-columns: 340px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     "tb tb"
@@ -3298,4 +3301,63 @@ a.nitem:hover .nhead {
   width: 380px;
   max-height: min(660px, calc(100vh - 78px));
   box-shadow: var(--shadow);
+}
+
+/* ── What is open on the perpetuals desk ───────────────────────────────────
+   The equivalent of the options desk's booked/MTM cluster. Absent entirely
+   when nothing is open: a strip of zeros is furniture. */
+.funds {
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid var(--grid);
+}
+.fund {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.1;
+  padding: 7px 14px;
+  min-width: 0;
+}
+.fund + .fund {
+  border-left: 1px solid var(--grid);
+}
+.fund small {
+  font-family: var(--u);
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+.fund b {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fund b.up {
+  color: var(--up);
+}
+.fund b.dn {
+  color: var(--dn);
+}
+.fund .unit {
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dim);
+}
+.fund em {
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.fund em.up {
+  color: var(--up);
+}
+.fund em.dn {
+  color: var(--dn);
 }

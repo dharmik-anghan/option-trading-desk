@@ -40,9 +40,15 @@ class PerpPosition:
     #: CROSS or ISOLATED. Decides whether the rest of the account backs this
     #: position or only the margin posted against it.
     margin_type: str
-    #: Margin posted, in the margin asset - INR on this venue, even for a
+    #: Margin posted, in the *quote* currency - USDT on this venue, despite the
+    #: field standing next to `margin_asset`. The venue reports both: `margin`
+    #: in USDT and `marginInMarginAsset` in INR, and a position showing 0.862
+    #: margin labelled INR was out by the conversion rate of 102. See
     #: contract quoted in USDT.
     margin: float
+    #: The same figure in the margin asset, which is what the account is actually
+    #: debited. None when the venue did not report it.
+    margin_in_margin_asset: float | None
     margin_asset: str
     #: Unrealised P&L in the quote asset, when the venue reports it.
     unrealized_pnl: float | None
@@ -60,6 +66,11 @@ class PerpPosition:
     #: somebody thinks to look.
     take_profit_orders: int = 0
     stop_loss_orders: int = 0
+    #: What one unit of the quote currency is worth in the margin asset - INR per
+    #: USDT on this venue. Carried because the desk works profit out live from a
+    #: streamed price, and a figure in USDT beside margin in INR is two
+    #: currencies on one line. None when the venue did not say.
+    conversion_rate: float | None = None
 
     @property
     def is_protected(self) -> bool:
