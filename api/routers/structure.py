@@ -39,9 +39,18 @@ SIZES: tuple[Interval, ...] = (
     Interval.M15,
 )
 
-#: Candles to return for the chart. Enough to see the last few swings in
-#: context, few enough to send for five timeframes at once.
-CANDLES = 180
+#: How far back a reading looks, in bars, at every size.
+#:
+#: One number for both the label and the chart, which were two before: the
+#: trend was read from the whole stored series - seven hundred daily bars - and
+#: the chart drew the last hundred and eighty, so a reading could come from
+#: swings nobody could see. What produced the label is now what is on screen.
+#:
+#: The same count means a different span at each size, which is the point: a
+#: hundred and eighty weeks is three and a half years, a hundred and eighty
+#: days is nine months, and a hundred and eighty fifteen-minute bars is about a
+#: week. Each is a reasonable horizon for the size it belongs to.
+LOOKBACK = 180
 
 
 class SwingOut(BaseModel):
@@ -68,7 +77,10 @@ class CandleOut(BaseModel):
 
 class FrameOut(BaseModel):
     interval: str
+    #: Bars the reading was taken from, which is also what the chart shows.
     bars: int
+    #: The span those bars cover, in words, so the horizon is not left implied.
+    covers: str
     trend: str
     says: str
     high_label: str | None
@@ -85,6 +97,8 @@ class StructureOut(BaseModel):
     underlying: str
     name: str
     k: int
+    #: Bars each reading looks back over, the same at every size.
+    lookback: int
     #: Which size the candles belong to.
     charted: str
     frames: list[FrameOut]
@@ -143,6 +157,7 @@ def structure(
                 FrameOut(
                     interval=str(size),
                     bars=0,
+                    covers="",
                     trend="unclear",
                     says="no bars stored at this size",
                     high_label=None,
@@ -164,11 +179,37 @@ def structure(
         underlying=underlying,
         name=listed[underlying],
         k=k,
+        lookback=LOOKBACK,
         charted=str(chart_size),
         frames=frames,
         agreement=agreement,
         caveats=caveats,
     )
+
+
+def _covers(window: list[Bar]) -> str:
+    """The window in words. "180 bars" means nothing without its size.
+
+    From the first and last timestamps rather than from the bar count times the
+    bar width. The two differ on anything intraday, and by a lot: a hundred and
+    eighty fifteen-minute bars is forty-five hours of trading but about a week
+    of calendar, because the market is shut for two thirds of the day and all
+    of the weekend. The calendar answer is the one a reader means.
+    """
+    if len(window) < 2:
+        return ""
+    days = (window[-1].ts - window[0].ts).total_seconds() / 86400
+    if days >= 365:
+        return f"{days / 365:.1f} years"
+    if days >= 60:
+        return f"{days / 30:.0f} months"
+    if days >= 45:
+        return "about 6 weeks"
+    if days >= 14:
+        return f"{days / 7:.0f} weeks"
+    if days >= 2:
+        return f"{days:.0f} days"
+    return f"{days * 24:.0f} hours"
 
 
 def _bars_for(size: Interval, daily: list[Bar], intraday: list[Bar]) -> list[Bar]:
@@ -188,22 +229,23 @@ def _bars_for(size: Interval, daily: list[Bar], intraday: list[Bar]) -> list[Bar
 
 
 def _frame(size: Interval, bars: list[Bar], k: int, *, charted: bool) -> FrameOut:
-    found: Structure = read(bars, k)
+    # Sliced before reading, not after. The label and the chart have to come
+    # from the same bars or the panel is describing something off screen.
+    window = bars[-LOOKBACK:]
+    found: Structure = read(window, k)
     return FrameOut(
         interval=str(size),
-        bars=len(bars),
+        bars=len(window),
+        covers=_covers(window),
         trend=str(found.trend),
         says=found.says,
         high_label=found.high_label,
         low_label=found.low_label,
-        # Only the recent ones: a three-year daily series has hundreds, and a
-        # chart showing 180 candles can draw the turns inside them and no more.
         swings=[
             SwingOut(
                 at=s.at.isoformat(), kind=str(s.kind), price=s.price, confirmed=s.confirmed
             )
             for s in found.swings
-            if s.index >= len(bars) - CANDLES
         ],
         last_break=(
             BreakOut(
@@ -219,7 +261,7 @@ def _frame(size: Interval, bars: list[Bar], k: int, *, charted: bool) -> FrameOu
             CandleOut(
                 at=b.ts.isoformat(), open=b.open, high=b.high, low=b.low, close=b.close
             )
-            for b in bars[-CANDLES:]
+            for b in window
         ]
         if charted
         else [],

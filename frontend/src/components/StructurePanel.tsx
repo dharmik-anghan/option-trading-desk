@@ -59,6 +59,11 @@ export function StructurePanel({
           </span>
         )}
         <span className="sp" />
+        {structure && (
+          <span className="sub">
+            last {structure.lookback} bars
+          </span>
+        )}
         <label className="kpick" title="Bars either side a turn has to beat">
           k
           <input
@@ -88,7 +93,9 @@ export function StructurePanel({
                   onClick={() => onCharted(f.interval)}
                   onMouseEnter={() => setHovered(f.interval)}
                   onMouseLeave={() => setHovered(null)}
-                  title={f.note || `${f.bars.toLocaleString()} bars · ${f.says}`}
+                  title={
+                    f.note || `${f.bars.toLocaleString()} bars — ${f.covers} · ${f.says}`
+                  }
                 >
                   <b>{f.interval}</b>
                   <span>{f.bars === 0 ? "—" : f.trend}</span>
@@ -127,40 +134,43 @@ export function StructurePanel({
 }
 
 /**
- * The swings on the chart.
+ * What goes on the chart.
  *
- * Every recent turn is a marker; only the last confirmed high and the last
- * confirmed low are drawn as levels across the chart. Six horizontal lines was
- * the first attempt and it was a net — and it is wrong besides: the levels that
- * matter in a structure reading are the two that price would have to break to
- * change it, not every turn that ever happened.
+ * One line: the level price last broke, dotted, labelled BOS when the break
+ * went with the structure and CHoCH when it went against it. Nothing else.
  *
- * A provisional turn gets a marker and no level. The next bar can take it away,
- * and drawing a line across the chart for it would be stating a level the
- * market has not set.
+ * The first version marked every swing with a dot and the last high and low
+ * with their own lines. Both were wrong. The dots were borrowed from the
+ * backtest chart, where a marker means a fill - so they were labelled "buy" and
+ * "close" on a chart where nothing was ever bought, which is worse than
+ * clutter. And the swing levels are already in the candles: a reader looking at
+ * a structure chart can see where the highs and lows are, and drawing lines
+ * through them says nothing the price had not already said.
+ *
+ * A break is different. It is the one thing on the chart that is a judgement
+ * rather than an observation - the level price closed through, and whether that
+ * continued the structure or cracked it.
  */
 function overlayFor(frame: StructureFrame): Overlay {
-  const recent = frame.swings.slice(-10);
-  const confirmed = recent.filter((s) => s.confirmed);
-  const lastHigh = [...confirmed].reverse().find((s) => s.kind === "high");
-  const lastLow = [...confirmed].reverse().find((s) => s.kind === "low");
-
-  const levels: NonNullable<Overlay["levels"]> = [];
-  if (lastHigh) {
-    levels.push({ price: lastHigh.price, label: `high ${num(lastHigh.price, 0)}`, kind: "target" });
-  }
-  if (lastLow) {
-    levels.push({ price: lastLow.price, label: `low ${num(lastLow.price, 0)}`, kind: "stop" });
-  }
-
+  const br = frame.last_break;
+  if (!br) return {};
   return {
-    levels,
-    marks: recent.map((s) => ({
-      at: s.at,
-      price: s.price,
-      kind: s.confirmed ? "entry" : "exit",
-      side: s.kind === "high" ? "long" : "short",
-    })),
+    levels: [
+      {
+        price: br.level,
+        label: `${br.continuation ? "BOS" : "CHoCH"} ${num(br.level, 0)}`,
+        // Coloured by which way price went, not by whether the break continued
+        // the structure. Green for a close above the level and red for below,
+        // because on this desk those two hues mean direction and nothing else -
+        // a downward break drawn green because it agreed with a downtrend was
+        // the first version, and it read as good news.
+        //
+        // Whether it was continuation or a change of character is in the label,
+        // which is where a judgement belongs rather than in a colour that
+        // already means something.
+        kind: br.price > br.level ? "target" : "stop",
+      },
+    ],
   };
 }
 
@@ -170,7 +180,8 @@ function Reading({ frame }: { frame: StructureFrame | undefined }) {
   const provisional = frame.swings.filter((s) => !s.confirmed).length;
   return (
     <p className="reading-structure">
-      <b>{frame.interval}</b> — {frame.says}, from {frame.bars.toLocaleString()} bars.
+      <b>{frame.interval}</b> — {frame.says}, from the last {frame.bars.toLocaleString()} bars
+      ({frame.covers}).
       {br && (
         <>
           {" "}

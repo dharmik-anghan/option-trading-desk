@@ -1260,7 +1260,10 @@ export interface StructureBreak {
 
 export interface StructureFrame {
   interval: string;
+  /** Bars the reading came from, which is also what the chart shows. */
   bars: number;
+  /** The span those bars cover, in words — "180 bars" means nothing alone. */
+  covers: string;
   trend: "uptrend" | "downtrend" | "broadening" | "contracting" | "unclear";
   says: string;
   high_label: string | null;
@@ -1276,6 +1279,8 @@ export interface MarketStructure {
   underlying: string;
   name: string;
   k: number;
+  /** Bars each reading looks back over, the same count at every size. */
+  lookback: number;
   charted: string;
   frames: StructureFrame[];
   /** Where every size agrees, if they do. */
