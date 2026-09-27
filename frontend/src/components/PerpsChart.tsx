@@ -14,13 +14,30 @@ interface Props {
 //: reload. Two requests a minute against a 60-a-minute budget.
 const CANDLES_MS = 30000;
 
-/** Timeframes worth having: intraday, a day's shape, and a week's. */
+/** Bars at every size, which is also the window a structure reading covers. */
+const BARS = 180;
+
+/**
+ * Timeframes worth having on a market that never closes: intraday, a day's
+ * shape, a week's, and a quarter's.
+ *
+ * Asked for in bars rather than days, at the same count everywhere. Days was
+ * arbitrary — five of them is 120 hourly bars and 1,440 five-minute ones, so
+ * the chart showed a different amount of history at every size for no reason.
+ * A fixed bar count is also what makes the structure reading beside it
+ * describe exactly the bars on screen.
+ *
+ * Weekly is here because there was no reason for it not to be. The venue serves
+ * no weekly series, but a week is seven daily bars and the store has those, so
+ * it is built from them — the same way the options desk gets four-hour bars.
+ */
 const FRAMES: Frame[] = [
-  { label: "5m", interval: "5m", days: 1 },
-  { label: "15m", interval: "15m", days: 2 },
-  { label: "1h", interval: "1h", days: 5 },
-  { label: "4h", interval: "4h", days: 20 },
-  { label: "1d", interval: "1d", days: 120 },
+  { label: "5m", interval: "5m", bars: BARS },
+  { label: "15m", interval: "15m", bars: BARS },
+  { label: "1h", interval: "1h", bars: BARS },
+  { label: "4h", interval: "4h", bars: BARS },
+  { label: "1d", interval: "1d", bars: BARS },
+  { label: "1w", interval: "1w", bars: BARS },
 ];
 
 /**
@@ -50,6 +67,7 @@ export function PerpsChart({ desk, selected, last }: Props) {
       onFrame={setFrame}
       last={last}
       dp={dp}
+      bars={BARS}
       everyMs={CANDLES_MS}
       footer={
         /* Whether prices are moving. The ticket beside this chart places an

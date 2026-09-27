@@ -179,3 +179,66 @@ def test_structure_survives_a_series_with_no_bars() -> None:
 
     assert structure.swings == ()
     assert structure.trend is Trend.UNCLEAR
+
+
+def _series(closes: list[float]) -> list[Bar]:
+    """Bars that close where told, with a hair of range either side.
+
+    The range matters: a swing is a bar that strictly beats its neighbours on
+    high or low, and bars with no range at all would make ties out of turns.
+    """
+    return [
+        Bar(
+            ts=START + timedelta(days=i),
+            open=c,
+            high=c + 0.1,
+            low=c - 0.1,
+            close=c,
+            volume=1.0,
+        )
+        for i, c in enumerate(closes)
+    ]
+
+
+class TestEveryBreak:
+    """Breaks across the whole window, not just the most recent one.
+
+    Only the last was reported at first, and only if the *latest* swing high or
+    low happened to have been taken out - so a market in a clean uptrend, which
+    takes out a level every few bars, produced a reading of "HH + HL" with
+    nothing drawn on the chart at all.
+    """
+
+    def test_a_level_is_broken_once(self) -> None:
+        """A market that runs away from a level must not report a break on every
+        bar after it, or the chart becomes a row of identical lines."""
+        # up to a high at index 3, back down, then away above it and stays there
+        closes = [10, 11, 12, 15, 12, 11, 10, 16, 17, 18, 19, 20, 21, 22]
+        found = read(_series(closes), k=2)
+
+        above = [b for b in found.breaks if b.price > b.level]
+        levels = [b.level for b in above]
+        assert len(levels) == len(set(levels)), f"a level was broken twice: {levels}"
+
+    def test_a_level_is_not_used_before_it_could_be_known(self) -> None:
+        """A swing at index i is only a level from bar i + k: that is the first
+        bar by which anybody could have seen it was a swing."""
+        closes = [10, 11, 20, 11, 10, 9, 8, 7, 6, 5, 4, 3]
+        found = read(_series(closes), k=2)
+
+        for b in found.breaks:
+            assert b.at > b.from_at, "a level was broken before the swing that set it"
+
+    def test_the_last_one_is_what_last_break_reports(self) -> None:
+        closes = [10, 11, 12, 15, 12, 11, 10, 16, 9, 8, 7, 6, 5, 4]
+        found = read(_series(closes), k=2)
+
+        assert found.last_break is not None
+        assert found.last_break == found.breaks[-1]
+
+    def test_a_series_that_never_closes_through_anything_has_none(self) -> None:
+        """A single swing high nobody takes out is not a break."""
+        closes = [10, 11, 12, 11, 10, 10, 10, 10]
+        found = read(_series(closes), k=2)
+
+        assert [b for b in found.breaks if b.price > b.level] == []

@@ -1289,12 +1289,16 @@ export interface StructureFrame {
   high_label: string | null;
   low_label: string | null;
   swings: Swing[];
-  last_break: StructureBreak | null;
+  /** Every close through a swing level in this window, oldest first. */
+  breaks: StructureBreak[];
   note: string;
 }
 
 export interface MarketStructure {
   underlying: string;
+  /** Whose bars were read. Structure is a way of reading bars, not a property
+      of one venue, so this says which. */
+  source: string;
   name: string;
   k: number;
   /** Bars each reading looks back over, the same count at every size. The chart
@@ -1307,9 +1311,26 @@ export interface MarketStructure {
   caveats: string[];
 }
 
-export function getStructure(underlying: string, k: number): Promise<MarketStructure> {
-  const query = new URLSearchParams({ k: String(k) });
+/**
+ * How the price has been behaving, at several sizes at once.
+ *
+ * `sizes` are the ones the chart is offering and `bars` is how many of them it
+ * is showing, so the reading describes what is on screen rather than a window
+ * of its own choosing.
+ */
+export function getStructure(
+  source: string,
+  symbol: string,
+  k: number,
+  sizes: readonly string[],
+  bars: number,
+): Promise<MarketStructure> {
+  const query = new URLSearchParams({
+    k: String(k),
+    sizes: sizes.join(","),
+    bars: String(bars),
+  });
   return getJson<MarketStructure>(
-    `/api/structure/${encodeURIComponent(underlying)}?${query}`,
+    `/api/structure/${encodeURIComponent(source)}/${encodeURIComponent(symbol)}?${query}`,
   );
 }

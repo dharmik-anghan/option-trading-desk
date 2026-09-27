@@ -34,26 +34,25 @@
 .a-structure {
   grid-area: middle;
 }
-/* The structure panel is the shared chart with a reading around it, so its body
-   is the shared chart body. What it wants that a bare chart does not is room
-   around the size buttons and the sentence under the candles - the chart itself
-   takes whatever is left, because `.candlewrap` already grows. */
-.a-structure .chartpb {
-  padding: 7px 8px 9px;
-  gap: 8px;
-}
-.a-structure .reading-structure,
-.a-structure .volcaveat,
-.a-structure .frames {
+/* Everything in a chart body except the candles keeps its own height; the chart
+   takes what is left, because `.candlewrap` already grows into it. Structure
+   can be switched on over any chart now, so these belong to the body rather
+   than to the desk that used to be the only one with a reading. */
+.chartpb .reading-structure,
+.chartpb .volcaveat,
+.chartpb .chartnote,
+.chartpb .frames {
   flex: none;
 }
-/* Before the reading arrives there is no chart, only a line of text. */
-.structurepb {
-  display: flex;
-  flex-direction: column;
-  padding: 7px 8px 9px;
-  gap: 8px;
-  min-height: 0;
+/* The size row, when each button carries a reading, needs air around it - the
+   tiles are three lines tall where a tab is one. */
+.chartpb .frames.tiles {
+  gap: 5px;
+  margin: 3px 5px 5px;
+}
+.chartpb .reading-structure,
+.chartpb .volcaveat {
+  padding: 0 5px;
 }
 
 /* The size row on a chart, whichever desk it is. Two kinds of button sit in it
@@ -1698,6 +1697,12 @@ a.nitem:hover .nhead {
 .candlewrap .candles.dragging {
   cursor: grabbing;
 }
+/* The price axis is draggable, so it says so. */
+.cscale {
+  fill: transparent;
+  cursor: ns-resize;
+}
+
 .candlewrap .zoom {
   padding: 2px 6px 4px;
 }

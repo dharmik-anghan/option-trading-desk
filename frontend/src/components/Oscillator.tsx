@@ -56,7 +56,11 @@ export function Oscillator({ line, colour, start, end, hovered }: Props) {
   const max = bounds ? bounds[1] : Math.max(...drawn);
   const span = max - min || 1;
 
-  const step = plotW / values.length;
+  // Divided by the window, not by the values in it. The chart above can be
+  // panned past the last bar, and a pane that scaled to the bars it happened to
+  // receive would drift out of step with the candles exactly when it matters -
+  // when you are looking at the right-hand edge.
+  const step = plotW / Math.max(1, to - from);
   const y = (v: number) => PAD.top + plotH - ((v - min) / span) * plotH;
 
   const path: string[] = [];

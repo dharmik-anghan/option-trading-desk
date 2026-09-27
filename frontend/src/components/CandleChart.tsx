@@ -49,6 +49,19 @@ const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
 /** Fewest bars worth showing. Below this the chart is a magnifying glass. */
 const MIN_BARS = 12;
 
+/** Empty space past the last bar, as a fraction of the window.
+ *
+ * Every trading chart leaves some. Without it the newest bar is jammed against
+ * the price axis, there is nowhere to draw a level ahead of price, and - the
+ * thing that actually gets noticed - the chart cannot be dragged at all when it
+ * is showing the whole series, because there is nothing either side to drag it
+ * towards. */
+const RIGHT_MARGIN = 0.3;
+
+/** How far the price axis may be stretched or squeezed by hand, as a multiple
+    of the range that fits the bars on screen. */
+const PRICE_ZOOM = { min: 0.15, max: 8 };
+
 /**
  * Candles, drawn as candles.
  *
@@ -109,6 +122,14 @@ export function CandleChart({
   const [bars, setBars] = useState<number | null>(null);
   const [end, setEnd] = useState<number | null>(null);
   const drag = useRef<{ x: number; end: number } | null>(null);
+  // How much of the price axis to show, as a multiple of the range the bars on
+  // screen need. One is the range itself; larger flattens the chart and smaller
+  // magnifies the moves. Horizontal zoom answers "how much history", and this
+  // answers "how big is a move" - two different questions, and a chart that
+  // only ever auto-fits the price can answer neither, because every window
+  // looks equally volatile when it is always scaled to its own extremes.
+  const [priceZoom, setPriceZoom] = useState(1);
+  const scaling = useRef<{ y: number; zoom: number } | null>(null);
   // The drawing area, measured rather than assumed. The viewBox is fixed and
   // the element scales to fit it, so a box taller than the viewBox's aspect
   // letterboxes: the candles sit in a band with empty space above and below,
@@ -136,12 +157,21 @@ export function CandleChart({
   const plotH = H - PAD.top - PAD.bottom;
 
   const total = candles.length;
-  const showing = Math.min(bars ?? total, total);
-  const endIndex = Math.min(end ?? total, total);
+  const showing = Math.max(MIN_BARS, Math.min(bars ?? total, total));
+  // How far past the last bar the window may be pushed. The window keeps its
+  // width at both ends rather than shrinking into the edge, so panning to the
+  // start of the series shows a full screen of bars beginning at the first.
+  const margin = Math.round(showing * RIGHT_MARGIN);
+  const endIndex = Math.max(
+    Math.min(showing, total),
+    Math.min(end ?? total, total + margin),
+  );
   const startIndex = Math.max(0, endIndex - showing);
+  // Only the bars that exist. The window can reach past them, which is what
+  // leaves the empty space on the right.
   const shown = useMemo(
-    () => candles.slice(startIndex, endIndex),
-    [candles, startIndex, endIndex],
+    () => candles.slice(startIndex, Math.min(endIndex, total)),
+    [candles, startIndex, endIndex, total],
   );
   const fitted = bars === null && end === null;
 
@@ -168,7 +198,11 @@ export function CandleChart({
         setEnd((currentEnd) => {
           const e = currentEnd ?? total;
           const anchor = e - from + from * anchorRatio;
-          return Math.max(MIN_BARS, Math.min(total, Math.round(anchor + next * (1 - anchorRatio))));
+          const room = total + Math.round(next * RIGHT_MARGIN);
+          return Math.max(
+            Math.min(next, total),
+            Math.min(room, Math.round(anchor + next * (1 - anchorRatio))),
+          );
         });
         return next;
       });
@@ -176,10 +210,24 @@ export function CandleChart({
     [total],
   );
 
+  /** True when the pointer is over the price axis rather than the plot. */
+  const overAxis = (event: { clientX: number }, box: DOMRect) =>
+    box.width > 0 && (event.clientX - box.left) / box.width > (PAD.left + plotW) / W;
+
+  const stretch = (factor: number) =>
+    setPriceZoom((z) => Math.min(PRICE_ZOOM.max, Math.max(PRICE_ZOOM.min, z * factor)));
+
   const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
     if (!total) return;
     event.preventDefault();
     const box = event.currentTarget.getBoundingClientRect();
+    // Over the axis, the wheel is about price rather than about history. That
+    // is where every charting package puts it, and it is the only place on the
+    // chart where the gesture is unambiguous.
+    if (overAxis(event, box)) {
+      stretch(event.deltaY > 0 ? 1.15 : 1 / 1.15);
+      return;
+    }
     const ratio = box.width ? (event.clientX - box.left) / box.width : 1;
     zoom(event.deltaY > 0 ? 1.25 : 0.8, Math.min(1, Math.max(0, ratio)));
   };
@@ -187,13 +235,35 @@ export function CandleChart({
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!total) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (overAxis(event, event.currentTarget.getBoundingClientRect())) {
+      scaling.current = { y: event.clientY, zoom: priceZoom };
+      return;
+    }
     drag.current = { x: event.clientX, end: endIndex };
     setDragging(true);
+  };
+
+  /** Back to the range the bars need. Double-click, as everywhere else. */
+  const onDoubleClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (overAxis(event, event.currentTarget.getBoundingClientRect())) setPriceZoom(1);
   };
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const held = drag.current;
     const box = event.currentTarget.getBoundingClientRect();
+
+    const stretching = scaling.current;
+    if (stretching !== null) {
+      if (!box.height) return;
+      // Down squeezes the axis and up magnifies it, which is the direction the
+      // hand expects: dragging the scale down pulls the extremes in towards the
+      // middle of the chart.
+      const moved = (event.clientY - stretching.y) / box.height;
+      setPriceZoom(
+        Math.min(PRICE_ZOOM.max, Math.max(PRICE_ZOOM.min, stretching.zoom * Math.exp(moved * 2))),
+      );
+      return;
+    }
 
     if (held === null) {
       // Not dragging: track the cursor. Measured against the plot rather than the
@@ -202,8 +272,8 @@ export function CandleChart({
       if (!box.width || !box.height || !shown.length) return;
       const acrossPlot =
         ((event.clientX - box.left) / box.width - PAD.left / W) / (plotW / W);
-      const bar = Math.floor(acrossPlot * shown.length);
-      setHovered(bar >= 0 && bar < shown.length ? startIndex + bar : null);
+      const bar = Math.floor(acrossPlot * showing);
+      setHovered(bar >= 0 && startIndex + bar < total ? startIndex + bar : null);
       const downPlot =
         ((event.clientY - box.top) / box.height - PAD.top / H) / (plotH / H);
       setCursorRatio(downPlot >= 0 && downPlot <= 1 ? downPlot : null);
@@ -215,7 +285,12 @@ export function CandleChart({
     // rather than by an arbitrary step.
     const moved = ((held.x - event.clientX) / box.width) * showing;
     setBars(showing);
-    setEnd(Math.max(MIN_BARS, Math.min(total, Math.round(held.end + moved))));
+    setEnd(
+      Math.max(
+        Math.min(showing, total),
+        Math.min(total + margin, Math.round(held.end + moved)),
+      ),
+    );
   };
 
   const onPointerLeave = () => {
@@ -225,6 +300,7 @@ export function CandleChart({
 
   const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
     drag.current = null;
+    scaling.current = null;
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -276,8 +352,12 @@ export function CandleChart({
       max += Math.abs(max) * 0.001 || 1;
     }
     const pad = (max - min) * 0.06;
-    return { min: min - pad, max: max + pad };
-  }, [shown, last, overlay, startIndex, endIndex]);
+    // Stretched about the middle, so the bars stay where they are and only the
+    // amount of price on either side of them changes.
+    const mid = (max + min) / 2;
+    const half = (max - min) / 2 + pad;
+    return { min: mid - half * priceZoom, max: mid + half * priceZoom };
+  }, [shown, last, overlay, startIndex, endIndex, priceZoom]);
 
   if (view === null) {
     return <p className="empty">No candles yet.</p>;
@@ -285,9 +365,10 @@ export function CandleChart({
 
   const y = (price: number) =>
     PAD.top + plotH - ((price - view.min) / (view.max - view.min)) * plotH;
-  // Bars share the width; a gap of a fifth keeps them readable when there are
-  // few, and disappears when there are many.
-  const step = plotW / shown.length;
+  // Bars share the width of the *window*, not of the bars that exist in it -
+  // which is what turns the unused end of the window into empty space rather
+  // than stretching the last few candles across it.
+  const step = plotW / showing;
   const bodyW = Math.max(1, step * 0.8);
 
   // Where a moment falls on the x axis. A timestamp that is not one of the bars
@@ -345,7 +426,11 @@ export function CandleChart({
               tone={onBar.close >= onBar.open ? "up" : "dn"}
             />
             {(overlay?.lines ?? []).map((line, n) => {
-              const value = hoverAt === null ? null : line.values[hoverAt];
+              // Indexed by where the bar sits in the series, not by where it
+              // sits on screen. `line.values` runs the whole series, so reading
+              // it at the window offset showed the value from the first bars of
+              // the series whenever the chart had been panned or zoomed.
+              const value = hovered === null ? null : line.values[hovered];
               return typeof value === "number" ? (
                 <span key={line.label} className={`ind i${n % 5}`}>
                   {line.label} {value.toFixed(dp)}
@@ -382,8 +467,9 @@ export function CandleChart({
           onClick={() => {
             setBars(null);
             setEnd(null);
+            setPriceZoom(1);
           }}
-          disabled={fitted}
+          disabled={fitted && priceZoom === 1}
         >
           Fit
         </button>
@@ -391,7 +477,9 @@ export function CandleChart({
           {fitted ? `all ${total} bars` : `${showing} of ${total} bars`}
         </span>
         <span className="sp" />
-        <span className="dim">drag to pan · scroll to zoom</span>
+        <span className="dim">
+          drag to pan · scroll to zoom · drag the price axis to stretch it
+        </span>
       </div>
       <svg
       ref={box}
@@ -400,6 +488,7 @@ export function CandleChart({
       role="img"
       aria-label="Price candles"
       onWheel={onWheel}
+      onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
@@ -429,11 +518,11 @@ export function CandleChart({
       {/* A level that only existed between two moments. Clamped to the plot so
           a break whose origin scrolled off the left still starts at the edge
           rather than vanishing. */}
-      {(overlay?.segments ?? []).map((seg) => {
+      {(overlay?.segments ?? []).map((seg, n) => {
         const from = xOf(seg.from) ?? PAD.left;
         const to = xOf(seg.to) ?? PAD.left + plotW;
         return (
-          <g key={`${seg.kind}-${seg.price}-${seg.from}`} className={`clevel ${seg.kind}`}>
+          <g key={`${n}-${seg.from}-${seg.to}`} className={`clevel ${seg.kind}`}>
             <line x1={from} x2={to} y1={y(seg.price)} y2={y(seg.price)} />
             <text x={from + 3} y={y(seg.price) - 4} className="clevellabel">
               {seg.label}
@@ -478,7 +567,11 @@ export function CandleChart({
         const path: string[] = [];
         let drawing = false;
         for (let i = 0; i < shown.length; i += 1) {
-          const value = line.values[i];
+          // `startIndex + i`, because `values` runs the whole series while `i`
+          // runs the window. Drawn at `i` alone, a panned chart plotted the
+          // indicator's opening values over its closing bars - invisible at
+          // full fit, which is why it survived, and wrong everywhere else.
+          const value = line.values[startIndex + i];
           if (typeof value !== "number") {
             // A gap, not a jump to zero: the indicator had no value here.
             drawing = false;
@@ -538,6 +631,17 @@ export function CandleChart({
           {when(onBar.at)}
         </text>
       )}
+
+      {/* The price axis, as something you can grab. Invisible, but it is what
+          turns "drag the axis to stretch it" from a line of help text into an
+          affordance a cursor announces. */}
+      <rect
+        x={PAD.left + plotW}
+        y={PAD.top}
+        width={PAD.right}
+        height={plotH}
+        className="cscale"
+      />
 
       {last !== null && (
         <g>

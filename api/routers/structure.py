@@ -22,22 +22,12 @@ from api.charting import days_for, series_for
 from api.deps import bar_service
 from marketdata import Interval
 from marketdata.models import Bar
-from venues import OPTION_UNDERLYINGS
+from venues import OPTION_UNDERLYINGS, for_venue
 
 router = APIRouter(tags=["structure"], prefix="/api/structure")
 
-SOURCE = "fyers"
-
-#: The sizes to read, longest first. Intraday needs stored intraday bars, which
-#: is a separate backfill - a size with nothing behind it is reported as such
-#: rather than silently missing.
-SIZES: tuple[Interval, ...] = (
-    Interval.W1,
-    Interval.D1,
-    Interval.H4,
-    Interval.H1,
-    Interval.M15,
-)
+#: The sizes to read when a caller names none, longest first.
+DEFAULT_SIZES = "1w,1d,4h,1h,15m"
 
 #: How far back a reading looks, in bars, at every size.
 #:
@@ -80,13 +70,17 @@ class FrameOut(BaseModel):
     high_label: str | None
     low_label: str | None
     swings: list[SwingOut]
-    last_break: BreakOut | None
+    #: Every close through a swing level in the window, oldest first.
+    breaks: list[BreakOut]
     #: Why this size has nothing, when it has nothing.
     note: str = ""
 
 
 class StructureOut(BaseModel):
+    #: Kept as `underlying` for the desk that has one; it is whatever symbol was
+    #: read, on whichever venue.
     underlying: str
+    source: str
     name: str
     k: int
     #: Bars each reading looks back over, the same at every size. The chart
@@ -99,18 +93,37 @@ class StructureOut(BaseModel):
     caveats: list[str]
 
 
-@router.get("/{underlying:path}", response_model=StructureOut)
+@router.get("/{source}/{symbol:path}", response_model=StructureOut)
 def structure(
     request: Request,
-    underlying: str,
+    source: str,
+    symbol: str,
     k: int = DEFAULT_K,
+    sizes: str = DEFAULT_SIZES,
+    bars: int = LOOKBACK,
 ) -> StructureOut:
-    """Market structure across every size we hold bars for."""
-    listed = dict(OPTION_UNDERLYINGS)
-    if underlying not in listed:
-        raise HTTPException(status_code=404, detail=f"{underlying} is not an underlying here")
+    """Market structure at several sizes at once, for any series we hold.
+
+    Not an options endpoint any more. Structure is a way of reading bars, and
+    bars are bars - a perpetual makes higher highs and lower lows exactly as an
+    index does. The desk that asks is what differs, and all it passes is which
+    sizes it is offering and how many bars its chart is showing, so the reading
+    describes the bars on screen rather than a window of its own choosing.
+    """
     if not 1 <= k <= 20:
         raise HTTPException(status_code=400, detail="k has to be between 1 and 20")
+    if not 20 <= bars <= 5000:
+        raise HTTPException(status_code=400, detail="bars has to be between 20 and 5000")
+    try:
+        wanted = [Interval(piece.strip()) for piece in sizes.split(",") if piece.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{sizes} is not a list of bar sizes") from None
+    if not wanted:
+        raise HTTPException(status_code=400, detail="name at least one bar size")
+
+    name = _name_of(source, symbol)
+    if name is None:
+        raise HTTPException(status_code=404, detail=f"{symbol} is not traded on {source}")
 
     service = bar_service(request)
     if service is None:
@@ -119,32 +132,17 @@ def structure(
             detail="The bar store is open in another process, so no structure can be read",
         )
 
-    daily = service.stored(SOURCE, underlying, Interval.D1, days=365 * 4).bars
-    intraday = service.stored(SOURCE, underlying, Interval.M15, days=200).bars
-
-    caveats: list[str] = []
-    if not daily:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"No stored daily bars for {listed[underlying]}. Run scripts/backfill_nse.py"
-            ),
-        )
-    if not intraday:
-        caveats.append(
-            "No intraday bars are stored, so the hourly and fifteen-minute readings are "
-            "absent. Everything daily and above is from three years of stored history"
-        )
-
     frames: list[FrameOut] = []
-    for size in SIZES:
+    missing: list[str] = []
+    for size in wanted:
         # Through the same helper the chart endpoint reads with, given the same
         # window. Two code paths to the same bars is how a panel ends up
         # describing swings that are not on the chart beside it.
-        bars, _note = series_for(
-            service, SOURCE, underlying, size, days_for(size, LOOKBACK), refresh=False
+        held, _note = series_for(
+            service, source, symbol, size, days_for(size, bars), refresh=False
         )
-        if not bars:
+        if not held:
+            missing.append(str(size))
             frames.append(
                 FrameOut(
                     interval=str(size),
@@ -155,12 +153,25 @@ def structure(
                     high_label=None,
                     low_label=None,
                     swings=[],
-                    last_break=None,
-                    note="Needs intraday bars, which have not been backfilled",
+                    breaks=[],
+                    note="Nothing is stored at this size, or under it to build it from",
                 )
             )
             continue
-        frames.append(_frame(size, bars, k))
+        frames.append(_frame(size, held, k, bars))
+
+    if all(f.bars == 0 for f in frames):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No bars are stored for {name} at any of {sizes}",
+        )
+
+    caveats: list[str] = []
+    if missing:
+        caveats.append(
+            f"Nothing is stored at {', '.join(missing)}, so those sizes have no reading. "
+            "Everything else here is from what has been backfilled"
+        )
 
     trends = {f.trend for f in frames if f.bars and f.trend != "unclear"}
     agreement = (
@@ -168,14 +179,27 @@ def structure(
     )
 
     return StructureOut(
-        underlying=underlying,
-        name=listed[underlying],
+        underlying=symbol,
+        source=source,
+        name=name,
         k=k,
-        lookback=LOOKBACK,
+        lookback=bars,
         frames=frames,
         agreement=agreement,
         caveats=caveats,
     )
+
+
+def _name_of(source: str, symbol: str) -> str | None:
+    """What this venue calls the symbol, or None if it does not trade it.
+
+    The same guard the chart endpoint applies, and for the same reason: a
+    reading of a symbol nobody listed is a reading of a stranger's price.
+    """
+    if source == "fyers":
+        return dict(OPTION_UNDERLYINGS).get(symbol)
+    listed = {i.symbol: i.name for i in for_venue(source)}
+    return listed.get(symbol)
 
 
 def _covers(window: list[Bar]) -> str:
@@ -203,10 +227,10 @@ def _covers(window: list[Bar]) -> str:
     return f"{days * 24:.0f} hours"
 
 
-def _frame(size: Interval, bars: list[Bar], k: int) -> FrameOut:
+def _frame(size: Interval, bars: list[Bar], k: int, lookback: int) -> FrameOut:
     # Sliced before reading, not after. The label and the chart have to come
     # from the same bars or the panel is describing something off screen.
-    window = bars[-LOOKBACK:]
+    window = bars[-lookback:]
     found: Structure = read(window, k)
     return FrameOut(
         interval=str(size),
@@ -222,15 +246,14 @@ def _frame(size: Interval, bars: list[Bar], k: int) -> FrameOut:
             )
             for s in found.swings
         ],
-        last_break=(
+        breaks=[
             BreakOut(
-                from_at=found.last_break.from_at.isoformat(),
-                at=found.last_break.at.isoformat(),
-                price=found.last_break.price,
-                level=found.last_break.level,
-                continuation=found.last_break.continuation,
+                from_at=b.from_at.isoformat(),
+                at=b.at.isoformat(),
+                price=b.price,
+                level=b.level,
+                continuation=b.continuation,
             )
-            if found.last_break
-            else None
-        ),
+            for b in found.breaks
+        ],
     )

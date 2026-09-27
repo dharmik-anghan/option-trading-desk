@@ -1,12 +1,128 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { getChart } from "../api";
+import type { StructureFrame } from "../api";
+import { getChart, getStructure } from "../api";
+import { num } from "../format";
 import type { Overlay } from "./CandleChart";
 import { useLive } from "../useLive";
 import { CandleChart } from "./CandleChart";
 import { IndicatorButton, IndicatorMenu, asQuery, remembered } from "./IndicatorPicker";
 import type { Pick } from "./IndicatorPicker";
 import { Oscillator } from "./Oscillator";
+
+//: How often the structure reading is refetched. It changes when a bar closes,
+//: and the smallest size any desk offers is five minutes.
+const STRUCTURE_MS = 120000;
+
+/** Bars each size is read over, when the caller names no window. */
+const DEFAULT_LOOKBACK = 180;
+
+/** Bars either side a turn has to beat. Two is about a swing a week on a daily
+    series; larger means fewer and more significant turns, at the price of
+    waiting longer for any of them to be confirmed. */
+const DEFAULT_K = 2;
+
+/** How each reading should feel. Up and down borrow the P&L pair; the two
+    mixed states get the market hue, because neither side is winning. */
+const TONE: Record<string, string> = {
+  uptrend: "up",
+  downtrend: "dn",
+  broadening: "mixed",
+  contracting: "mixed",
+  unclear: "none",
+};
+
+const STRUCTURE_KEY = "optiondesk-chart-structure";
+
+function rememberedStructure(scope: string): boolean {
+  try {
+    return localStorage.getItem(`${STRUCTURE_KEY}:${scope}`) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function rememberStructure(scope: string, on: boolean): void {
+  try {
+    localStorage.setItem(`${STRUCTURE_KEY}:${scope}`, on ? "on" : "off");
+  } catch {
+    // forgetting whether structure was on is not worth failing over
+  }
+}
+
+/**
+ * The breaks, which are what structure draws on the price.
+ *
+ * Each is the level price closed through, dotted, from the swing that set it to
+ * the bar that took it — not across the whole chart. A break is a span between
+ * two moments; a full-width line states the level at times before it existed
+ * and long after it was gone.
+ *
+ * All of them, across the window, rather than the most recent one. Only the
+ * last was drawn at first, and on a market in a clean trend — which takes out a
+ * level every few bars — that meant a chart reading "HH + HL" with nothing on
+ * it at all, because the latest swing high had not been broken *yet*. The
+ * history of where the market gave way is the thing worth seeing.
+ *
+ * An earlier version marked every swing with a dot and drew the last high and
+ * low as their own lines. Both were wrong. The dots were borrowed from the
+ * backtest chart, where a marker means a fill, so they read as trades on a
+ * chart where nothing was bought. And the swing levels are already in the
+ * candles — drawing lines through the highs says nothing the price had not.
+ *
+ * A break is different: it is the one mark here that is a judgement rather than
+ * an observation.
+ */
+function breakOf(frame: StructureFrame | undefined): NonNullable<Overlay["segments"]> {
+  const all = frame?.breaks ?? [];
+  return all.map((br, i) => ({
+      from: br.from_at,
+      to: br.at,
+      price: br.level,
+      // Only the newest carries its level in the label. Twenty of them with a
+      // price each is a wall of digits over the candles, and the price is on
+      // the axis anyway - what the label is for is saying which kind of break
+      // this was.
+      label: i === all.length - 1
+        ? `${br.continuation ? "BOS" : "CHoCH"} ${num(br.level, 0)}`
+        : br.continuation ? "BOS" : "CHoCH",
+      // Coloured by which way price went, not by whether the break continued
+      // the structure. Green for a close above the level and red for below,
+      // because on this desk those two hues mean direction and nothing else — a
+      // downward break drawn green because it agreed with a downtrend was the
+      // first version, and it read as good news. Whether it was continuation or
+      // a change of character is in the label, which is where a judgement
+      // belongs rather than in a colour that already means something.
+      kind: br.price > br.level ? ("target" as const) : ("stop" as const),
+  }));
+}
+
+function Reading({
+  frame,
+  lookback,
+}: {
+  frame: StructureFrame | undefined;
+  lookback: number | undefined;
+}) {
+  if (!frame || frame.bars === 0) return null;
+  const br = frame.breaks.at(-1);
+  const provisional = frame.swings.filter((s) => !s.confirmed).length;
+  return (
+    <p className="reading-structure">
+      <b>{frame.interval}</b> — {frame.says}, from the last{" "}
+      {frame.bars.toLocaleString()} bars ({frame.covers})
+      {lookback && frame.bars < lookback ? ", which is all that is stored" : ""}.
+      {br && (
+        <>
+          {" "}
+          Last break {br.continuation ? "went with" : "went against"} it, closing{" "}
+          {br.price > br.level ? "above" : "below"} {num(br.level, 0)}.
+        </>
+      )}
+      {provisional > 0 && <> A turn is forming that the next bar can still take away.</>}
+    </p>
+  );
+}
 
 /** One button on the timeframe row, and what it asks for. */
 export interface Frame {
@@ -18,11 +134,6 @@ export interface Frame {
   days?: number;
   /** Ask for the last N bars, for a chart that must show a named window. */
   bars?: number;
-  /** A class on the button, for a desk that colours them by what they say. */
-  tone?: string;
-  /** A second and third line, for a button that is a reading rather than a tab. */
-  says?: string;
-  detail?: string;
   disabled?: boolean;
   title?: string;
 }
@@ -40,12 +151,6 @@ interface Props {
   frames: readonly Frame[];
   frame: Frame;
   onFrame: (f: Frame) => void;
-  /** Which size the cursor is over, for a desk whose buttons are readings —
-      hovering one should read it without moving the chart off the one being
-      looked at, since comparison is the whole point of the row. */
-  onHoverFrame?: (f: Frame | null) => void;
-  /** Tabs read as a row of sizes; tiles carry a reading on each button. */
-  frameStyle?: "tabs" | "tiles";
   /** Live price, drawn as the current level. Null where nothing streams. */
   last?: number | null;
   /** Decimal places the venue quotes in. */
@@ -56,6 +161,8 @@ interface Props {
   everyMs: number;
   /** Which chart's indicator set this is, so two desks remember their own. */
   scope: string;
+  /** How many bars each size shows, which is also the window structure reads. */
+  bars?: number;
   /** Under the chart: a reading, a caveat, whatever belongs to the desk. */
   children?: ReactNode;
   /** The strip along the bottom. */
@@ -87,13 +194,12 @@ export function Chart({
   frames,
   frame,
   onFrame,
-  onHoverFrame,
-  frameStyle = "tabs",
   last = null,
   dp = 2,
   overlay,
   everyMs,
   scope,
+  bars = 0,
   children,
   footer,
   className = "a-chart",
@@ -105,6 +211,15 @@ export function Chart({
   const [picks, setPicks] = useState<Pick[]>(() => remembered(scope));
   const [picking, setPicking] = useState(false);
   useEffect(() => setPicks(remembered(scope)), [scope]);
+
+  // Structure is a reading of the same bars, so it is a thing you switch on
+  // over the chart rather than a different chart. Remembered like an indicator,
+  // because it is one.
+  const [structureOn, setStructureOn] = useState(() => rememberedStructure(scope));
+  const [k, setK] = useState(DEFAULT_K);
+  const [hoveredFrame, setHoveredFrame] = useState<string | null>(null);
+  useEffect(() => setStructureOn(rememberedStructure(scope)), [scope]);
+  useEffect(() => rememberStructure(scope, structureOn), [scope, structureOn]);
 
   // What the candle chart is showing and where the cursor is, so the panes
   // underneath draw the same bars and the same moment.
@@ -137,6 +252,23 @@ export function Chart({
     everyMs,
     [source, symbol, frame.interval, frame.days, frame.bars, indicators],
   );
+  // The sizes this chart offers, so the reading is about the buttons that are
+  // actually there rather than a fixed five.
+  const sizes = useMemo(() => frames.map((f) => f.interval), [frames]);
+  const structure = useLive(
+    () => getStructure(source, symbol, k, sizes, bars || DEFAULT_LOOKBACK),
+    STRUCTURE_MS,
+    [source, symbol, k, sizes.join(","), bars],
+    !structureOn,
+    600,
+  );
+  const reading = structureOn ? (structure.data ?? null) : null;
+  const byInterval = useMemo(() => {
+    const m = new Map<string, StructureFrame>();
+    for (const f of reading?.frames ?? []) m.set(f.interval, f);
+    return m;
+  }, [reading]);
+
   const rows = candles.data?.candles ?? [];
   const lines = candles.data?.lines ?? [];
   const onPrice = lines.filter((l) => l.on_price);
@@ -146,10 +278,17 @@ export function Chart({
   // Merged here rather than by the caller, so no desk has to know that the
   // lines it never asked for share a field with the levels it did.
   const drawn: Overlay = useMemo(
-    () => ({ ...overlay, lines: onPrice.map((l) => ({ label: l.label, values: l.values })) }),
+    () => {
+      const here = byInterval.get(frame.interval);
+      return {
+        ...overlay,
+        lines: onPrice.map((l) => ({ label: l.label, values: l.values })),
+        segments: [...(overlay?.segments ?? []), ...breakOf(here)],
+      };
+    },
     // `onPrice` is rebuilt every render from `lines`; the response is what changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overlay, candles.data],
+    [overlay, candles.data, byInterval, frame.interval],
   );
 
   return (
@@ -163,47 +302,78 @@ export function Chart({
           open={picking}
           onToggle={() => setPicking((p) => !p)}
         />
+        <button
+          className={structureOn ? "xbtn on" : "xbtn"}
+          aria-pressed={structureOn}
+          onClick={() => setStructureOn((on) => !on)}
+          title="Read higher highs and lower lows off these bars, at every size"
+        >
+          Structure
+        </button>
+        {structureOn && (
+          <label className="kpick" title="Bars either side a turn has to beat">
+            k
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={k}
+              onChange={(e) => setK(Math.min(20, Math.max(1, Number(e.target.value))))}
+            />
+          </label>
+        )}
+        {structureOn && reading && (
+          <span className={`sub agree ${reading.agreement === "the sizes disagree" ? "mixed" : ""}`}>
+            {reading.agreement}
+          </span>
+        )}
         {controls}
       </div>
 
       <div className="pb chartpb">
-        {frameStyle === "tiles" ? (
-          <div className="frames" role="tablist">
-            {frames.map((f) => (
+        <div
+          className={structureOn ? "frames tiles" : "frames"}
+          role="tablist"
+          aria-label="Timeframe"
+        >
+          {frames.map((f) => {
+            const said = byInterval.get(f.interval);
+            const on = f.interval === frame.interval;
+            return (
               <button
                 key={f.interval}
                 role="tab"
-                aria-selected={f.interval === frame.interval}
+                aria-selected={on}
                 disabled={f.disabled}
-                className={`frame ${f.tone ?? ""}${f.interval === frame.interval ? " on" : ""}`}
+                className={
+                  structureOn
+                    ? `frame ${TONE[said?.trend ?? "unclear"]}${on ? " on" : ""}`
+                    : on
+                      ? "xbtn on"
+                      : "xbtn"
+                }
                 onClick={() => onFrame(f)}
-                onMouseEnter={() => onHoverFrame?.(f)}
-                onMouseLeave={() => onHoverFrame?.(null)}
-                title={f.title}
+                onMouseEnter={() => setHoveredFrame(f.interval)}
+                onMouseLeave={() => setHoveredFrame(null)}
+                title={
+                  said
+                    ? `${said.bars.toLocaleString()} bars — ${said.covers} · ${said.says}`
+                    : f.title
+                }
               >
-                <b>{f.label}</b>
-                <span>{f.says}</span>
-                <em>{f.detail}</em>
+                {structureOn ? (
+                  <>
+                    <b>{f.label}</b>
+                    <span>{said && said.bars ? said.trend : "—"}</span>
+                    <em>{said && said.bars ? said.says : "no bars"}</em>
+                  </>
+                ) : (
+                  f.label
+                )}
               </button>
-            ))}
-          </div>
-        ) : (
-          <div className="frames" role="tablist" aria-label="Timeframe">
-            {frames.map((f) => (
-              <button
-                key={f.interval}
-                role="tab"
-                aria-selected={f.interval === frame.interval}
-                disabled={f.disabled}
-                className={f.interval === frame.interval ? "xbtn on" : "xbtn"}
-                onClick={() => onFrame(f)}
-                title={f.title}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
 
         {/* Over the chart rather than under the button: the header scrolls
             sideways when it runs out of room, and anything positioned inside a
@@ -251,6 +421,18 @@ export function Chart({
               hovered={view.hovered}
             />
           ))}
+        {structureOn && (
+          <Reading frame={byInterval.get(hoveredFrame ?? frame.interval)} lookback={reading?.lookback} />
+        )}
+        {structureOn &&
+          (reading?.caveats ?? []).map((c) => (
+            <p className="volcaveat" key={c}>
+              {c}
+            </p>
+          ))}
+        {structureOn && structure.error && (
+          <p className="chartnote">Structure unavailable: {structure.error.message}</p>
+        )}
         {children}
       </div>
 

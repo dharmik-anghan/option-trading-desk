@@ -94,9 +94,16 @@ class Structure:
     #: "HH" or "LH", and "HL" or "LL". None until there are two of each.
     high_label: str | None
     low_label: str | None
-    #: The most recent break of a swing level, if price has taken one out since
-    #: it was set.
-    last_break: Break | None
+    #: Every close through a swing level in these bars, oldest first. One was
+    #: reported before, and only if the *latest* high or low happened to have
+    #: been taken out - so a market in a clean uptrend, which breaks a level
+    #: every few bars, drew nothing at all between the last one and now.
+    breaks: tuple[Break, ...]
+
+    @property
+    def last_break(self) -> Break | None:
+        """The most recent one, which is what a sentence about this market means."""
+        return self.breaks[-1] if self.breaks else None
 
     @property
     def confirmed(self) -> tuple[Swing, ...]:
@@ -196,7 +203,7 @@ def read(bars: Sequence[Bar], k: int = DEFAULT_K) -> Structure:
         trend=trend,
         high_label=high_label,
         low_label=low_label,
-        last_break=_break(bars, highs, lows, trend),
+        breaks=tuple(breaks(bars, settled, k)),
     )
 
 
@@ -215,38 +222,70 @@ def _trend(high_label: str | None, low_label: str | None) -> Trend:
     }.get((high_label or "", low_label or ""), Trend.UNCLEAR)
 
 
-def _break(
-    bars: Sequence[Bar], highs: list[Swing], lows: list[Swing], trend: Trend
-) -> Break | None:
-    """The most recent close through a swing level.
+def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]:
+    """Every close through a swing level, oldest first.
 
     On a close rather than a touch. A wick through a level is a test of it; a
     close beyond is the market agreeing, and the difference is most of what
     separates a break from a stop hunt.
 
-    Whether it continues the structure or breaks it is the interesting part - a
-    close under the last swing low while the trend is up is the first crack, and
-    it is the one worth a label of its own.
-    """
-    last_high = highs[-1] if highs else None
-    last_low = lows[-1] if lows else None
-    found: Break | None = None
+    Causal, with the same discipline as everything else here: a swing found at
+    index `i` is not used as a level until bar `i + k`, because that is the
+    first bar by which anybody could have known it was a swing. Reading the
+    whole series first and then asking which bars closed through which levels
+    would draw breaks of levels that had not been established yet.
 
-    for bar in bars:
-        if last_high is not None and bar.ts > last_high.at and bar.close > last_high.price:
-            found = Break(
-                at=bar.ts,
-                price=bar.close,
-                level=last_high.price,
-                from_at=last_high.at,
-                continuation=trend is not Trend.DOWN,
+    A level is broken once. Without that, a market that runs away from a swing
+    high reports a break on every bar after it, and the chart becomes a row of
+    identical lines rather than a record of the moments something gave way.
+
+    Whether a break continues the structure or cracks it is judged on the trend
+    *at that bar*, not on the trend now - a change of character is interesting
+    because of what it did to the reading at the time.
+    """
+    ordered = sorted(settled, key=lambda s: s.index)
+    found: list[Break] = []
+    highs: list[Swing] = []
+    lows: list[Swing] = []
+    high: Swing | None = None
+    low: Swing | None = None
+    taken_high = taken_low = False
+    nxt = 0
+
+    for i, bar in enumerate(bars):
+        # Swings become usable k bars after they print, which is when they could
+        # first have been recognised.
+        while nxt < len(ordered) and ordered[nxt].index + k <= i:
+            swing = ordered[nxt]
+            if swing.kind is Kind.HIGH:
+                highs.append(swing)
+                high, taken_high = swing, False
+            else:
+                lows.append(swing)
+                low, taken_low = swing, False
+            nxt += 1
+
+        trend = _trend(_label(highs, "HH", "LH"), _label(lows, "HL", "LL"))
+        if high is not None and not taken_high and bar.close > high.price:
+            found.append(
+                Break(
+                    at=bar.ts,
+                    price=bar.close,
+                    level=high.price,
+                    from_at=high.at,
+                    continuation=trend is not Trend.DOWN,
+                )
             )
-        if last_low is not None and bar.ts > last_low.at and bar.close < last_low.price:
-            found = Break(
-                at=bar.ts,
-                price=bar.close,
-                level=last_low.price,
-                from_at=last_low.at,
-                continuation=trend is not Trend.UP,
+            taken_high = True
+        if low is not None and not taken_low and bar.close < low.price:
+            found.append(
+                Break(
+                    at=bar.ts,
+                    price=bar.close,
+                    level=low.price,
+                    from_at=low.at,
+                    continuation=trend is not Trend.UP,
+                )
             )
+            taken_low = True
     return found
