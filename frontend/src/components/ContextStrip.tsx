@@ -73,24 +73,12 @@ export function ContextStrip({ context }: { context: MarketContext | null }) {
       market: true,
       hint: "Where the most open interest expires worthless",
     },
-    {
-      label: "ATM straddle",
-      value: f(c?.atm_straddle),
-      hint: c?.atm_strike == null ? undefined : `At the ${int(c.atm_strike)} strike`,
-    },
-    {
-      label: "IV / HV",
-      value:
-        c?.atm_iv == null || c?.historical_vol == null
-          ? dash
-          : `${num(c.atm_iv, 1)} / ${num(c.historical_vol, 1)}`,
-      hint:
-        c?.iv_over_hv == null
-          ? "Implied against 20-session historical volatility"
-          : `${num(c.iv_over_hv, 2)}× — options cost ${
-              c.iv_over_hv >= 1 ? "more" : "less"
-            } than the index has lately moved`,
-    },
+    // The straddle and the implied-against-realised pair used to sit here as
+    // well as in the volatility panel, and the two disagreed - 9.3 against 9.03
+    // - because each had its own copy of the arithmetic. The panel keeps them:
+    // it has room for the rank and for both estimators, which is what makes
+    // either number mean anything. This strip keeps what the panel does not
+    // cover, which is the levels the chain implies.
     {
       label: "Skew",
       value: c?.skew == null ? dash : `${num(c.skew, 1)} pts`,

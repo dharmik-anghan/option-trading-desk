@@ -41,6 +41,13 @@ def close_to_close(closes: Sequence[float], window: int = 20) -> float | None:
     day that travelled two percent and came back reads as a quiet day. Kept
     because it is what everyone means by "realised volatility" and what an
     implied figure is quoted against.
+
+    The sample standard deviation, dividing by n-1. Worth stating because the
+    choice is visible: this desk once had two implementations of this function,
+    one using n-1 and one using n, and the same index showed 9.3 in the context
+    strip and 9.03 in the volatility panel. Over twenty samples the two differ
+    by root(20/19), which is 2.6% - small enough to look like a rounding
+    difference and large enough to make two figures on one screen disagree.
     """
     if window < 2 or len(closes) < window + 1:
         return None
@@ -49,9 +56,27 @@ def close_to_close(closes: Sequence[float], window: int = 20) -> float | None:
         for i in range(len(closes) - window, len(closes))
         if closes[i] > 0 and closes[i - 1] > 0
     ]
-    if len(returns) < 2:
+    if len(returns) < 3:
         return None
-    return statistics.pstdev(returns) * math.sqrt(YEAR) * 100.0
+    return statistics.stdev(returns) * math.sqrt(YEAR) * 100.0
+
+
+def iv_hv_ratio(implied: float | None, realised: float | None) -> float | None:
+    """Implied over realised. Above one means options cost more than the recent
+    past would justify.
+
+    A ratio rather than a difference, because it travels. Two points of premium
+    on a 9% index is a quarter again on top; the same two points on a 25% index
+    is almost nothing, and a subtraction calls them equal. The difference is
+    still worth showing beside it - it is what a seller actually collects - but
+    the ratio is what compares across instruments and across regimes.
+
+    None when realised is zero or missing: a ratio against a market that has not
+    moved is infinite rather than excellent.
+    """
+    if implied is None or realised is None or realised <= 0:
+        return None
+    return implied / realised
 
 
 def parkinson(bars: Sequence[Bar], window: int = 20) -> float | None:

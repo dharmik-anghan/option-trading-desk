@@ -15,6 +15,7 @@ import math
 import statistics
 from dataclasses import dataclass
 
+from analytics.volatility import close_to_close
 from broker.models import OptionChain, OptionChainRow
 
 
@@ -255,21 +256,13 @@ def _nearest_quoted(strikes: list[Strike], target: float, side: str) -> float | 
 def historical_vol(closes: list[float], sessions: int = 20) -> float | None:
     """Annualised volatility of daily closes, as a percentage.
 
-    The standard deviation of log returns over the last `sessions`, scaled by
-    root-252. Compared against implied vol it answers whether options are
-    charging more than the index has actually been moving.
+    Kept as a name because the context strip and its tests call it, but the
+    arithmetic lives in `analytics.volatility` now. It was duplicated there, and
+    the two copies disagreed: this one divided by n-1 and the other by n, so the
+    same index read 9.3 in the strip and 9.03 in the panel beside it. Two
+    figures for one number on one screen is worse than either being wrong.
     """
-    if len(closes) < 3:
-        return None
-    returns = [
-        math.log(closes[i] / closes[i - 1])
-        for i in range(1, len(closes))
-        if closes[i] > 0 and closes[i - 1] > 0
-    ]
-    window = returns[-sessions:]
-    if len(window) < 3:
-        return None
-    return statistics.stdev(window) * math.sqrt(252) * 100
+    return close_to_close(closes, sessions)
 
 
 def futures_symbol(option_symbol: str, strike: float) -> str | None:

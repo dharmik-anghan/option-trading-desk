@@ -24,7 +24,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from analytics.vol_snapshot import snapshot_from
-from analytics.volatility import close_to_close, expected_move, parkinson, rank_of
+from analytics.volatility import (
+    close_to_close,
+    expected_move,
+    iv_hv_ratio,
+    parkinson,
+    rank_of,
+)
 from api.dependencies import get_broker
 from api.deps import DbPathDep, bar_service
 from api.store import open_db
@@ -82,8 +88,14 @@ class VolatilityOut(BaseModel):
     expected_move_points: float | None
     india_vix: float | None
     realised: list[RealisedOut]
-    #: Implied minus realised over twenty sessions. The edge, in vol points.
+    #: Implied minus realised over twenty sessions. The edge, in vol points -
+    #: what a seller actually collects.
     spread: float | None
+    #: Implied over realised. Above one means options cost more than the recent
+    #: past would justify. Beside the difference rather than instead of it: the
+    #: ratio travels between a quiet index and a wild one where the subtraction
+    #: does not.
+    iv_hv: float | None
     #: Where India VIX sits in two years of its own history. Available today.
     vix_rank: RankOut | None
     #: Where this underlying's own implied sits in what has been recorded. None
@@ -145,6 +157,7 @@ def volatility(request: Request, underlying: str, db_path: DbPathDep) -> Volatil
 
     twenty = next((r.close_to_close for r in realised if r.window == 20), None)
     spread = now.atm_iv - twenty if now.atm_iv is not None and twenty is not None else None
+    ratio = iv_hv_ratio(now.atm_iv, twenty)
 
     vix_bars = _bars(request, VIX_SYMBOL, 800)
     vix_rank = (
@@ -188,6 +201,7 @@ def volatility(request: Request, underlying: str, db_path: DbPathDep) -> Volatil
         india_vix=now.india_vix,
         realised=realised,
         spread=spread,
+        iv_hv=ratio,
         vix_rank=_rank_out(vix_rank),
         iv_rank=_rank_out(iv_rank),
         iv_days=len(implied),

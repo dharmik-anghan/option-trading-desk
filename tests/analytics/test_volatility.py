@@ -11,6 +11,7 @@ from analytics.volatility import (
     YEAR,
     close_to_close,
     expected_move,
+    iv_hv_ratio,
     parkinson,
     rank_of,
 )
@@ -32,17 +33,23 @@ def test_a_price_that_never_moves_has_no_volatility() -> None:
 
 
 def test_a_known_daily_move_annualises_to_the_expected_figure() -> None:
-    """One percent a day, alternating, is about 16% a year - and the arithmetic
-    is worth pinning because the annualisation factor is the easy thing to get
-    wrong."""
+    """One percent a day, alternating, is about 16% a year.
+
+    Worth pinning for two reasons. The annualisation factor is the easy thing to
+    get wrong, and so is the estimator: this uses the *sample* standard
+    deviation, dividing by n-1, so the answer is root(n/(n-1)) larger than the
+    population one. The desk once had both, and the same index read 9.3 in one
+    panel and 9.03 in the next.
+    """
     closes = [100.0]
     for i in range(40):
         closes.append(closes[-1] * (1.01 if i % 2 else 1 / 1.01))
 
     vol = close_to_close(closes, 20)
 
+    population = math.log(1.01) * math.sqrt(YEAR) * 100
     assert vol is not None
-    assert vol == pytest.approx(math.log(1.01) * math.sqrt(YEAR) * 100, rel=1e-6)
+    assert vol == pytest.approx(population * math.sqrt(20 / 19), rel=1e-6)
 
 
 def test_volatility_needs_a_full_window_rather_than_guessing() -> None:
@@ -129,3 +136,36 @@ def test_the_expected_move_is_the_straddle_over_spot() -> None:
 def test_an_expected_move_on_nothing() -> None:
     assert expected_move(0.0, 100.0) is None
     assert expected_move(100.0, 0.0) is None
+
+
+# --------------------------------------------------------------------------
+# Implied against realised
+# --------------------------------------------------------------------------
+
+
+def test_the_ratio_says_how_much_dearer_options_are() -> None:
+    """Options at 12 against a market moving at 9 cost a third again."""
+    assert iv_hv_ratio(12.0, 9.0) == pytest.approx(4 / 3)
+
+
+def test_the_ratio_travels_where_the_difference_does_not() -> None:
+    """Two points of premium on a 9% index is a quarter again on top; the same
+    two points on a 25% index is almost nothing. A subtraction calls them equal
+    and a ratio does not - which is the whole reason for having both."""
+    quiet = iv_hv_ratio(11.0, 9.0)
+    wild = iv_hv_ratio(27.0, 25.0)
+
+    assert quiet is not None and wild is not None
+    assert (11.0 - 9.0) == (27.0 - 25.0)
+    # 1.22 against 1.08: the same two points is a quarter again on a quiet
+    # index and eight percent on a wild one.
+    assert quiet == pytest.approx(11 / 9)
+    assert wild == pytest.approx(27 / 25)
+    assert quiet > wild
+
+
+def test_a_ratio_against_a_market_that_has_not_moved_is_undefined() -> None:
+    """Infinite rather than excellent."""
+    assert iv_hv_ratio(12.0, 0.0) is None
+    assert iv_hv_ratio(12.0, None) is None
+    assert iv_hv_ratio(None, 9.0) is None

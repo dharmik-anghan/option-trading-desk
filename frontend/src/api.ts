@@ -1224,8 +1224,11 @@ export interface Volatility {
   expected_move_points: number | null;
   india_vix: number | null;
   realised: Realised[];
-  /** Implied minus realised over twenty sessions — the edge, in vol points. */
+  /** Implied minus realised over twenty sessions — what a seller collects. */
   spread: number | null;
+  /** Implied over realised. Travels between a quiet index and a wild one where
+      the subtraction does not. */
+  iv_hv: number | null;
   vix_rank: VolRank | null;
   /** Null until enough of our own implied history has been recorded. */
   iv_rank: VolRank | null;

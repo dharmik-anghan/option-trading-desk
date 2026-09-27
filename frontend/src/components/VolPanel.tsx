@@ -50,11 +50,19 @@ export function VolPanel({ vol, error, loading }: Props) {
                 value={fmt(vol.realised.find((r) => r.window === 20)?.close_to_close)}
                 note="what it actually did"
               />
+              {/* Both, because they say different things. The difference is
+                  what a seller collects; the ratio is what compares across
+                  instruments, where two points on a 9% index is a quarter again
+                  and on a 25% one is almost nothing. */}
               <Figure
-                label="Implied − realised"
-                value={vol.spread === null ? "—" : `${signed(vol.spread, 2)}`}
-                tone={vol.spread === null ? undefined : vol.spread > 0 ? "up" : "dn"}
-                note="the edge, in vol points"
+                label="IV / HV"
+                value={vol.iv_hv === null ? "—" : `${num(vol.iv_hv, 2)}×`}
+                tone={vol.iv_hv === null ? undefined : vol.iv_hv > 1 ? "up" : "dn"}
+                note={
+                  vol.spread === null
+                    ? "implied over realised"
+                    : `${signed(vol.spread, 2)} vol points`
+                }
               />
             </div>
 

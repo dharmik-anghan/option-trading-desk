@@ -14,6 +14,7 @@ from analytics import market_context as mc
 from analytics.payoff import (
     PLAUSIBLE_RATE,
 )
+from analytics.volatility import iv_hv_ratio
 from api.deps import BrokerDep
 from api.pricing import (
     years_to_expiry,
@@ -96,7 +97,7 @@ def market_context(symbol: str, broker: BrokerDep, hv_sessions: int = 20) -> Mar
         atm_straddle=mc.atm_straddle(strikes, spot),
         atm_iv=iv,
         historical_vol=hv,
-        iv_over_hv=None if iv is None or not hv else iv / hv,
+        iv_over_hv=iv_hv_ratio(iv, hv),
         put_call_ratio=mc.put_call_ratio(chain, strikes),
         max_pain=mc.max_pain(strikes),
         resistance=resistance.strike if resistance else None,
