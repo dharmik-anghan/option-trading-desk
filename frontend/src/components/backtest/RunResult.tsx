@@ -1,4 +1,4 @@
-import type { BacktestResult } from "../../api";
+import type { BacktestResult, StrategySpec } from "../../api";
 import { useState } from "react";
 import type { BacktestTrade } from "../../api";
 import { TradeChart } from "./TradeChart";
@@ -6,6 +6,8 @@ import { TradeLog } from "./TradeLog";
 
 interface Props {
   result: BacktestResult;
+  /** What produced it, so a trade chart can draw the same indicators. */
+  spec: StrategySpec;
 }
 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -21,7 +23,7 @@ const money = (v: number) =>
  * drawdown, which decides whether it is holdable at all. Then where the money
  * went - on a short-horizon rule that is usually the whole story.
  */
-export function RunResult({ result }: Props) {
+export function RunResult({ result, spec }: Props) {
   const m = result.metrics;
   const [picked, setPicked] = useState<BacktestTrade | null>(null);
   const costs = m.fees + m.funding + m.slippage;
@@ -53,6 +55,24 @@ export function RunResult({ result }: Props) {
           note={m.beat_holding ? "the rule did better" : "the rule did worse"}
         />
         <Figure label="Worst drawdown" value={pct(m.max_drawdown)} tone="dn" />
+        <Figure
+          label="A year, compounded"
+          value={m.annualised === null ? "—" : pct(m.annualised)}
+          tone={m.annualised !== null && m.annualised > 0 ? "up" : "dn"}
+          note={m.annualised === null ? "too short a window to annualise" : ""}
+        />
+        <Figure
+          label="Sharpe"
+          value={m.sharpe.toFixed(2)}
+          tone={m.sharpe > 0 ? "up" : "dn"}
+          note="return over volatility"
+        />
+        <Figure
+          label="Calmar"
+          value={m.calmar === null ? "—" : m.calmar.toFixed(2)}
+          tone={m.calmar !== null && m.calmar > 0 ? "up" : "dn"}
+          note={m.calmar === null ? "nothing ever fell" : "year over worst fall"}
+        />
         <Figure
           label="Trades"
           value={m.trades.toLocaleString()}
@@ -155,6 +175,7 @@ export function RunResult({ result }: Props) {
           source={result.source}
           symbol={result.symbol}
           interval={result.interval}
+          spec={spec}
           onClose={() => setPicked(null)}
         />
       )}

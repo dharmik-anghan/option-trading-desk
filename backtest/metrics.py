@@ -52,10 +52,23 @@ class Metrics:
     #: the bar, so it includes losses taken inside a position rather than only
     #: those realised on a close.
     max_drawdown: float
-    #: Return divided by volatility, annualised. A ratio, not a promise: it
-    #: assumes returns that are independent and roughly symmetric, and a rule with
-    #: a stop has neither.
+    #: What the run returned a year, compounded. The figure Calmar is built on,
+    #: so it is reported rather than left implied. None over a window too short
+    #: to annualise honestly.
+    annualised: float | None
+    #: Return over volatility, annualised, at a risk-free rate of zero. A ratio,
+    #: not a promise: it assumes returns that are independent and roughly
+    #: symmetric, and a rule with a stop has neither. It also punishes upside
+    #: volatility exactly as hard as downside, which is why it is not alone here.
     sharpe: float
+    #: Annual return over the worst drawdown. The ratio that matches how a rule is
+    #: actually abandoned - not by its variance but by the one fall that made it
+    #: unholdable - and the one to read when a Sharpe looks too good.
+    #:
+    #: None when nothing ever fell: a ratio over a zero drawdown is infinite
+    #: rather than excellent, and printing a large number there would be a lie of
+    #: exactly the kind these figures exist to prevent.
+    calmar: float | None
     gross: float
     fees: float
     funding: float
@@ -105,6 +118,9 @@ def measure(
         (bars[-1].ts - bars[0].ts).total_seconds() + interval.seconds if bars else 0.0
     )
 
+    drawdown = max_drawdown(equity)
+    yearly = annualised(capital, final, bars, interval)
+
     endings: dict[str, int] = {}
     for reason in Exit:
         count = sum(1 for t in trades if t.why is reason)
@@ -116,8 +132,10 @@ def measure(
         wins=sum(1 for t in trades if t.won),
         total_return=(final - capital) / capital if capital else 0.0,
         buy_and_hold=(bars[-1].close - bars[0].open) / bars[0].open if bars else 0.0,
-        max_drawdown=max_drawdown(equity),
+        max_drawdown=drawdown,
+        annualised=yearly,
         sharpe=sharpe(equity, interval),
+        calmar=(yearly / drawdown) if yearly is not None and drawdown > 0 else None,
         gross=gross,
         fees=fees,
         funding=funding,
@@ -144,6 +162,43 @@ def _by_side(trades: Sequence[Trade]) -> dict[str, SideSummary]:
             net=sum(t.net for t in mine),
         )
     return out
+
+
+#: The shortest window worth annualising.
+#:
+#: Below this the arithmetic still works and the answer is theatre: a run that
+#: made 1% in an afternoon annualises to several million percent, and a Calmar
+#: built on it would be the most impressive number on the page. Nothing is a
+#: better answer than a number that cannot be true.
+MIN_YEARS = 30 / 365
+
+
+def annualised(
+    capital: float, final: float, bars: Sequence[Bar], interval: Interval
+) -> float | None:
+    """What the run made a year, compounded, or None over too short a window.
+
+    Compounded rather than the total divided by the number of years: a run that
+    doubled over three years returned 26% a year, not 33%, and the difference
+    grows with the window. Both ratios that use it divide by this, so getting it
+    wrong would be wrong twice.
+
+    A run that lost everything returns -100% a year however long it took, which
+    is the truth rather than whatever the formula would produce for it.
+    """
+    if capital <= 0 or not bars:
+        return None
+    span = (bars[-1].ts - bars[0].ts).total_seconds() + interval.seconds
+    years = span / timedelta(days=365).total_seconds()
+    if years < MIN_YEARS:
+        return None
+    if final <= 0:
+        return -1.0
+    try:
+        return float((final / capital) ** (1 / years)) - 1.0
+    except OverflowError:
+        # Unreachable above the minimum span, and cheaper to guard than to prove.
+        return None
 
 
 def max_drawdown(equity: Sequence[float]) -> float:

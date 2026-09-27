@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getBacktestCandles } from "../../api";
-import type { BacktestTrade, Candle } from "../../api";
+import type { BacktestTrade, Candle, IndicatorLine, StrategySpec } from "../../api";
 import { CandleChart } from "../CandleChart";
 import type { Overlay } from "../CandleChart";
 
@@ -9,6 +9,9 @@ interface Props {
   source: string;
   symbol: string;
   interval: string;
+  /** The strategy, so its own indicators are drawn on the chart. Without them a
+      crossover chart cannot show the crossing that caused the trade. */
+  spec: StrategySpec;
   onClose: () => void;
 }
 
@@ -37,8 +40,9 @@ const SECONDS: Record<string, number> = {
  * result gets caught - an entry printed at the exact low of a bar is the shape of
  * a lookahead bug, and no summary statistic would ever show it.
  */
-export function TradeChart({ trade, source, symbol, interval, onClose }: Props) {
+export function TradeChart({ trade, source, symbol, interval, spec, onClose }: Props) {
   const [candles, setCandles] = useState<Candle[] | null>(null);
+  const [lines, setLines] = useState<IndicatorLine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,13 +52,17 @@ export function TradeChart({ trade, source, symbol, interval, onClose }: Props) 
     let current = true;
     setCandles(null);
     setError(null);
-    void getBacktestCandles(source, symbol, interval, start, end)
-      .then((r) => current && setCandles(r.candles))
+    void getBacktestCandles({ source, symbol, interval, start, end, spec })
+      .then((r) => {
+        if (!current) return;
+        setCandles(r.candles);
+        setLines(r.lines);
+      })
       .catch((e: unknown) => current && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       current = false;
     };
-  }, [trade, source, symbol, interval]);
+  }, [trade, source, symbol, interval, spec]);
 
   const long = trade.side === "long";
   const overlay: Overlay = {
@@ -67,6 +75,7 @@ export function TradeChart({ trade, source, symbol, interval, onClose }: Props) 
       { at: trade.closed_at, price: trade.exit_price, kind: "exit", side: long ? "long" : "short" },
     ],
     band: { from: trade.opened_at, to: trade.closed_at },
+    lines: lines.map((l) => ({ label: l.label, values: l.values })),
   };
 
   return (
@@ -80,6 +89,15 @@ export function TradeChart({ trade, source, symbol, interval, onClose }: Props) 
           {trade.net.toFixed(2)} ({(trade.net_pct * 100).toFixed(1)}%)
         </span>
         <span className="sp" />
+        {lines.length > 0 && (
+          <span className="keys">
+            {lines.map((l, n) => (
+              <span key={l.label} className={`key i${n % 5}`}>
+                {l.label}
+              </span>
+            ))}
+          </span>
+        )}
         <span className="dim">
           opened because {trade.entry_reason || "—"} · closed because {trade.exit_reason || "—"}
         </span>

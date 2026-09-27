@@ -421,7 +421,7 @@ export function Backtesting({ onHome }: Props) {
         </section>
       </div>
 
-      {result && <RunResult result={result} />}
+      {result && <RunResult result={result} spec={spec} />}
 
       {series !== null && series.length > 0 && (
         <details className="held-wrap">

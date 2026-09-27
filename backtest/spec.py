@@ -85,6 +85,22 @@ class Operand:
                 found |= side.timeframes()
         return found
 
+    def indicators(self) -> set[tuple[str, int, Interval | None]]:
+        """Every indicator this operand reads, for drawing them on a chart.
+
+        A strategy that trades an EMA crossing should show the two EMAs, and the
+        only way to be sure the lines are the ones it read is to take them from
+        the strategy itself rather than from a list somebody keeps in step by
+        hand.
+        """
+        found: set[tuple[str, int, Interval | None]] = set()
+        if self.kind == "indicator":
+            found.add((self.name, self.length, self.interval))
+        for side in (self.left, self.right):
+            if side is not None:
+                found |= side.indicators()
+        return found
+
     def read(self, view: View) -> float | None:
         if self.kind == "value":
             return self.value
@@ -170,6 +186,15 @@ class Condition:
                 found |= side.timeframes()
         for inner in self.of:
             found |= inner.timeframes()
+        return found
+
+    def indicators(self) -> set[tuple[str, int, Interval | None]]:
+        found: set[tuple[str, int, Interval | None]] = set()
+        for side in (self.left, self.right):
+            if side is not None:
+                found |= side.indicators()
+        for inner in self.of:
+            found |= inner.indicators()
         return found
 
     def holds(self, view: View) -> bool:
@@ -353,6 +378,21 @@ class StrategySpec:
                 found |= level.timeframes()
         found.discard(self.interval)
         return tuple(sorted(found, key=lambda i: i.seconds, reverse=True))
+
+    def indicators(self) -> list[tuple[str, int, Interval | None]]:
+        """Every indicator the strategy reads, longest period first.
+
+        Ordered so a chart draws the slow line under the fast one, which is the
+        way round that keeps a crossing legible.
+        """
+        found: set[tuple[str, int, Interval | None]] = set()
+        for part in (self.long_entry, self.short_entry, self.long_exit, self.short_exit):
+            if part is not None:
+                found |= part.indicators()
+        for lev in (self.stop, self.target):
+            if lev is not None and lev.kind == "atr":
+                found.add(("atr", lev.length, lev.interval))
+        return sorted(found, key=lambda i: (-i[1], i[0]))
 
     def check(self) -> list[str]:
         """Everything wrong with this, in words, before a run is attempted.

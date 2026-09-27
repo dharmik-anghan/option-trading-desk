@@ -218,9 +218,9 @@ def test_restricting_the_hours_changes_the_trades(stocked: TestClient) -> None:
 
 def test_candles_over_a_window(stocked: TestClient) -> None:
     """What a single trade is looked at on."""
-    response = stocked.get(
+    response = stocked.post(
         "/api/backtest/candles",
-        params={
+        json={
             "source": "binance",
             "symbol": "TESTUSDT",
             "interval": "5m",
@@ -238,9 +238,9 @@ def test_candles_over_a_window(stocked: TestClient) -> None:
 
 def test_a_window_can_be_asked_for_at_a_longer_bar_size(stocked: TestClient) -> None:
     """Only 5m is stored, so an hourly window has to be resampled."""
-    response = stocked.get(
+    response = stocked.post(
         "/api/backtest/candles",
-        params={
+        json={
             "source": "binance",
             "symbol": "TESTUSDT",
             "interval": "1h",
@@ -255,9 +255,9 @@ def test_a_window_can_be_asked_for_at_a_longer_bar_size(stocked: TestClient) -> 
 
 
 def test_a_backwards_window_is_refused(stocked: TestClient) -> None:
-    response = stocked.get(
+    response = stocked.post(
         "/api/backtest/candles",
-        params={
+        json={
             "source": "binance",
             "symbol": "TESTUSDT",
             "interval": "5m",
@@ -271,9 +271,9 @@ def test_a_backwards_window_is_refused(stocked: TestClient) -> None:
 
 
 def test_a_window_that_is_not_a_timestamp_says_so(stocked: TestClient) -> None:
-    response = stocked.get(
+    response = stocked.post(
         "/api/backtest/candles",
-        params={
+        json={
             "source": "binance",
             "symbol": "TESTUSDT",
             "interval": "5m",
@@ -295,9 +295,9 @@ def test_the_window_covers_the_trades_a_run_reported(stocked: TestClient) -> Non
     run_body = stocked.post("/api/backtest/run", json=_crossover()).json()
     trade = run_body["trades"][0]
 
-    response = stocked.get(
+    response = stocked.post(
         "/api/backtest/candles",
-        params={
+        json={
             "source": "binance",
             "symbol": "TESTUSDT",
             "interval": run_body["interval"],
@@ -308,3 +308,122 @@ def test_the_window_covers_the_trades_a_run_reported(stocked: TestClient) -> Non
 
     assert response.status_code == 200
     assert response.json()["candles"]
+
+
+def test_the_strategys_own_indicators_come_back_with_the_candles(
+    stocked: TestClient,
+) -> None:
+    """A crossover chart without its two lines cannot show the crossing."""
+    body = stocked.post(
+        "/api/backtest/candles",
+        json={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-01T12:00:00+00:00",
+            "end": "2026-01-01T16:00:00+00:00",
+            "spec": _crossover()["spec"],
+        },
+    ).json()
+
+    labels = [line["label"] for line in body["lines"]]
+    assert labels == ["EMA 20", "EMA 5"]  # slowest first, so it draws underneath
+    for line in body["lines"]:
+        assert len(line["values"]) == len(body["candles"])
+        assert any(v is not None for v in line["values"])
+
+
+def test_a_drawn_indicator_is_the_one_the_rule_read(stocked: TestClient) -> None:
+    """The point of computing these in the engine's own view.
+
+    A line drawn by different code from the one that made the decision can be
+    subtly wrong exactly where it matters, at the crossing. Here the drawn value
+    is checked against the indicator computed straight from the same bars.
+    """
+    from analytics.indicators import closes as close_prices
+    from analytics.indicators import ema as ema_line
+    from marketdata import Interval, Series
+
+    store = app.state.bar_store
+    bars = store.read(Series("binance", "TESTUSDT", Interval.M5))
+
+    body = stocked.post(
+        "/api/backtest/candles",
+        json={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": bars[900].ts.isoformat(),
+            "end": bars[910].ts.isoformat(),
+            "spec": _crossover()["spec"],
+        },
+    ).json()
+
+    drawn = next(line for line in body["lines"] if line["label"] == "EMA 5")
+    expected = ema_line(close_prices(bars), 5)
+
+    for offset, value in enumerate(drawn["values"]):
+        assert value == pytest.approx(expected[900 + offset], rel=1e-9)
+
+
+def test_a_higher_timeframe_line_holds_its_last_closed_value(
+    stocked: TestClient,
+) -> None:
+    """Drawing the true hourly value against a five-minute bar inside that hour
+    would draw information the rule did not have - the same lie the engine exists
+    to avoid, just in pixels."""
+    spec = {
+        "name": "Hourly filter",
+        "long_entry": {
+            "all": [
+                {
+                    "left": {"kind": "indicator", "name": "ema", "length": 5, "tf": "1h"},
+                    "op": "above",
+                    "right": 0,
+                }
+            ]
+        },
+        "long_exit": {
+            "all": [{"left": {"kind": "price", "field": "close"}, "op": "below", "right": 0}]
+        },
+    }
+
+    body = stocked.post(
+        "/api/backtest/candles",
+        json={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-02T00:00:00+00:00",
+            "end": "2026-01-02T02:00:00+00:00",
+            "spec": spec,
+        },
+    ).json()
+
+    values = [v for v in body["lines"][0]["values"] if v is not None]
+
+    assert body["lines"][0]["label"] == "EMA 5 1h"
+    # twenty-five five-minute bars across two hours, but only three distinct
+    # hourly values can have closed in that time
+    assert len(values) > 12
+    assert len(set(values)) <= 3
+
+
+def test_a_chart_is_still_drawn_for_a_strategy_that_will_not_run(
+    stocked: TestClient,
+) -> None:
+    """A broken strategy is a reason to show no lines, not to show no chart."""
+    body = stocked.post(
+        "/api/backtest/candles",
+        json={
+            "source": "binance",
+            "symbol": "TESTUSDT",
+            "interval": "5m",
+            "start": "2026-01-01T00:00:00+00:00",
+            "end": "2026-01-01T02:00:00+00:00",
+            "spec": {"name": "Broken"},
+        },
+    ).json()
+
+    assert body["candles"]
+    assert body["lines"] == []

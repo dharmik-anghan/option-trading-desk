@@ -2150,13 +2150,17 @@ a.nitem:hover .nhead {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
   margin-top: 18px;
-  background: var(--line);
+  /* The panel colour, not the hairline: with seven figures in a four-column
+     grid the last row is part empty, and a line-coloured background turns that
+     gap into a block of nothing. */
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 3px;
   overflow: hidden;
 }
 .bt .fig {
   background: var(--panel);
+  box-shadow: 0 0 0 1px var(--line);
   padding: 10px 12px;
 }
 .bt .fig small {
@@ -2604,3 +2608,51 @@ a.nitem:hover .nhead {
 .cmark.exit circle {
   fill: var(--dim);
 }
+
+/* Indicator lines on a trade chart. Five hues that stay apart in both themes
+   and none of which is the up/down pair — a moving average is not a profit. */
+:root {
+  --i0: #5b4bd6;
+  --i1: #b8860b;
+  --i2: #0f7b8a;
+  --i3: #a0439b;
+  --i4: #6b7280;
+}
+:root[data-theme="dark"] {
+  --i0: #9a8cf5;
+  --i1: #d9a441;
+  --i2: #5ec4d4;
+  --i3: #d98cd0;
+  --i4: #9aa7b8;
+}
+.cline {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.cline.i0 { stroke: var(--i0); }
+.cline.i1 { stroke: var(--i1); }
+.cline.i2 { stroke: var(--i2); }
+.cline.i3 { stroke: var(--i3); }
+.cline.i4 { stroke: var(--i4); }
+
+.bt .tradechart .keys {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+}
+.bt .tradechart .key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.bt .tradechart .key.i0::before { background: var(--i0); }
+.bt .tradechart .key.i1::before { background: var(--i1); }
+.bt .tradechart .key.i2::before { background: var(--i2); }
+.bt .tradechart .key.i3::before { background: var(--i3); }
+.bt .tradechart .key.i4::before { background: var(--i4); }

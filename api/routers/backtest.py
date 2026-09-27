@@ -15,7 +15,7 @@ forty thousand times sends the most recent few hundred with a count of the rest.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,8 +26,10 @@ from backtest.market import FundingSchedule, PerpetualMarket
 from backtest.metrics import Metrics, measure
 from backtest.resample import resample
 from backtest.rules import SpecRule
-from backtest.spec import SpecError, parse
+from backtest.spec import SpecError, StrategySpec, parse
+from backtest.view import Frame, build, wind
 from marketdata import BarService, Interval
+from marketdata.models import Bar
 from marketdata.store import BarStore
 
 router = APIRouter(tags=["backtest"], prefix="/api/backtest")
@@ -118,7 +120,9 @@ class MetricsOut(BaseModel):
     buy_and_hold: float
     beat_holding: bool
     max_drawdown: float
+    annualised: float | None
     sharpe: float
+    calmar: float | None
     gross: float
     fees: float
     funding: float
@@ -166,11 +170,38 @@ class CandleOut(BaseModel):
     volume: float
 
 
+class LineOut(BaseModel):
+    """One indicator, aligned bar for bar with the candles."""
+
+    #: What to call it on the chart: "EMA 9", "EMA 50 1h".
+    label: str
+    name: str
+    length: int
+    #: The timeframe it is read on, when that is not the one being traded.
+    interval: str | None
+    #: Null wherever the indicator was not yet defined, or - on a higher
+    #: timeframe - repeated across the bars for which that value was the newest
+    #: one that had closed. Which is exactly what the rule saw.
+    values: list[float | None]
+
+
+class WindowRequest(BaseModel):
+    source: str
+    symbol: str
+    interval: str
+    start: str
+    end: str
+    #: The strategy, so its indicators can be drawn. Optional: a chart without
+    #: them is still a chart.
+    spec: dict[str, Any] | None = None
+
+
 class WindowResponse(BaseModel):
     source: str
     symbol: str
     interval: str
     candles: list[CandleOut]
+    lines: list[LineOut] = []
 
 
 def _service(request: Request) -> BarService:
@@ -182,16 +213,9 @@ def _service(request: Request) -> BarService:
     return service
 
 
-@router.get("/candles", response_model=WindowResponse)
-def candles(
-    request: Request,
-    source: str,
-    symbol: str,
-    interval: str,
-    start: str,
-    end: str,
-) -> WindowResponse:
-    """The bars over one window, for looking at a single trade.
+@router.post("/candles", response_model=WindowResponse)
+def candles(request: Request, body: WindowRequest) -> WindowResponse:
+    """The bars over one window, with the strategy's own indicators on them.
 
     A result says a trade made money; this is what lets you see whether it was a
     trade anybody would have taken. The window is named by time rather than by a
@@ -202,46 +226,134 @@ def candles(
     fetched, and going to a source here could return bars that differ from the
     ones the run was computed on - which would make the picture disagree with the
     numbers beside it.
+
+    The indicators are computed through the same `View` the engine runs on, not
+    recomputed some other way and certainly not in the browser. A line drawn by
+    different code from the one that made the decision is a line that can be
+    subtly wrong exactly where it matters - at the crossing.
     """
     try:
-        size = Interval(interval)
+        size = Interval(body.interval)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"{interval} is not a bar size") from None
+        raise HTTPException(status_code=400, detail=f"{body.interval} is not a bar size") from None
     try:
-        from_at = datetime.fromisoformat(start)
-        to_at = datetime.fromisoformat(end)
+        from_at = datetime.fromisoformat(body.start)
+        to_at = datetime.fromisoformat(body.end)
     except ValueError:
         raise HTTPException(status_code=400, detail="start and end are ISO timestamps") from None
     if to_at <= from_at:
         raise HTTPException(status_code=400, detail="the window ends before it begins")
 
+    spec = None
+    if body.spec:
+        try:
+            spec = parse({**body.spec, "interval": body.interval})
+        except SpecError:
+            # A chart is still worth drawing for a strategy that will not run.
+            spec = None
+
     service = _service(request)
-    held = _stored_interval(service, source, symbol, size)
-    # Asked for by days because that is what the store's reader takes, then cut to
-    # the window. Generous enough to cover it, and bounded so a trade opened three
-    # years ago does not read the whole series.
-    days = max(1, int((datetime.now(UTC) - from_at).total_seconds() / 86400) + 1)
-    bars = service.stored(source, symbol, held, days=days).bars
+    held = _stored_interval(service, body.source, body.symbol, size)
+    wanted = spec.indicators() if spec else []
+    warmup = _warmup(wanted)
+
+    # Read back far enough that the indicators have converged before the window
+    # begins. An exponential average started later differs from one started
+    # earlier, and the difference is what would show up as a line that crosses a
+    # bar too soon.
+    earliest = from_at - timedelta(seconds=size.seconds * warmup)
+    days = max(1, int((datetime.now(UTC) - earliest).total_seconds() / 86400) + 1)
+    bars = service.stored(body.source, body.symbol, held, days=days).bars
     if held != size:
         bars = resample(bars, size)
-    inside = [b for b in bars if from_at <= b.ts <= to_at]
+    bars = [b for b in bars if b.ts >= earliest]
+
+    inside = [i for i, b in enumerate(bars) if from_at <= b.ts <= to_at]
+    lines = _lines(bars, size, spec, inside) if spec and wanted else []
 
     return WindowResponse(
-        source=source,
-        symbol=symbol,
+        source=body.source,
+        symbol=body.symbol,
         interval=str(size),
         candles=[
             CandleOut(
-                at=b.ts.isoformat(),
-                open=b.open,
-                high=b.high,
-                low=b.low,
-                close=b.close,
-                volume=b.volume,
+                at=bars[i].ts.isoformat(),
+                open=bars[i].open,
+                high=bars[i].high,
+                low=bars[i].low,
+                close=bars[i].close,
+                volume=bars[i].volume,
             )
-            for b in inside
+            for i in inside
         ],
+        lines=lines,
     )
+
+
+#: How far back to compute an indicator before the window being drawn.
+#:
+#: An exponential average never forgets its start completely, but it forgets it
+#: fast: after twelve periods the seed is worth less than a thousandth, and after
+#: three hundred bars the difference is below what any price is quoted to. Enough
+#: that the drawn line and the line the engine read are the same line.
+MIN_WARMUP = 300
+
+
+def _warmup(indicators: list[tuple[str, int, Interval | None]]) -> int:
+    longest = max((length for _, length, _ in indicators), default=0)
+    return max(MIN_WARMUP, longest * 12)
+
+
+def _lines(
+    bars: list[Bar], size: Interval, spec: StrategySpec, inside: list[int]
+) -> list[LineOut]:
+    """Each indicator's value at each bar of the window.
+
+    Walked through the engine's own view so that a higher-timeframe line is what
+    the rule actually saw: the newest value that had *closed* by that bar, held
+    flat until the next one closes. Drawing the true hourly value against a
+    five-minute bar inside that hour would draw information the rule did not
+    have, which is the same lie the engine exists to avoid - just in pixels.
+    """
+    wanted = spec.indicators()
+    context = tuple(i for _, _, i in wanted if i is not None and i != size)
+    view, cursors = build(bars, size, tuple(dict.fromkeys(context)))
+
+    collected: dict[tuple[str, int, Interval | None], list[float | None]] = {
+        key: [] for key in wanted
+    }
+    for i in inside:
+        wind(view, cursors, i)
+        for key in wanted:
+            name, length, interval = key
+            frame = view.frame(interval) if interval and interval != size else view.base
+            collected[key].append(_read(frame, name, length))
+
+    out: list[LineOut] = []
+    for (name, length, interval), values in collected.items():
+        where = f" {interval}" if interval and interval != size else ""
+        out.append(
+            LineOut(
+                label=f"{name.upper()} {length}{where}",
+                name=name,
+                length=length,
+                interval=str(interval) if interval else None,
+                values=values,
+            )
+        )
+    return out
+
+
+def _read(frame: Frame, name: str, length: int) -> float | None:
+    if name == "ema":
+        return frame.ema(length)
+    if name == "sma":
+        return frame.sma(length)
+    if name == "rsi":
+        return frame.rsi(length)
+    if name == "atr":
+        return frame.atr(length)
+    return None
 
 
 @router.post("/run", response_model=RunResponse)
@@ -426,7 +538,9 @@ def _metrics_out(m: Metrics) -> MetricsOut:
         buy_and_hold=m.buy_and_hold,
         beat_holding=m.beat_holding,
         max_drawdown=m.max_drawdown,
+        annualised=m.annualised,
         sharpe=m.sharpe,
+        calmar=m.calmar,
         gross=m.gross,
         fees=m.fees,
         funding=m.funding,

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backtest.market import Costs, Side
-from backtest.metrics import max_drawdown, measure, sharpe
+from backtest.metrics import annualised, max_drawdown, measure, sharpe
 from backtest.models import Exit, Trade
 from marketdata.models import Bar, Interval
 
@@ -115,3 +115,68 @@ def test_measuring_a_run_with_no_trades() -> None:
     assert metrics.trades == 0
     assert metrics.win_rate == 0.0
     assert metrics.cost_share is None
+
+
+def test_annualising_compounds_rather_than_averaging() -> None:
+    """A run that doubled over three years returned 26% a year, not 33%."""
+    three_years = [
+        Bar(ts=START + timedelta(days=365 * 3 * i), open=100.0, high=100.0, low=100.0,
+            close=100.0, volume=1.0)
+        for i in range(2)
+    ]
+
+    yearly = annualised(1000.0, 2000.0, three_years, Interval.D1)
+
+    assert yearly == pytest.approx(0.26, abs=0.01)
+
+
+def test_a_run_that_lost_everything_is_minus_one_hundred_a_year() -> None:
+    """Whatever the formula would otherwise produce for a zero or negative end."""
+    two_years = [
+        Bar(ts=START + timedelta(days=365 * 2 * i), open=100.0, high=100.0, low=100.0,
+            close=100.0, volume=1.0)
+        for i in range(2)
+    ]
+
+    assert annualised(1000.0, 0.0, two_years, Interval.D1) == -1.0
+
+
+def test_too_short_a_window_is_not_annualised_at_all() -> None:
+    """A run that made 1% in an afternoon annualises to several million percent,
+    and a Calmar built on it would be the most impressive number on the page."""
+    an_hour = _bars([100.0] * 12)
+
+    assert annualised(1000.0, 1010.0, an_hour, Interval.M5) is None
+
+
+def test_calmar_is_the_year_over_the_worst_fall() -> None:
+    """The ratio that matches how a rule is actually abandoned."""
+    bars = [
+        Bar(ts=START + timedelta(days=365 * i), open=100.0, high=100.0, low=100.0,
+            close=100.0, volume=1.0)
+        for i in range(2)
+    ]
+    # up 50% over a year, through a 25% fall
+    metrics = measure([_trade(500.0)], [1000.0, 750.0, 1500.0], bars, 1000.0, Interval.D1)
+
+    assert metrics.annualised is not None
+    assert metrics.annualised == pytest.approx(0.5, abs=0.02)
+    assert metrics.max_drawdown == pytest.approx(0.25)
+    assert metrics.calmar == pytest.approx(metrics.annualised / 0.25, rel=1e-6)
+
+
+def test_calmar_is_undefined_when_nothing_ever_fell() -> None:
+    """A ratio over a zero drawdown is infinite rather than excellent, and
+    printing a large number there would be exactly the flattery these figures
+    exist to prevent."""
+    a_year = [
+        Bar(ts=START + timedelta(days=365 * i), open=100.0, high=100.0, low=100.0,
+            close=100.0, volume=1.0)
+        for i in range(2)
+    ]
+
+    metrics = measure([_trade(100.0)], [1000.0, 1100.0], a_year, 1000.0, Interval.D1)
+
+    assert metrics.max_drawdown == 0.0
+    assert metrics.annualised is not None
+    assert metrics.calmar is None

@@ -25,6 +25,8 @@ export interface Overlay {
   marks?: { at: string; price: number; kind: "entry" | "exit"; side: "long" | "short" }[];
   /** The stretch a position was held over, shaded. */
   band?: { from: string; to: string };
+  /** Indicator lines, one value per candle, null where not yet defined. */
+  lines?: { label: string; values: (number | null)[] }[];
 }
 
 const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
@@ -143,8 +145,18 @@ export function CandleChart({
     if (!shown.length) return null;
     const lows = shown.map((c) => c.low);
     const highs = shown.map((c) => c.high);
-    let min = Math.min(...lows, last ?? Infinity);
-    let max = Math.max(...highs, last ?? -Infinity);
+    // Indicator values count towards the range. A 200-period average sitting
+    // below every bar on screen would otherwise be drawn off the bottom, which
+    // reads as the line not being there at all.
+    const drawn: number[] = [];
+    for (const line of overlay?.lines ?? []) {
+      for (let i = startIndex; i < endIndex; i += 1) {
+        const v = line.values[i];
+        if (typeof v === "number") drawn.push(v);
+      }
+    }
+    let min = Math.min(...lows, ...drawn, last ?? Infinity);
+    let max = Math.max(...highs, ...drawn, last ?? -Infinity);
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
     if (min === max) {
       // A flat window still needs a band, or every bar collapses onto one line.
@@ -153,7 +165,7 @@ export function CandleChart({
     }
     const pad = (max - min) * 0.06;
     return { min: min - pad, max: max + pad };
-  }, [shown, last]);
+  }, [shown, last, overlay, startIndex, endIndex]);
 
   if (view === null) {
     return <p className="empty">No candles yet.</p>;
@@ -295,6 +307,28 @@ export function CandleChart({
               className="cbody"
             />
           </g>
+        );
+      })}
+
+      {/* Over the candles, because a line hidden behind a wick is not a line.
+          Slowest first, which `StrategySpec.indicators` already orders them by,
+          so a fast line crossing a slow one stays legible. */}
+      {(overlay?.lines ?? []).map((line, n) => {
+        const path: string[] = [];
+        let drawing = false;
+        for (let i = 0; i < shown.length; i += 1) {
+          const value = line.values[i];
+          if (typeof value !== "number") {
+            // A gap, not a jump to zero: the indicator had no value here.
+            drawing = false;
+            continue;
+          }
+          const px = PAD.left + i * step + step / 2;
+          path.push(`${drawing ? "L" : "M"}${px.toFixed(1)} ${y(value).toFixed(1)}`);
+          drawing = true;
+        }
+        return (
+          <path key={line.label} d={path.join(" ")} className={`cline i${n % 5}`} />
         );
       })}
 

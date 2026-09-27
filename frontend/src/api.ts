@@ -953,7 +953,11 @@ export interface BacktestMetrics {
   buy_and_hold: number;
   beat_holding: boolean;
   max_drawdown: number;
+  /** Compounded yearly return, or null over a window too short to annualise. */
+  annualised: number | null;
   sharpe: number;
+  /** Yearly return over the worst drawdown. Null when nothing ever fell. */
+  calmar: number | null;
   gross: number;
   fees: number;
   funding: number;
@@ -1024,11 +1028,23 @@ export interface BacktestResult {
   caveats: string[];
 }
 
+/** One indicator from the strategy, aligned bar for bar with the candles. */
+export interface IndicatorLine {
+  label: string;
+  name: string;
+  length: number;
+  interval: string | null;
+  /** Null where the indicator was not yet defined, or — on a higher timeframe —
+      repeated across the bars for which that value was the newest closed one. */
+  values: (number | null)[];
+}
+
 export interface WindowResponse {
   source: string;
   symbol: string;
   interval: string;
   candles: Candle[];
+  lines: IndicatorLine[];
 }
 
 /**
@@ -1038,15 +1054,15 @@ export interface WindowResponse {
  * going to a source here could return bars that differ from the ones the numbers
  * were computed on.
  */
-export function getBacktestCandles(
-  source: string,
-  symbol: string,
-  interval: string,
-  start: string,
-  end: string,
-): Promise<WindowResponse> {
-  const query = new URLSearchParams({ source, symbol, interval, start, end });
-  return getJson<WindowResponse>(`/api/backtest/candles?${query}`);
+export function getBacktestCandles(request: {
+  source: string;
+  symbol: string;
+  interval: string;
+  start: string;
+  end: string;
+  spec?: StrategySpec;
+}): Promise<WindowResponse> {
+  return postJson<typeof request, WindowResponse>("/api/backtest/candles", request);
 }
 
 export function runBacktest(request: BacktestRequest): Promise<BacktestResult> {
