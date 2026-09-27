@@ -44,7 +44,17 @@ def db_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(fake_broker: FakeBroker, db_path: Path) -> Iterator[TestClient]:
+    """A client with a fake broker, a temporary database, and no bar store.
+
+    No store on purpose. These tests are about the venue path - the chart asking
+    the broker directly, which is what a desk without a store does - and a store
+    that opens onto an empty file answers every candle request with nothing at
+    all. A test that wants one wires it onto `app.state.bar_service`, which wins
+    over the holder.
+    """
     app.dependency_overrides[get_broker] = lambda: fake_broker
     app.dependency_overrides[get_db_path] = lambda: db_path
-    yield TestClient(app)
+    client = TestClient(app)
+    app.state.bars = None
+    yield client
     app.dependency_overrides.clear()

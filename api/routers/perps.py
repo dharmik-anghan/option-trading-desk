@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 from api.dependencies import broker_for
-from api.deps import DbPathDep
+from api.deps import DbPathDep, bar_service
 from api.store import open_db
 from backtest.lines import compute, parse_wanted
 from broker.base import PerpetualsData
@@ -186,9 +186,12 @@ class CandleResponse(BaseModel):
 
 
 def _bars(request: Request) -> BarService | None:
-    """The bar store's service, or None before the lifespan has built one."""
-    service = getattr(request.app.state, "bar_service", None)
-    return service if isinstance(service, BarService) else None
+    """The bar store's service, or None when it cannot be had.
+
+    None is a working answer here rather than a refusal: the chart falls back
+    to asking the venue, which is the whole reason the store is optional.
+    """
+    return bar_service(request)
 
 
 def _hub(request: Request) -> TickHub | None:

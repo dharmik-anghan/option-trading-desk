@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from api.deps import bar_service
 from marketdata import BarService, Interval
 
 router = APIRouter(tags=["bars"], prefix="/api/bars")
@@ -51,11 +52,21 @@ class BarsResponse(BaseModel):
 
 
 def _service(request: Request) -> BarService:
-    service = getattr(request.app.state, "bar_service", None)
-    if not isinstance(service, BarService):
+    """The bar store, or a refusal that says why.
+
+    Opened on demand and retried, not once at startup: a desk that came up
+    beside a finishing backfill used to answer this for the rest of the day
+    with the file unlocked the whole time.
+    """
+    service = bar_service(request)
+    if service is None:
         raise HTTPException(
             status_code=503,
-            detail="The bar store is not open, so no history is available",
+            detail=(
+                "The bar store is open in another process, so no history can be read. "
+                "It is retried every 30 seconds - a backfill script or a second "
+                "copy of the app will be holding it."
+            ),
         )
     return service
 

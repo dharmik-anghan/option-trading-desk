@@ -50,7 +50,8 @@ from api.routers import (
 from api.store import open_db
 from broker.errors import BrokerError
 from broker.shark.stream import SharkStream
-from marketdata import BarService, BarStore
+from marketdata import BarService
+from marketdata.holder import BarStoreHolder
 from marketdata.venue import VenueBars
 from notify import Telegram, TelegramConfig
 from settings import load_settings
@@ -106,32 +107,24 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # The bar store, and the venue registered as a source under its own name. The
     # venue's candles are what a trading chart shows - the instrument an order would
     # be in - and storing them is what turns a few hundred bars into a history.
-    # Non-fatal. DuckDB permits one writer, so a second copy of this app - a stray
-    # reloader, a container beside a local run - cannot open the file, and a desk
-    # that refuses to start because a chart cache is busy is a bad trade. The
-    # candles endpoint asks the venue directly when there is no store.
-    bar_store: BarStore | None = None
-    bar_service: BarService | None = None
-    try:
-        bar_store = BarStore(get_db_path().parent / "bars.duckdb")
-        bar_service = BarService(bar_store)
-    except Exception:  # noqa: BLE001 - see above
-        log.warning(
-            "could not open the bar store; charts will ask the venue each time",
-            exc_info=True,
+    #
+    # Opened lazily and retried, not once here. DuckDB permits one writer, so a
+    # copy of this app still shutting down or a backfill just finishing holds the
+    # file for a few seconds - and a desk that tried once at boot answered "the
+    # bar store is not open" for the rest of its life, with the file unlocked the
+    # whole time. See `marketdata/holder.py`.
+    def _register(service: BarService) -> None:
+        if not settings.has_shark:
+            return
+        shark = broker_for(get_venue("shark"))
+        service.register(
+            "shark",
+            VenueBars(shark),
+            {i.symbol: i.symbol for i in for_venue("shark")},
         )
-    if bar_service is not None and settings.has_shark:
-        try:
-            shark = broker_for(get_venue("shark"))
-            bar_service.register(
-                "shark",
-                VenueBars(shark),
-                {i.symbol: i.symbol for i in for_venue("shark")},
-            )
-        except Exception:  # noqa: BLE001 - a desk without a venue still draws charts
-            log.warning("could not register the perpetuals venue as a bar source")
-    application.state.bar_service = bar_service
-    application.state.bar_store = bar_store
+
+    bars = BarStoreHolder(get_db_path().parent / "bars.duckdb", on_open=_register)
+    application.state.bars = bars
 
     def perps_broker() -> object | None:
         """The perpetuals adapter, or None when that venue is not configured.
@@ -185,8 +178,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await task
         if stream is not None:
             await stream.stop()
-        if bar_store is not None:
-            bar_store.close()
+        bars.close()
         log.info("alert watcher stopped")
 
 

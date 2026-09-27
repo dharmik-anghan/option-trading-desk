@@ -21,6 +21,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from api.deps import bar_service, bar_store
 from backtest.engine import Execution, run
 from backtest.lines import compute
 from backtest.market import FundingSchedule, PerpetualMarket
@@ -212,10 +213,21 @@ class WindowResponse(BaseModel):
 
 
 def _service(request: Request) -> BarService:
-    service = getattr(request.app.state, "bar_service", None)
-    if not isinstance(service, BarService):
+    """The bar store, or a refusal that says why.
+
+    Opened on demand and retried, not once at startup: a desk that came up
+    beside a finishing backfill used to answer this for the rest of the day
+    with the file unlocked the whole time.
+    """
+    service = bar_service(request)
+    if service is None:
         raise HTTPException(
-            status_code=503, detail="The bar store is not open, so there is nothing to test on"
+            status_code=503,
+            detail=(
+                "The bar store is open in another process, so there is nothing to test on. "
+                "It is retried every 30 seconds - a backfill script or a second "
+                "copy of the app will be holding it."
+            ),
         )
     return service
 
@@ -348,7 +360,7 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         raise HTTPException(status_code=400, detail=f"{body.interval} is not a bar size") from None
 
     service = _service(request)
-    store = getattr(request.app.state, "bar_store", None)
+    store = bar_store(request)
 
     # Stored at the shortest size we hold; anything longer is built from it rather
     # than fetched, so the two cannot disagree about a bar boundary.
