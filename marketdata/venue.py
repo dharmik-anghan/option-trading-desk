@@ -35,6 +35,7 @@ RESOLUTION: dict[Interval, str] = {
     Interval.H1: "60",
     Interval.H4: "240",
     Interval.D1: "D",
+    Interval.W1: "W",
 }
 
 

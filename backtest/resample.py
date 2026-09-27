@@ -24,10 +24,27 @@ from datetime import UTC, datetime, timedelta
 
 from marketdata.models import Bar, Interval
 
+#: The epoch was a Thursday, so dividing by a week puts week boundaries on
+#: Thursdays. Nobody's trading week starts on a Thursday. Three days, because
+#: that is how far Thursday is from the Monday before it - four moves the
+#: boundary to Sunday, which is what the first attempt did.
+_EPOCH_WEEKDAY_OFFSET = 3 * 86400
+
 
 def bucket_for(at: datetime, interval: Interval) -> datetime:
-    """The start of the bar of `interval` that contains this moment."""
-    seconds = int(at.timestamp()) // interval.seconds * interval.seconds
+    """The start of the bar of `interval` that contains this moment.
+
+    Aligned to the epoch, which puts an hourly bucket on the hour and a daily one
+    at midnight UTC. A week is the exception: 1 January 1970 was a Thursday, so
+    the same arithmetic would run a market week from Thursday to Wednesday. The
+    offset moves it to Monday.
+    """
+    stamp = int(at.timestamp())
+    if interval is Interval.W1:
+        shifted = stamp + _EPOCH_WEEKDAY_OFFSET
+        start = shifted // interval.seconds * interval.seconds - _EPOCH_WEEKDAY_OFFSET
+        return datetime.fromtimestamp(start, tz=UTC)
+    seconds = stamp // interval.seconds * interval.seconds
     return datetime.fromtimestamp(seconds, tz=UTC)
 
 

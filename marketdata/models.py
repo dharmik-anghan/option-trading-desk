@@ -29,6 +29,7 @@ class Interval(StrEnum):
     H1 = "1h"
     H4 = "4h"
     D1 = "1d"
+    W1 = "1w"
 
     @property
     def seconds(self) -> int:
@@ -40,6 +41,7 @@ class Interval(StrEnum):
             Interval.H1: 3600,
             Interval.H4: 14400,
             Interval.D1: 86400,
+            Interval.W1: 604800,
         }[self]
 
 

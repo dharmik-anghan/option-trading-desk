@@ -25,8 +25,9 @@ export function Home({ onGo, cryptoReady }: Props) {
       <header>
         <h1>Desk</h1>
         <p>
-          Three places to work. The first two watch live positions; the third asks what
-          a rule would have done with the bars they left behind.
+          Four places to work. Two watch live positions, one asks what a rule would have
+          done with the bars they left behind, and one shows which way the market's parts
+          are turning.
         </p>
       </header>
 
@@ -51,6 +52,16 @@ export function Home({ onGo, cryptoReady }: Props) {
           <span className="go">
             {cryptoReady ? "Open the crypto desk" : "Needs SHARK_API_KEY in .env"}
           </span>
+        </button>
+
+        <button className="card" onClick={() => onGo("rotation")}>
+          <RotationMark />
+          <h2>Rotation</h2>
+          <p>
+            Which sectors are leading, improving, weakening and lagging against the
+            index — and which way each one is travelling.
+          </p>
+          <span className="go">Open the rotation graph</span>
         </button>
 
         <button className="card" onClick={() => onGo("backtesting")}>
@@ -97,6 +108,20 @@ function CandlesMark() {
           <rect x={x - 4} y={top} width="8" height={bottom - top} className="markbody" />
         </g>
       ))}
+    </svg>
+  );
+}
+
+/** Four quadrants and something rotating through them. */
+function RotationMark() {
+  return (
+    <svg viewBox="0 0 120 56" className="mark" aria-hidden="true">
+      <line x1="60" y1="4" x2="60" y2="52" className="markgrid" />
+      <line x1="10" y1="28" x2="110" y2="28" className="markgrid" />
+      <path d="M30 42 C44 40, 52 34, 58 24" className="markline mkt" />
+      <circle cx="58" cy="24" r="3" className="markdot" />
+      <path d="M72 14 C84 18, 90 24, 94 34" className="markline you" />
+      <circle cx="94" cy="34" r="3" className="markdot" />
     </svg>
   );
 }

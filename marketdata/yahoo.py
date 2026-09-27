@@ -79,6 +79,7 @@ YAHOO_INTERVAL: dict[Interval, str] = {
     Interval.H1: "1h",
     Interval.H4: "1h",
     Interval.D1: "1d",
+    Interval.W1: "1wk",
 }
 
 #: The three the desk cares about, and what Yahoo calls them. Held here rather than

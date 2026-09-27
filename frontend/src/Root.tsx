@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import App from "./App";
 import { Home } from "./components/Home";
 import { Backtesting } from "./components/Backtesting";
+import { Rrg } from "./components/Rrg";
 import { getVenues } from "./api";
 import { useRoute } from "./useRoute";
 import { useTheme } from "./useTheme";
@@ -38,6 +39,9 @@ export default function Root() {
   }
   if (route === "backtesting") {
     return <Backtesting onHome={() => go("home")} />;
+  }
+  if (route === "rotation") {
+    return <Rrg onHome={() => go("home")} />;
   }
   return (
     <App

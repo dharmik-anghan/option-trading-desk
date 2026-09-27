@@ -43,6 +43,7 @@ from api.routers import (
     orders,
     perps,
     portfolio,
+    rrg,
     strategies,
     system,
 )
@@ -219,6 +220,7 @@ for _router in (
     portfolio.router,
     market.router,
     perps.router,
+    rrg.router,
     feeds.router,
     strategies.router,
     orders.router,

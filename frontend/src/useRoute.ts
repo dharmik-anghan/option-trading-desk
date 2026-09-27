@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type Route = "home" | "options" | "crypto" | "backtesting";
+export type Route = "home" | "options" | "crypto" | "backtesting" | "rotation";
 
 /** Paths, and what they mean. One place, so a link and a redirect cannot disagree. */
 const PATHS: Record<Route, string> = {
@@ -8,6 +8,7 @@ const PATHS: Record<Route, string> = {
   options: "/options",
   crypto: "/crypto",
   backtesting: "/backtesting",
+  rotation: "/rotation",
 };
 
 function routeFor(pathname: string): Route {
@@ -28,6 +29,7 @@ const TITLE: Record<Route, string> = {
   options: "Option Desk",
   crypto: "Crypto Desk",
   backtesting: "Backtesting",
+  rotation: "Rotation",
 };
 
 /**

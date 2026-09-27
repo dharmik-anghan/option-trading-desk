@@ -44,6 +44,7 @@ BINANCE_INTERVAL: dict[Interval, str] = {
     Interval.H1: "1h",
     Interval.H4: "4h",
     Interval.D1: "1d",
+    Interval.W1: "1w",
 }
 
 #: What the desk calls these against what Binance calls them. Identical here, since
