@@ -70,6 +70,22 @@ class Rule(Protocol):
         ...
 
 
+@dataclass
+class Armed:
+    """An order resting at a level, waiting for price to reach it.
+
+    Held across bars, which is the whole point: the setup happened on one candle
+    and the trade may happen on a later one, or not at all.
+    """
+
+    intent: Intent
+    side: Side
+    level: float
+    #: The bar index the order stops resting after.
+    until: int
+    reason: str
+
+
 @dataclass(frozen=True)
 class Execution:
     """The assumptions a fill is made under.
@@ -142,6 +158,12 @@ class Result:
     skipped_unaffordable: int = 0
     #: Positions closed and immediately opened the other way on the same bar.
     reversals: int = 0
+    #: Setups that armed an order, and those whose order was never reached
+    #: before it expired. The ratio is worth as much as the win rate: a rule
+    #: that arms five hundred times and fills eighty is a different animal from
+    #: one that fills four hundred, whatever the trades look like afterwards.
+    armed: int = 0
+    expired_unfilled: int = 0
 
     @property
     def final(self) -> float:
@@ -188,6 +210,8 @@ def run(
     pending_enter: Intent | None = None
     #: The price a resting entry would sit at, when entering as a maker.
     pending_limit: float | None = None
+    #: An order waiting for price to come to it, from a setup on an earlier bar.
+    armed: Armed | None = None
 
     for i, bar in enumerate(bars):
         # --- act on what was decided last bar, at this bar's open -----------
@@ -213,6 +237,27 @@ def run(
         pending_enter = None
         pending_limit = None
 
+        # --- an order left resting from an earlier setup --------------------
+        #
+        # Checked after a pending exit has been filled and before the bar is
+        # judged against an open position, so a setup can trigger on the same bar
+        # a position was closed on - which is what a stop-and-reverse looks like
+        # when the reverse is a breakout rather than an immediate flip.
+        if armed is not None and position is None:
+            reached = _reached(armed, bar)
+            if reached is not None:
+                position, why_not = _open(
+                    armed.intent, bar, market, settings, equity, at=reached
+                )
+                if why_not == "small":
+                    result.skipped_too_small += 1
+                elif why_not == "afford":
+                    result.skipped_unaffordable += 1
+                armed = None
+            elif i >= armed.until:
+                result.expired_unfilled += 1
+                armed = None
+
         # --- what the bar did to an open position ---------------------------
         if position is not None:
             position = _carry(position, bar, market, interval)
@@ -229,7 +274,19 @@ def run(
         wind(view, cursors, i)
         if position is None:
             intent = rule.entry(view)
-            pending_enter = intent if intent.action is Action.ENTER else None
+            if intent.action is Action.ENTER and intent.trigger is not None:
+                # A setup, not a trade. Arm an order and wait for price. A newer
+                # setup replaces an older one rather than queueing behind it:
+                # two orders at two levels is a different strategy from the one
+                # that was written.
+                resting = _arm(intent, view, i, settings)
+                if resting is not None:
+                    if armed is None:
+                        result.armed += 1
+                    armed = resting
+                pending_enter = None
+            else:
+                pending_enter = intent if intent.action is Action.ENTER else None
         else:
             leaving = rule.exit(view, position)
             if leaving.action is Action.EXIT:
@@ -240,11 +297,23 @@ def run(
                 # would be churn the strategy did not ask for.
                 turning = rule.entry(view)
                 if turning.action is Action.ENTER and turning.side is position.side.opposite:
-                    pending_enter = turning
+                    if turning.trigger is not None:
+                        resting = _arm(turning, view, i, settings)
+                        if resting is not None:
+                            if armed is None:
+                                result.armed += 1
+                            armed = resting
+                    else:
+                        pending_enter = turning
         pending_limit = bar.close if (pending_enter and settings.maker_entry) else None
 
         result.equity.append(_equity_now(equity, position, bar.close, market))
 
+    if result.expired_unfilled:
+        result.caveats.append(
+            f"{result.expired_unfilled:,} setups armed an order that price never reached, "
+            "so they cost nothing and are not trades"
+        )
     if result.skipped_too_small:
         result.caveats.append(
             f"{result.skipped_too_small:,} signals were below the venue's minimum size and "
@@ -288,6 +357,54 @@ def _said(why: Exit) -> str:
     }.get(why, "")
 
 
+def _arm(intent: Intent, view: View, i: int, settings: Execution) -> Armed | None:
+    """Work out the level a setup rests its order at.
+
+    Read off the setup candle through the view, so it is a closed bar's price and
+    nothing later. Returns None when that candle is not there yet - a trigger
+    that looks three bars back at bar one has nothing to aim at.
+    """
+    trigger = intent.trigger
+    side = intent.side
+    if trigger is None or side is None:
+        return None
+
+    field = trigger.field if side is Side.LONG else trigger.mirrored
+    level = view.base.price(field, trigger.ago)
+    if level is None or level <= 0:
+        return None
+
+    # The cushion goes the way the break does: above for a long, below for a
+    # short. A buffer that made the order easier to fill would be a discount on
+    # the very thing being tested.
+    level *= 1 + side.sign * trigger.buffer_bps / 10_000.0
+    return Armed(
+        intent=intent,
+        side=side,
+        level=level,
+        until=i + max(1, trigger.within),
+        reason=intent.reason,
+    )
+
+
+def _reached(armed: Armed, bar: Bar) -> float | None:
+    """Whether this bar reached the resting order, and at what price it filled.
+
+    Gaps are the part worth getting right. A buy-stop above the market fills at
+    its level when price trades up through it, but when the bar *opens* beyond
+    the level it fills at the open - worse, sometimes far worse. Filling a gap at
+    the level would hand the strategy the whole gap for nothing, on exactly the
+    bars where the move was biggest.
+    """
+    if armed.side is Side.LONG:
+        if bar.open >= armed.level:
+            return bar.open
+        return armed.level if bar.high >= armed.level else None
+    if bar.open <= armed.level:
+        return bar.open
+    return armed.level if bar.low <= armed.level else None
+
+
 def _slipped(price: float, side: Side, settings: Execution, *, opening: bool) -> float:
     """The fill, moved against the trade.
 
@@ -307,6 +424,7 @@ def _open(
     equity: float,
     *,
     limit: float | None = None,
+    at: float | None = None,
 ) -> tuple[Position | None, str]:
     """Open a position, or say why not.
 
@@ -319,7 +437,11 @@ def _open(
     if side is None:
         return None, "none"
 
-    if limit is None:
+    if at is not None:
+        # A triggered order is a market order the moment it is reached, so it
+        # pays slippage and the taker fee whatever the entry style says.
+        price = _slipped(at, side, settings, opening=True)
+    elif limit is None:
         price = _slipped(bar.open, side, settings, opening=True)
     else:
         # A resting order fills at its own price and no worse, so no slippage -
@@ -341,8 +463,10 @@ def _open(
     if market.margin(quantity, price, settings.leverage) > max(0.0, equity):
         return None, "afford"
 
-    fee = market.fee(quantity, price, maker=limit is not None, opening=True, side=side)
-    slippage = abs(price - bar.open) * quantity * market.multiplier
+    fee = market.fee(
+        quantity, price, maker=limit is not None and at is None, opening=True, side=side
+    )
+    slippage = abs(price - (at if at is not None else bar.open)) * quantity * market.multiplier
     return Position(
         side=side,
         quantity=quantity,

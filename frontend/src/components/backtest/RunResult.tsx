@@ -143,6 +143,14 @@ export function RunResult({ result, spec }: Props) {
         </p>
       ))}
 
+      {result.armed > 0 && (
+        <p className="endings">
+          {result.armed.toLocaleString()} setups armed an order;{" "}
+          {result.expired_unfilled.toLocaleString()} expired before price reached it.
+          A setup that is never confirmed costs nothing.
+        </p>
+      )}
+
       {Object.keys(m.by_side).length > 0 && (
         <table className="where sides">
           <caption>Each side on its own</caption>

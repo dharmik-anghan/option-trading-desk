@@ -938,8 +938,23 @@ export interface Level {
 /** A named session, or a window of your own with a real timezone. */
 export type SessionChoice = string | { name?: string; start: string; end: string; tz: string };
 
+/** What has to happen after the conditions before a trade is actually taken. */
+export interface Trigger {
+  kind: "break";
+  /** Which price of the setup candle the order rests at. Mirrors for a short. */
+  field: "high" | "low" | "close" | "open";
+  /** Which candle, counting back from the one the conditions fired on. */
+  ago?: number;
+  /** How many candles the order rests for. */
+  within: number;
+  /** A cushion past the level, in basis points, always against you. */
+  buffer_bps?: number;
+}
+
 export interface StrategySpec {
   name: string;
+  /** Absent means enter at the next candle's open. */
+  trigger?: Trigger | null;
   /** Hours during which entries may fire. Empty means all of them. */
   sessions?: SessionChoice[];
   /** Whether an open position is closed when the session ends. */
@@ -1055,6 +1070,9 @@ export interface BacktestResult {
   trades_total: number;
   /** Positions closed and reopened the other way on the same signal. */
   reversals: number;
+  /** Setups that armed a resting order, and those price never reached. */
+  armed: number;
+  expired_unfilled: number;
   skipped_too_small: number;
   skipped_unaffordable: number;
   caveats: string[];

@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { getBarSeries, runBacktest } from "../api";
-import type { BacktestResult, BarSeries, Group, Level, Sizing, StrategySpec } from "../api";
+import type {
+  BacktestResult,
+  BarSeries,
+  Group,
+  Level,
+  Sizing,
+  StrategySpec,
+} from "../api";
 import { ConditionList } from "./backtest/ConditionList";
 import { LevelPicker } from "./backtest/LevelPicker";
 import { SessionPicker } from "./backtest/SessionPicker";
+import { TriggerPicker } from "./backtest/TriggerPicker";
 import { RunResult } from "./backtest/RunResult";
 
 interface Props {
@@ -387,6 +395,11 @@ export function Backtesting({ onHome }: Props) {
             onChange={(g: Group | null) => setSpec({ ...spec, short_exit: g })}
             intervals={HIGHER}
             traded={interval}
+          />
+
+          <TriggerPicker
+            value={spec.trigger ?? null}
+            onChange={(t) => setSpec({ ...spec, trigger: t })}
           />
 
           <SessionPicker

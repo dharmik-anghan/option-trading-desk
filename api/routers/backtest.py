@@ -155,6 +155,9 @@ class RunResponse(BaseModel):
     trades_total: int
     #: Positions closed and reopened the other way on the same signal.
     reversals: int
+    #: Setups that armed a resting order, and those price never reached.
+    armed: int
+    expired_unfilled: int
     skipped_too_small: int
     skipped_unaffordable: int
     #: Anything a reader has to know to judge the numbers.
@@ -435,6 +438,8 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         trades=[_trade_out(t, size, execution) for t in result.trades[-MAX_TRADES:]],
         trades_total=len(result.trades),
         reversals=result.reversals,
+        armed=result.armed,
+        expired_unfilled=result.expired_unfilled,
         skipped_too_small=result.skipped_too_small,
         skipped_unaffordable=result.skipped_unaffordable,
         caveats=caveats,
@@ -463,6 +468,14 @@ def _stored_interval(service: BarService, source: str, symbol: str, wanted: Inte
 def _sentence(spec: Any) -> str:
     """The strategy read back, so a result says what produced it."""
     parts: list[str] = []
+    if spec.trigger is not None:
+        t = spec.trigger
+        where = f"the candle {t.ago} back" if t.ago else "that candle"
+        cushion = f" by {t.buffer_bps:g}bp" if t.buffer_bps else ""
+        parts.append(
+            f"Enter only if price breaks the {t.field} of {where}{cushion} "
+            f"within {t.within} bar{'s' if t.within != 1 else ''}"
+        )
     if spec.sessions:
         during = " or ".join(s.describe() for s in spec.sessions)
         parts.append(f"Only during {during}")

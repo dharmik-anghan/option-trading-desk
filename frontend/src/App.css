@@ -2907,3 +2907,36 @@ a.nitem:hover .nhead {
 .reading .ind.i2 { color: var(--i2); }
 .reading .ind.i3 { color: var(--i3); }
 .reading .ind.i4 { color: var(--i4); }
+
+/* ── When a setup becomes a trade ─────────────────────────────────────────── */
+.bt .trigger {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+.bt .trigger header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bt .trigger h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.bt .trigger .row {
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.bt .trigger .row > label {
+  width: auto;
+}
+.bt .trigger .say {
+  margin: 8px 0 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}

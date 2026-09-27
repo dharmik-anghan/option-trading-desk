@@ -18,6 +18,42 @@ class Action(StrEnum):
 
 
 @dataclass(frozen=True)
+class Trigger:
+    """What has to happen after a setup before the trade is actually taken.
+
+    A condition says a setup exists; it does not say to buy. "EMA 9 and EMA 21
+    both cross below the close, then enter if the next few candles break the high
+    of the candle that did it" is two different statements, and an engine that
+    only understands the first has to guess the second - which it did, by always
+    filling at the next open.
+
+    So a setup arms a resting order at a level taken from the setup candle, and
+    the trade happens only if price reaches it within `within` bars. If it does
+    not, nothing is traded and the setup is forgotten.
+
+    The level mirrors for a short. "Break the candle's high" is a long's way of
+    saying "wait for a move in my direction", and the short's way of saying the
+    same thing is the low - so a strategy written one way works both ways round
+    without a second set of fields to keep in step.
+    """
+
+    #: Where the level comes from on the setup candle.
+    field: str = "high"
+    #: Which candle, counting back from the one the setup fired on.
+    ago: int = 0
+    #: How many bars the order rests for. One means the next bar only.
+    within: int = 3
+    #: A cushion past the level, in basis points, before the order triggers.
+    #: Zero is a break of exactly the high, which in practice is a touch.
+    buffer_bps: float = 0.0
+
+    @property
+    def mirrored(self) -> str:
+        """The field a short uses in place of this one."""
+        return {"high": "low", "low": "high"}.get(self.field, self.field)
+
+
+@dataclass(frozen=True)
 class Intent:
     """A rule's decision. Deliberately not an order.
 
@@ -36,6 +72,10 @@ class Intent:
     #: Why, for the trade log. Worth more than it looks: a list of trades with
     #: reasons is readable, and one without is a list of numbers.
     reason: str = ""
+    #: What has to happen before this entry becomes a trade. None means take it
+    #: at the next open, which is the right default for a rule that has already
+    #: decided.
+    trigger: Trigger | None = None
 
     @staticmethod
     def nothing() -> Intent:
@@ -43,9 +83,21 @@ class Intent:
 
     @staticmethod
     def enter(
-        side: Side, *, stop: float | None = None, target: float | None = None, reason: str = ""
+        side: Side,
+        *,
+        stop: float | None = None,
+        target: float | None = None,
+        reason: str = "",
+        trigger: Trigger | None = None,
     ) -> Intent:
-        return Intent(action=Action.ENTER, side=side, stop=stop, target=target, reason=reason)
+        return Intent(
+            action=Action.ENTER,
+            side=side,
+            stop=stop,
+            target=target,
+            reason=reason,
+            trigger=trigger,
+        )
 
     @staticmethod
     def exit(reason: str = "") -> Intent:

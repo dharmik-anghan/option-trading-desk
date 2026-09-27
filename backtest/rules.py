@@ -46,7 +46,7 @@ class SpecRule:
             return Intent.nothing()
 
         side = Side.LONG if wants_long else Side.SHORT
-        entry = view.base.close
+        entry = _reference(spec, view, side)
         if entry is None:
             return Intent.nothing()
 
@@ -69,6 +69,7 @@ class SpecRule:
             stop=stop,
             target=target,
             reason=condition.describe() if condition else "",
+            trigger=spec.trigger,
         )
 
     def exit(self, view: View, position: Position) -> Intent:
@@ -94,3 +95,29 @@ class SpecRule:
         if condition is not None and condition.holds(view):
             return Intent.exit(condition.describe())
         return Intent.nothing()
+
+
+def _reference(spec: StrategySpec, view: View, side: Side) -> float | None:
+    """The price a stop or target should be measured from.
+
+    Without a trigger that is the setup candle's close, because the fill will be
+    the next open and the close is the best guess available when the decision is
+    made.
+
+    With one it is the level the order rests at, which is a much better answer: a
+    stop "1% below entry" on a breakout means 1% below the breakout, not 1% below
+    a close the trade never happened at. On a wide setup candle those are
+    different trades.
+
+    It is still the level rather than the fill, because the fill is not known
+    until price gets there - a bar that gaps straight through fills worse, and
+    the stop will sit slightly closer than asked. Erring that way is the right
+    way to err.
+    """
+    if spec.trigger is None:
+        return view.base.close
+    field = spec.trigger.field if side is Side.LONG else spec.trigger.mirrored
+    level = view.base.price(field, spec.trigger.ago)
+    if level is None:
+        return None
+    return level * (1 + side.sign * spec.trigger.buffer_bps / 10_000.0)

@@ -34,6 +34,7 @@ from datetime import time
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backtest.models import Trigger
 from backtest.sessions import PRESETS, WEEKDAYS, Session, preset
 from backtest.view import Frame, View
 from marketdata.models import Interval
@@ -370,6 +371,9 @@ class StrategySpec:
     #: Hours during which entries are allowed. Empty means all of them, which is
     #: right for a perpetual and wrong for almost everything else.
     sessions: tuple[Session, ...] = ()
+    #: What has to happen after the entry conditions before a trade is taken.
+    #: None means take it at the next open.
+    trigger: Trigger | None = None
     #: Whether an open position is closed when the session ends. What an intraday
     #: strategy does, and the difference between "I trade the London session" and
     #: "I open trades during London and hold them through Tokyo".
@@ -531,6 +535,43 @@ def level(raw: Any) -> Level | None:
     )
 
 
+def trigger(raw: Any) -> Trigger | None:
+    """What has to happen after a setup, from the shape a UI posts.
+
+    Absent means the entry is taken at the next open, which is right for a rule
+    that has already decided. A trigger says the conditions were only a setup,
+    and the trade waits for price to confirm it.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SpecError(f"{raw!r} is not an entry trigger")
+
+    kind = str(raw.get("kind", "break")).lower()
+    if kind in ("", "open", "next_open", "none"):
+        return None
+    if kind != "break":
+        raise SpecError(
+            f"{kind!r} is not a kind of trigger; use \"break\" to wait for price to "
+            "break a level, or leave it out to enter at the next open"
+        )
+
+    field = str(raw.get("field", "high")).lower()
+    if field not in FIELDS:
+        raise SpecError(f"a candle has no {field!r}; pick one of {', '.join(FIELDS)}")
+    within = _whole(raw.get("within", 3), "within")
+    if within < 1:
+        raise SpecError("a trigger has to rest for at least one bar")
+    if within > 500:
+        raise SpecError("a trigger resting for more than 500 bars is not a trigger")
+    return Trigger(
+        field=field,
+        ago=_whole(raw.get("ago", 0), "ago"),
+        within=within,
+        buffer_bps=float(raw.get("buffer_bps", 0.0)),
+    )
+
+
 def sessions(raw: Any) -> tuple[Session, ...]:
     """The hours to trade in, from the shape a UI posts.
 
@@ -609,6 +650,7 @@ def parse(raw: dict[str, Any]) -> StrategySpec:
         short_exit=condition(raw["short_exit"]) if raw.get("short_exit") else None,
         stop=level(raw.get("stop")),
         target=level(raw.get("target")),
+        trigger=trigger(raw.get("trigger")),
         sessions=sessions(raw.get("sessions")),
         close_outside_session=bool(raw.get("close_outside_session")),
         notes=str(raw.get("notes") or ""),
