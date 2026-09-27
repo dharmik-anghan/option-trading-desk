@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -166,12 +166,16 @@ def test_portfolio_history_endpoint_returns_saved_snapshots(
 ) -> None:
     conn = connect(str(db_path))
     init_schema(conn)
+    # Relative to now, not a fixed date. The endpoint returns the last seven
+    # days by default, and a hardcoded timestamp walks out of that window as
+    # the calendar moves - this one did, and the test began failing on a day
+    # nobody had touched it.
     save_portfolio_snapshot(
         conn,
         positions=[],
         realized_pnl=100.0,
         unrealized_pnl=20.0,
-        fetched_at=datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+        fetched_at=datetime.now(UTC) - timedelta(hours=6),
     )
     conn.close()
 
