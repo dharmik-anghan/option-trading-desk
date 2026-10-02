@@ -307,3 +307,28 @@ the hard part is solved.
    runs unattended like `vol_recorder` already does, and is the only source that
    will ever give bid/ask history. Its value compounds with every day it has been
    running, which argues for starting it before it is needed rather than after.
+
+## The engine boundary, and a second engine
+
+What the engine depends on, and nothing else, so it can be reimplemented
+(Rust, via PyO3) and checked against the one we have:
+
+- **Market: `optbt/source.py` `MarketSource`.** A narrow, asking interface - a
+  chain at a minute, a contract's bars for a day, a lot size, the calendar.
+  `optbt/data/history.py` answers it from DuckDB; a second engine answers the
+  same questions from the same store. Not a preloaded market: a run reads a
+  full chain only when it enters, then only the contracts it holds, and
+  preloading four years of weekly windows cost more (18s + 6s for lots) than
+  a whole run (17s).
+- **Strategy: `optbt/spec.py`.** A `LegsConfig` as versioned JSON - the API's
+  request shape - so the request, a saved run and another engine read one
+  format.
+- **Parity: `tests/optbt/parity/`.** A deterministic synthetic market (rallies,
+  a gap, a holiday expiry, a dark stretch, an illiquid strike, VIX), a set of
+  spec cases, and the exact results the Python engine produces for them. Any
+  engine must reproduce them. `python -m tests.optbt.parity.run --parquet DIR`
+  writes the market as Parquet for an engine that reads files; `--write`
+  re-records after a deliberate behaviour change, and the diff is the change.
+
+The Python engine stays as the reference: new strategy behaviour lands there
+first, with its parity cases, and a second engine follows.

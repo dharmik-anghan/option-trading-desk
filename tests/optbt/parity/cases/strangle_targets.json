@@ -1,0 +1,93 @@
+{
+  "start": "2026-01-05",
+  "end": "2026-01-23",
+  "spec": {
+    "version": 1,
+    "legs": [
+      {
+        "side": "sell",
+        "kind": "CE",
+        "lots": 1,
+        "expiry": "week",
+        "expiry_days": 45,
+        "strike": {
+          "mode": "pct",
+          "offset": 0,
+          "premium": 0.0,
+          "pct": 0.5,
+          "delta": 0.3
+        },
+        "stop": {
+          "kind": "pct",
+          "value": 0.6
+        },
+        "target": {
+          "kind": "points",
+          "value": 15
+        }
+      },
+      {
+        "side": "sell",
+        "kind": "PE",
+        "lots": 1,
+        "expiry": "week",
+        "expiry_days": 45,
+        "strike": {
+          "mode": "pct",
+          "offset": 0,
+          "premium": 0.0,
+          "pct": 0.5,
+          "delta": 0.3
+        },
+        "stop": {
+          "kind": "pct",
+          "value": 0.6
+        },
+        "target": {
+          "kind": "points",
+          "value": 15
+        }
+      }
+    ],
+    "entry": "10:00:00",
+    "exit": "15:15:00",
+    "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "hold": "intraday",
+    "mtm_stop": null,
+    "mtm_target": null,
+    "target_credit": null,
+    "stop_credit": null,
+    "exit_dte": null,
+    "trail_to_cost": false,
+    "days": {
+      "expiry_day": "any",
+      "dte_min": null,
+      "dte_max": null,
+      "vix_min": null,
+      "vix_max": null,
+      "vix_pct_min": null,
+      "vix_pct_max": null,
+      "vix_lookback": 252,
+      "gap_min": null,
+      "gap_max": null,
+      "open_zones": []
+    },
+    "adjust": {
+      "enabled": false,
+      "near_points": 50,
+      "fall_from": "long",
+      "fall_points": 200,
+      "rise_from": "short",
+      "rise_points": 0,
+      "move_wing": true,
+      "max_per_trade": 1
+    },
+    "equal_wings": false
+  }
+}

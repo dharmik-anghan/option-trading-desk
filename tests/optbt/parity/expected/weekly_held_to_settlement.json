@@ -1,0 +1,344 @@
+{
+ "days": 14,
+ "abandoned": 0,
+ "skipped": {},
+ "equity": [
+  [
+   "2026-01-05",
+   -40.84807735368672
+  ],
+  [
+   "2026-01-06",
+   297.1519226463127
+  ],
+  [
+   "2026-01-07",
+   1684.9019226463122
+  ],
+  [
+   "2026-01-08",
+   -3762.587202353689
+  ],
+  [
+   "2026-01-09",
+   -3762.587202353689
+  ],
+  [
+   "2026-01-12",
+   -3662.495541151781
+  ],
+  [
+   "2026-01-13",
+   -2664.7455411517803
+  ],
+  [
+   "2026-01-14",
+   -1665.0455411518092
+  ],
+  [
+   "2026-01-16",
+   -1665.0455411518092
+  ],
+  [
+   "2026-01-19",
+   -1715.9756800721245
+  ],
+  [
+   "2026-01-20",
+   -825.4756800721248
+  ],
+  [
+   "2026-01-21",
+   728.0243199278752
+  ],
+  [
+   "2026-01-22",
+   -1012.6756800720964
+  ],
+  [
+   "2026-01-23",
+   -1012.6756800720964
+  ]
+ ],
+ "trades": [
+  {
+   "id": 1,
+   "opened": "2026-01-05T09:20:00",
+   "closed": "2026-01-08T15:29:00",
+   "reason": "expiry",
+   "net": -3762.587202353689,
+   "worst": -3628.2870000000034,
+   "best": 1802.4629999999993,
+   "tags": {
+    "dte": 3,
+    "expiry_day": false,
+    "gap_pct": null,
+    "month": "2026-01",
+    "monthly_expiry": false,
+    "open_zone": null,
+    "spot": 23005.32,
+    "vix": 13.04,
+    "vix_pct": null,
+    "weekday": "Mon"
+   },
+   "legs": [
+    {
+     "key": "08Jan26 23000 CE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 1",
+     "entry_ts": "2026-01-05T09:20:00",
+     "entry_price": 121.88325,
+     "exit_ts": "2026-01-08T15:29:00",
+     "exit_price": 406.02000000000044,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 34.8532623014825
+    },
+    {
+     "key": "08Jan26 23000 PE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 2",
+     "entry_ts": "2026-01-05T09:20:00",
+     "entry_price": 103.2892,
+     "exit_ts": "2026-01-08T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 33.136506948332
+    },
+    {
+     "key": "08Jan26 23200 CE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 3",
+     "entry_ts": "2026-01-05T09:20:00",
+     "entry_price": 45.38575,
+     "exit_ts": "2026-01-08T15:29:00",
+     "exit_price": 206.02000000000044,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 41.667938519507544
+    },
+    {
+     "key": "08Jan26 22800 PE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 4",
+     "entry_ts": "2026-01-05T09:20:00",
+     "entry_price": 35.6065,
+     "exit_ts": "2026-01-08T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 24.642494584365004
+    }
+   ],
+   "events": [
+    "2026-01-05 09:20 sold 1x65 08Jan26 23000 CE @ 121.88",
+    "2026-01-05 09:20 sold 1x65 08Jan26 23000 PE @ 103.29",
+    "2026-01-05 09:20 bought 1x65 08Jan26 23200 CE @ 45.39",
+    "2026-01-05 09:20 bought 1x65 08Jan26 22800 PE @ 35.61",
+    "2026-01-08 15:29 settled 08Jan26 23000 CE at 406.02 (spot 23406.02), leg -18,469",
+    "2026-01-08 15:29 settled 08Jan26 23000 PE at 0.00 (spot 23406.02), leg +6,714",
+    "2026-01-08 15:29 settled 08Jan26 23200 CE at 206.02 (spot 23406.02), leg +10,441",
+    "2026-01-08 15:29 settled 08Jan26 22800 PE at 0.00 (spot 23406.02), leg -2,314"
+   ]
+  },
+  {
+   "id": 2,
+   "opened": "2026-01-12T09:20:00",
+   "closed": "2026-01-14T15:29:00",
+   "reason": "expiry",
+   "net": 2097.54166120188,
+   "worst": -480.62625000000094,
+   "best": 4524.373749999999,
+   "tags": {
+    "dte": 3,
+    "expiry_day": false,
+    "gap_pct": -1.2,
+    "month": "2026-01",
+    "monthly_expiry": false,
+    "open_zone": "below S2",
+    "spot": 22805.32,
+    "vix": 14.54,
+    "vix_pct": null,
+    "weekday": "Mon"
+   },
+   "legs": [
+    {
+     "key": "15Jan26 22800 CE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 1",
+     "entry_ts": "2026-01-12T09:20:00",
+     "entry_price": 93.3192,
+     "exit_ts": "2026-01-14T15:29:00",
+     "exit_price": 96.02000000000044,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 32.215994694632
+    },
+    {
+     "key": "15Jan26 22800 PE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 2",
+     "entry_ts": "2026-01-12T09:20:00",
+     "entry_price": 78.86269999999999,
+     "exit_ts": "2026-01-14T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 30.881251926767
+    },
+    {
+     "key": "15Jan26 23000 CE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 3",
+     "entry_ts": "2026-01-12T09:20:00",
+     "entry_price": 23.92155,
+     "exit_ts": "2026-01-14T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 24.3003801644255
+    },
+    {
+     "key": "15Jan26 22600 PE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 4",
+     "entry_ts": "2026-01-12T09:20:00",
+     "entry_price": 18.2546,
+     "exit_ts": "2026-01-14T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 24.134462012266003
+    }
+   ],
+   "events": [
+    "2026-01-12 09:20 sold 1x65 15Jan26 22800 CE @ 93.32",
+    "2026-01-12 09:20 sold 1x65 15Jan26 22800 PE @ 78.86",
+    "2026-01-12 09:20 bought 1x65 15Jan26 23000 CE @ 23.92",
+    "2026-01-12 09:20 bought 1x65 15Jan26 22600 PE @ 18.25",
+    "2026-01-14 15:29 settled 15Jan26 22800 CE at 96.02 (spot 22896.02), leg -176",
+    "2026-01-14 15:29 settled 15Jan26 22800 PE at 0.00 (spot 22896.02), leg +5,126",
+    "2026-01-14 15:29 settled 15Jan26 23000 CE at 0.00 (spot 22896.02), leg -1,555",
+    "2026-01-14 15:29 settled 15Jan26 22600 PE at 0.00 (spot 22896.02), leg -1,187"
+   ]
+  },
+  {
+   "id": 3,
+   "opened": "2026-01-19T09:20:00",
+   "closed": "2026-01-22T15:29:00",
+   "reason": "expiry",
+   "net": 652.3698610797128,
+   "worst": -1456.7280000000014,
+   "best": 3603.5220000000004,
+   "tags": {
+    "dte": 3,
+    "expiry_day": false,
+    "gap_pct": 1.41,
+    "month": "2026-01",
+    "monthly_expiry": false,
+    "open_zone": "R1-R2",
+    "spot": 23095.32,
+    "vix": 15.74,
+    "vix_pct": null,
+    "weekday": "Mon"
+   },
+   "legs": [
+    {
+     "key": "22Jan26 23100 CE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 1",
+     "entry_ts": "2026-01-19T09:20:00",
+     "entry_price": 120.78655,
+     "exit_ts": "2026-01-22T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 34.752005953575505
+    },
+    {
+     "key": "22Jan26 23100 PE",
+     "side": -1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 2",
+     "entry_ts": "2026-01-19T09:20:00",
+     "entry_price": 112.11265,
+     "exit_ts": "2026-01-22T15:29:00",
+     "exit_price": 133.97999999999956,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 33.9511602928565
+    },
+    {
+     "key": "22Jan26 23300 CE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 3",
+     "entry_ts": "2026-01-19T09:20:00",
+     "entry_price": 46.08785,
+     "exit_ts": "2026-01-22T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 24.949369750748506
+    },
+    {
+     "key": "22Jan26 22900 PE",
+     "side": 1,
+     "lots": 1,
+     "lot_size": 65,
+     "tag": "leg 4",
+     "entry_ts": "2026-01-19T09:20:00",
+     "entry_price": 40.97255,
+     "exit_ts": "2026-01-22T15:29:00",
+     "exit_price": 0.0,
+     "exit_reason": "expiry",
+     "stop": null,
+     "target": null,
+     "charges": 24.7996029231355
+    }
+   ],
+   "events": [
+    "2026-01-19 09:20 sold 1x65 22Jan26 23100 CE @ 120.79",
+    "2026-01-19 09:20 sold 1x65 22Jan26 23100 PE @ 112.11",
+    "2026-01-19 09:20 bought 1x65 22Jan26 23300 CE @ 46.09",
+    "2026-01-19 09:20 bought 1x65 22Jan26 22900 PE @ 40.97",
+    "2026-01-22 15:29 settled 22Jan26 23100 CE at 0.00 (spot 22966.02), leg +7,851",
+    "2026-01-22 15:29 settled 22Jan26 23100 PE at 133.98 (spot 22966.02), leg -1,421",
+    "2026-01-22 15:29 settled 22Jan26 23300 CE at 0.00 (spot 22966.02), leg -2,996",
+    "2026-01-22 15:29 settled 22Jan26 22900 PE at 0.00 (spot 22966.02), leg -2,663"
+   ]
+  }
+ ]
+}
