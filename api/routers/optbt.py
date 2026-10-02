@@ -32,17 +32,14 @@ import paths
 from optbt.costs import CostModel
 from optbt.data.history import History
 from optbt.data.models import Kind
-from optbt.engine import Engine, Leg, Level, Result, Side, Trade
+from optbt.engine import Engine, Leg, Result, Trade
 from optbt.market import OptionKey
 from optbt.results import summarise
+from optbt.spec import from_dict as spec_from_dict
 from optbt.strategies.legs import (
-    Adjustment,
-    DayFilter,
     ExpiryRule,
     LegsConfig,
-    LegSpec,
     LegStrategy,
-    StrikeRule,
 )
 from venues.instruments import OPTION_SERIES
 
@@ -232,64 +229,8 @@ class RunRequest(BaseModel):
     brokerage: float = Field(default=20.0, ge=0, le=500)
 
     def config(self) -> LegsConfig:
-        def level(lv: LevelIn | None) -> Level | None:
-            return Level(lv.kind, lv.value) if lv else None
-
-        return LegsConfig(
-            legs=tuple(
-                LegSpec(
-                    side=Side.BUY if leg.side == "buy" else Side.SELL,
-                    kind=Kind(leg.kind),
-                    lots=leg.lots,
-                    expiry=leg.expiry,
-                    expiry_days=leg.expiry_days,
-                    strike=StrikeRule(
-                        leg.strike.mode,
-                        leg.strike.offset,
-                        leg.strike.premium,
-                        leg.strike.pct,
-                        leg.strike.delta,
-                    ),
-                    stop=level(leg.stop),
-                    target=level(leg.target),
-                )
-                for leg in self.legs
-            ),
-            entry=self.entry,
-            exit=self.exit,
-            weekdays=frozenset(self.weekdays),
-            hold=self.hold,
-            mtm_stop=self.mtm_stop,
-            mtm_target=self.mtm_target,
-            target_credit=self.target_credit,
-            stop_credit=self.stop_credit,
-            exit_dte=self.exit_dte,
-            trail_to_cost=self.trail_to_cost,
-            adjust=Adjustment(
-                enabled=self.adjust.enabled,
-                near_points=self.adjust.near_points,
-                fall_from=self.adjust.fall_from,
-                fall_points=self.adjust.fall_points,
-                rise_from=self.adjust.rise_from,
-                rise_points=self.adjust.rise_points,
-                move_wing=self.adjust.move_wing,
-                max_per_trade=self.adjust.max_per_trade,
-            ),
-            equal_wings=self.equal_wings,
-            days=DayFilter(
-                expiry_day=self.days.expiry_day,
-                dte_min=self.days.dte_min,
-                dte_max=self.days.dte_max,
-                vix_min=self.days.vix_min,
-                vix_max=self.days.vix_max,
-                vix_pct_min=self.days.vix_pct_min,
-                vix_pct_max=self.days.vix_pct_max,
-                vix_lookback=self.days.vix_lookback,
-                gap_min=self.days.gap_min,
-                gap_max=self.days.gap_max,
-                open_zones=frozenset(self.days.open_zones),
-            ),
-        )
+        """The strategy part of the request. Its JSON is the spec's shape - see optbt.spec."""
+        return spec_from_dict(self.model_dump(mode="json"))
 
 
 class LegOut(BaseModel):
