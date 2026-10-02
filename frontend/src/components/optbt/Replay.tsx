@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getOptbtReplay } from "../../api";
 import type { OptbtReplay, OptbtTrade } from "../../api";
-import { day, hhmm, premium, signed, tone } from "./format";
-import { useWidth } from "./useWidth";
+import { day, dir, hhmm, premium, signedRupees } from "../../format";
+import { useWidth } from "../../hooks/useWidth";
 
 interface Props {
   trade: OptbtTrade;
@@ -81,7 +81,7 @@ export function Replay({ trade, onClose }: Props) {
           {trade.closed && trade.closed.slice(0, 10) !== trade.opened.slice(0, 10)
             ? ` – ${day(trade.closed)}`
             : ""}{" "}
-          · {trade.legs.length} legs · <span className={tone(trade.net)}>{signed(trade.net)}</span>{" "}
+          · {trade.legs.length} legs · <span className={dir(trade.net)}>{signedRupees(trade.net)}</span>{" "}
           net
         </h3>
         <button onClick={onClose}>Close</button>
@@ -231,10 +231,10 @@ function PremiumPanel({ trade, chart, width }: { trade: OptbtTrade; chart: Chart
               </path>
             )}
             {exitI !== undefined && leg.exit !== null && (
-              <circle cx={x(exitI)} cy={y(leg.exit)} r={5} className={`out ${tone(leg.pnl)}`}>
+              <circle cx={x(exitI)} cy={y(leg.exit)} r={5} className={`out ${dir(leg.pnl)}`}>
                 <title>
                   {legName(leg)} closed {premium(leg.exit)} at {hhmm(leg.exit_at)} ({leg.ended}),{" "}
-                  {signed(leg.pnl)}
+                  {signedRupees(leg.pnl)}
                 </title>
               </circle>
             )}

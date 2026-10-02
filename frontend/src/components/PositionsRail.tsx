@@ -1,4 +1,6 @@
 import type { PortfolioHistoryPoint, PortfolioResponse } from "../api";
+import { LineChart } from "../charts/LineChart";
+import { fromSnapshots } from "../charts/series";
 import { clockIST, compact, dayIST, dir, int, num, signed } from "../format";
 
 interface Props {
@@ -69,30 +71,24 @@ export function PositionsRail({ portfolio, portfolioError, history }: Props) {
 }
 
 function Sparkline({ points }: { points: PortfolioHistoryPoint[] }) {
-  const w = 240;
-  const h = 62;
-  const pad = 4;
   const ys = points.map((p) => p.total_pnl);
   const lo = Math.min(0, ...ys);
   const hi = Math.max(0, ...ys);
-  const span = hi - lo || 1;
-  const X = (i: number) => pad + (i / Math.max(1, points.length - 1)) * (w - 2 * pad);
-  const Y = (v: number) => pad + ((hi - v) / span) * (h - 2 * pad);
-  const d = points.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.total_pnl).toFixed(1)}`).join("");
   const last = points[points.length - 1];
 
   return (
     <div style={{ padding: "8px 9px" }}>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        style={{ width: "100%", height: h, display: "block" }}
-        role="img"
-        aria-label="Total profit and loss over recent snapshots"
+      <LineChart
+        className="spark"
+        points={fromSnapshots(points)}
+        height={62}
+        baseline={0}
+        ariaLabel="Total profit and loss over recent snapshots"
       >
-        <line x1={pad} x2={w - pad} y1={Y(0)} y2={Y(0)} stroke="var(--line)" />
-        <path d={d} fill="none" stroke="var(--you)" strokeWidth="1.8" />
-        <circle cx={X(points.length - 1)} cy={Y(last.total_pnl)} r="2.5" fill="var(--you)" />
-      </svg>
+        {({ x, y }) => (
+          <circle cx={x(points.length - 1)} cy={y(last.total_pnl)} r="2.5" className="dot" />
+        )}
+      </LineChart>
       <div className="irow dim" style={{ marginTop: 4 }}>
         <span>
           {dayIST(points[0].fetched_at)} → {dayIST(last.fetched_at)}

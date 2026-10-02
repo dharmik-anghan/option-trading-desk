@@ -7,7 +7,7 @@ import { PreOpen } from "./components/PreOpen";
 import { Rrg } from "./components/Rrg";
 import { getVenues } from "./api";
 import { useRoute } from "./useRoute";
-import { useTheme } from "./useTheme";
+import { useTheme } from "./hooks/useTheme";
 
 /** Which venue each desk route trades. */
 const VENUE_FOR = { options: "fyers", crypto: "shark" } as const;

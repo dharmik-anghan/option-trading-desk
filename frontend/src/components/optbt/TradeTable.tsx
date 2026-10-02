@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { OptbtLeg, OptbtTrade } from "../../api";
-import { day, hhmm, premium, rupees, signed, tone } from "./format";
+import { day, dir, hhmm, premium, rupees, signedRupees } from "../../format";
 
 interface Props {
   trades: OptbtTrade[];
@@ -68,18 +68,18 @@ export function TradeTable({ trades, picked, onPick }: Props) {
                     <LegLine key={i} leg={l} />
                   ))}
                 </td>
-                <td className={`n ${tone(t.gross)}`}>{signed(t.gross)}</td>
+                <td className={`n ${dir(t.gross)}`}>{signedRupees(t.gross)}</td>
                 <td className="n dim">{rupees(-t.charges)}</td>
-                <td className={`n ${tone(t.net)}`}>{signed(t.net)}</td>
+                <td className={`n ${dir(t.net)}`}>{signedRupees(t.net)}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={3}>Total of {shown.length.toLocaleString()} trades</td>
-              <td className={`n ${tone(sum.gross)}`}>{signed(sum.gross)}</td>
+              <td className={`n ${dir(sum.gross)}`}>{signedRupees(sum.gross)}</td>
               <td className="n dim">{rupees(-sum.charges)}</td>
-              <td className={`n ${tone(sum.net)}`}>{signed(sum.net)}</td>
+              <td className={`n ${dir(sum.net)}`}>{signedRupees(sum.net)}</td>
             </tr>
           </tfoot>
         </table>
@@ -108,7 +108,7 @@ function LegLine({ leg }: { leg: OptbtLeg }) {
         {leg.ended ?? "open"}
         {leg.exit_at && leg.ended !== "expiry" ? ` ${hhmm(leg.exit_at)}` : ""}
       </span>
-      <span className={`n ${tone(leg.pnl)}`}>{signed(leg.pnl)}</span>
+      <span className={`n ${dir(leg.pnl)}`}>{signedRupees(leg.pnl)}</span>
     </span>
   );
 }

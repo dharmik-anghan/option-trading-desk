@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PANE_LEFT, PANE_RIGHT, PANE_WIDTH } from "../charts/layout";
 import type { Candle } from "../api";
 
 interface Props {
@@ -44,7 +45,8 @@ export interface Overlay {
   lines?: { label: string; values: (number | null)[] }[];
 }
 
-const PAD = { top: 8, right: 54, bottom: 18, left: 6 };
+const W = PANE_WIDTH;
+const PAD = { top: 8, right: PANE_RIGHT, bottom: 18, left: PANE_LEFT };
 
 /** Fewest bars worth showing. Below this the chart is a magnifying glass. */
 const MIN_BARS = 12;
@@ -151,7 +153,6 @@ export function CandleChart({
   // Geometry first, because the pointer handlers need it to say which bar is
   // under the cursor. The viewBox is fixed and the element is scaled to fit, so
   // everything here is a fraction of the element rather than a pixel of it.
-  const W = 1000;
   // Scaled to the viewBox's own units: the element is W units wide however many
   // pixels that is, so a box of 780x500 pixels is 1000x641 units.
   const H = measured ?? height;

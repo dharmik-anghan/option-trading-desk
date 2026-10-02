@@ -70,6 +70,11 @@ export function rupeesC(value: number | null): string {
   return (r < 0 ? MINUS : "") + "₹" + compact(Math.abs(r));
 }
 
+/** Rupees with an explicit sign, for a P&L: "+₹1,234". */
+export function signedRupees(value: number): string {
+  return value > 0 ? `+${rupees(value)}` : rupees(value);
+}
+
 export function pct(value: number, dp = 2): string {
   if (!Number.isFinite(value)) return "—";
   const sign = value > 0 ? "+" : value < 0 ? MINUS : "";
@@ -80,6 +85,22 @@ export function pct(value: number, dp = 2): string {
 export function dir(value: number): string {
   if (!Number.isFinite(value) || Math.abs(value) < 0.005) return "";
   return value > 0 ? "up" : "dn";
+}
+
+/** A premium: two decimals, as the exchange quotes it. */
+export function premium(value: number | null): string {
+  return value === null ? "—" : value.toFixed(2);
+}
+
+/** "2026-09-21T09:20:00" -> "09:20". For times already in exchange time. */
+export function hhmm(at: string | null): string {
+  return at ? at.slice(11, 16) : "—";
+}
+
+/** "2026-09-21T09:20:00" -> "21 Sep 26". For dates already in exchange time. */
+export function day(at: string): string {
+  const d = new Date(`${at.slice(0, 10)}T00:00:00`);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 }
 
 export function clockIST(iso: string | number | Date): string {

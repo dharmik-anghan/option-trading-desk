@@ -4,7 +4,7 @@ import type { StructureFrame } from "../api";
 import { getChart, getStructure } from "../api";
 import { num } from "../format";
 import type { Overlay } from "./CandleChart";
-import { useLive } from "../useLive";
+import { useLive } from "../hooks/useLive";
 import { CandleChart } from "./CandleChart";
 import { IndicatorButton, IndicatorMenu, asQuery, remembered } from "./IndicatorPicker";
 import type { Pick } from "./IndicatorPicker";

@@ -1,4 +1,4 @@
-import { rupees, signed, tone } from "./format";
+import { dir, rupees, signedRupees } from "../../format";
 
 interface Props {
   /** "YYYY-MM" -> net. */
@@ -60,16 +60,16 @@ export function MonthGrid({ byMonth, months = [], years: pickedYears = [], onMon
                 return (
                   <td
                     key={key}
-                    className={`${tone(v)} pick${months.includes(key) ? " picked" : ""}`}
+                    className={`${dir(v)} pick${months.includes(key) ? " picked" : ""}`}
                     style={{ ["--s" as string]: `${strength}%` }}
-                    title={`${MONTHS[i]} ${year}: ${signed(v)} - click to see its trades`}
+                    title={`${MONTHS[i]} ${year}: ${signedRupees(v)} - click to see its trades`}
                     onClick={() => onMonth?.(key)}
                   >
                     {compact(v)}
                   </td>
                 );
               })}
-              <td className={`yr ${tone(total)}`} title={signed(total)}>
+              <td className={`yr ${dir(total)}`} title={signedRupees(total)}>
                 {total > 0 ? "+" : ""}
                 {compact(total)}
               </td>

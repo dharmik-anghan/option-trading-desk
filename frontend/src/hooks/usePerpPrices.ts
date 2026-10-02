@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE } from "./api";
+import { API_BASE } from "../api";
 
 export interface StreamedPrice {
   price: number;

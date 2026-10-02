@@ -1,4 +1,6 @@
 import type { BacktestResult, StrategySpec } from "../../api";
+import { LineChart } from "../../charts/LineChart";
+import { fromUnixPairs } from "../../charts/series";
 import { useState } from "react";
 import type { BacktestTrade } from "../../api";
 import { TradeChart } from "./TradeChart";
@@ -229,31 +231,19 @@ function Figure({
  * of the window. A curve autoscaled to itself makes every result look eventful.
  */
 function Curve({ curve, capital }: { curve: [number, number][]; capital: number }) {
-  if (curve.length < 2) return null;
-
-  const width = 900;
-  const height = 220;
-  const pad = 4;
-  const values = curve.map(([, v]) => v);
-  const top = Math.max(...values, capital);
-  const bottom = Math.min(...values, capital);
-  const span = top - bottom || 1;
-  const first = curve[0][0];
-  const last = curve[curve.length - 1][0];
-  const across = last - first || 1;
-
-  const x = (at: number) => ((at - first) / across) * (width - pad * 2) + pad;
-  const y = (v: number) => height - pad - ((v - bottom) / span) * (height - pad * 2);
-
-  const line = curve.map(([at, v], i) => `${i ? "L" : "M"}${x(at).toFixed(1)} ${y(v).toFixed(1)}`);
-
   return (
-    <svg className="curve" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      <line x1={0} x2={width} y1={y(capital)} y2={y(capital)} className="base" />
-      <path d={line.join(" ")} className="eq" />
-      <text x={6} y={y(capital) - 5} className="lab">
-        started with {capital.toLocaleString()}
-      </text>
-    </svg>
+    <LineChart
+      className="curve"
+      points={fromUnixPairs(curve)}
+      height={220}
+      baseline={capital}
+      ariaLabel="Account equity over the run"
+    >
+      {({ y }) => (
+        <text x={6} y={y(capital) - 5} className="lab">
+          started with {capital.toLocaleString()}
+        </text>
+      )}
+    </LineChart>
   );
 }

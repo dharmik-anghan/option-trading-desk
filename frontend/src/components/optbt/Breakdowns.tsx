@@ -3,7 +3,7 @@ import type { OptbtTrade } from "../../api";
 import { PIVOT_ZONES } from "../../api";
 import type { Explore, Row } from "./explore";
 import { DTE_ORDER, VIX_ORDER, WEEKDAYS, breakdown, dteBucket, vixBucket } from "./explore";
-import { signed, tone } from "./format";
+import { dir, signedRupees } from "../../format";
 
 interface Props {
   trades: OptbtTrade[];
@@ -94,11 +94,11 @@ export function Breakdowns({ trades, filter: f, onFilter }: Props) {
               <th>{r.label.replaceAll("+", " + ")}</th>
               <td className="n">{r.trades}</td>
               <td className="n">{r.trades ? Math.round((r.wins / r.trades) * 100) : 0}%</td>
-              <td className={`n bar ${tone(r.net)}`}>
+              <td className={`n bar ${dir(r.net)}`}>
                 <i style={{ width: `${(Math.abs(r.net) / largest) * 100}%` }} />
-                <span>{signed(r.net)}</span>
+                <span>{signedRupees(r.net)}</span>
               </td>
-              <td className={`n ${tone(r.net)}`}>{signed(r.trades ? r.net / r.trades : 0)}</td>
+              <td className={`n ${dir(r.net)}`}>{signedRupees(r.trades ? r.net / r.trades : 0)}</td>
             </tr>
           ))}
         </tbody>

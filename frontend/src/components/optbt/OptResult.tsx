@@ -8,7 +8,7 @@ import { Replay } from "./Replay";
 import { TradeTable } from "./TradeTable";
 import type { Explore } from "./explore";
 import { NO_FILTER, apply, byMonth, curve, figures } from "./explore";
-import { rupees, signed, tone } from "./format";
+import { dir, rupees, signedRupees } from "../../format";
 
 interface Props {
   result: OptbtResult;
@@ -64,16 +64,16 @@ export function OptResult({ result, stale, finishedAt, seconds }: Props) {
       <div className="ob-kpis">
         <div className="ob-kpi hero">
           <span>Net</span>
-          <b className={tone(s.net)}>{signed(s.net)}</b>
+          <b className={dir(s.net)}>{signedRupees(s.net)}</b>
         </div>
         <div className="ob-kpi">
           <span>Trades</span>
           <b>{s.trades.toLocaleString()}</b>
           <small>{s.trades ? `${Math.round((s.wins / s.trades) * 100)}% won` : ""}</small>
         </div>
-        <div className="ob-kpi" title={`Median ${signed(s.median)}`}>
+        <div className="ob-kpi" title={`Median ${signedRupees(s.median)}`}>
           <span>Per trade</span>
-          <b className={tone(s.average)}>{signed(s.average)}</b>
+          <b className={dir(s.average)}>{signedRupees(s.average)}</b>
         </div>
         <div className="ob-kpi" title="Deepest fall from a peak, on closed trades day by day">
           <span>Max drawdown</span>
@@ -83,9 +83,9 @@ export function OptResult({ result, stale, finishedAt, seconds }: Props) {
           <span>Profit factor</span>
           <b>{s.profitFactor === null ? "—" : s.profitFactor.toFixed(2)}</b>
         </div>
-        <div className="ob-kpi" title={`Best trade ${signed(s.best)}`}>
+        <div className="ob-kpi" title={`Best trade ${signedRupees(s.best)}`}>
           <span>Worst trade</span>
-          <b className={tone(s.worst)}>{signed(s.worst)}</b>
+          <b className={dir(s.worst)}>{signedRupees(s.worst)}</b>
         </div>
       </div>
 
@@ -96,8 +96,8 @@ export function OptResult({ result, stale, finishedAt, seconds }: Props) {
           ` · GST ${rupees(c.gst)} · stamp and SEBI ${rupees(c.stamp + c.sebi)} (whole run)`
         }
       >
-        Gross <b className={tone(s.gross)}>{signed(s.gross)}</b> − charges{" "}
-        <b>{rupees(s.charges)}</b> = <b className={tone(s.net)}>{signed(s.net)}</b>
+        Gross <b className={dir(s.gross)}>{signedRupees(s.gross)}</b> − charges{" "}
+        <b>{rupees(s.charges)}</b> = <b className={dir(s.net)}>{signedRupees(s.net)}</b>
       </p>
 
       <FilterBar

@@ -2323,7 +2323,6 @@ a.nitem:hover .nhead {
 .bt .curve {
   display: block;
   width: 100%;
-  height: 220px;
   margin-top: 20px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -2343,6 +2342,23 @@ a.nitem:hover .nhead {
 .bt .curve .lab {
   fill: var(--dim);
   font-size: 9px;
+}
+.bt .curve svg,
+.spark svg {
+  display: block;
+}
+
+/* The portfolio's P&L sparkline, in the positions rail. */
+.spark .base {
+  stroke: var(--line);
+}
+.spark .eq {
+  fill: none;
+  stroke: var(--you);
+  stroke-width: 1.8;
+}
+.spark .dot {
+  fill: var(--you);
 }
 
 .bt .endings {
@@ -3692,7 +3708,8 @@ a.nitem:hover .nhead {
   stroke: var(--grid);
   stroke-width: 1;
 }
-.obt svg .zero {
+.obt svg .zero,
+.obt .ocurve .base {
   stroke: var(--dim);
   stroke-width: 1;
   stroke-dasharray: 3 3;

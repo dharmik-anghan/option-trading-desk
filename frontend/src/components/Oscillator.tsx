@@ -1,4 +1,5 @@
 import type { IndicatorLine } from "../api";
+import { PANE_LEFT, PANE_RIGHT, PANE_WIDTH } from "../charts/layout";
 
 interface Props {
   line: IndicatorLine;
@@ -45,9 +46,9 @@ export function Oscillator({ line, colour, start, end, hovered }: Props) {
   const drawn = values.filter((v): v is number => typeof v === "number");
   if (!drawn.length) return null;
 
-  const W = 1000;
+  const W = PANE_WIDTH;
   const H = 76;
-  const PAD = { top: 6, right: 54, bottom: 6, left: 6 };
+  const PAD = { top: 6, right: PANE_RIGHT, bottom: 6, left: PANE_LEFT };
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
 

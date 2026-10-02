@@ -14,9 +14,9 @@ import {
   getNews,
   describeError,
 } from "./api";
-import type { Theme } from "./useTheme";
-import { useLive, useNow } from "./useLive";
-import { usePerpPrices } from "./usePerpPrices";
+import type { Theme } from "./hooks/useTheme";
+import { useLive, useNow } from "./hooks/useLive";
+import { usePerpPrices } from "./hooks/usePerpPrices";
 import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
