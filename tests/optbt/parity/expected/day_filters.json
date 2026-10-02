@@ -3,7 +3,7 @@
  "abandoned": 2,
  "skipped": {
   "filter: VIX": 2,
-  "filter: expiry day": 2,
+  "filter: expiry day": 3,
   "filter: gap": 4,
   "filter: open outside the chosen pivot zones": 2
  },
@@ -38,95 +38,36 @@
   ],
   [
    "2026-01-14",
-   -1196.4990076645943
+   0.0
   ],
   [
    "2026-01-16",
-   -1196.4990076645943
+   0.0
   ],
   [
    "2026-01-19",
-   -1196.4990076645943
+   0.0
   ],
   [
    "2026-01-20",
-   -1556.7370267287988
+   -360.2380190642044
   ],
   [
    "2026-01-21",
-   -1556.7370267287988
+   -360.2380190642044
   ],
   [
    "2026-01-22",
-   -1556.7370267287988
+   -360.2380190642044
   ],
   [
    "2026-01-23",
-   -1285.3343515355632
+   -88.83534387096881
   ]
  ],
  "trades": [
   {
    "id": 1,
-   "opened": "2026-01-14T09:20:00",
-   "closed": "2026-01-14T11:03:00",
-   "reason": "stop",
-   "net": -1196.4990076645943,
-   "worst": -1040.7533459375002,
-   "best": 382.74665406249994,
-   "tags": {
-    "dte": 1,
-    "expiry_day": false,
-    "gap_pct": 0.23,
-    "month": "2026-01",
-    "monthly_expiry": false,
-    "open_zone": "R1-R2",
-    "spot": 22905.32,
-    "vix": 15.14,
-    "vix_pct": null,
-    "weekday": "Wed"
-   },
-   "legs": [
-    {
-     "key": "15Jan26 22900 CE",
-     "side": -1,
-     "lots": 1,
-     "lot_size": 65,
-     "tag": "leg 1",
-     "entry_ts": "2026-01-14T09:20:00",
-     "entry_price": 36.340650000000004,
-     "exit_ts": "2026-01-14T09:32:00",
-     "exit_price": 45.562089937500005,
-     "exit_reason": "stop",
-     "stop": 45.425812500000006,
-     "target": null,
-     "charges": 51.88924360196551
-    },
-    {
-     "key": "15Jan26 22900 PE",
-     "side": -1,
-     "lots": 1,
-     "lot_size": 65,
-     "tag": "leg 2",
-     "entry_ts": "2026-01-14T09:20:00",
-     "entry_price": 29.95985,
-     "exit_ts": "2026-01-14T11:03:00",
-     "exit_price": 37.5621619375,
-     "exit_reason": "stop",
-     "stop": 37.4498125,
-     "target": null,
-     "charges": 51.065892187628634
-    }
-   ],
-   "events": [
-    "2026-01-14 09:20 sold 1x65 15Jan26 22900 CE @ 36.34, stop 45.43",
-    "2026-01-14 09:20 sold 1x65 15Jan26 22900 PE @ 29.96, stop 37.45",
-    "2026-01-14 09:32 closed 15Jan26 22900 CE @ 45.56 (stop), leg -599",
-    "2026-01-14 11:03 closed 15Jan26 22900 PE @ 37.56 (stop), leg -494"
-   ]
-  },
-  {
-   "id": 2,
    "opened": "2026-01-20T09:20:00",
    "closed": "2026-01-20T15:15:00",
    "reason": "time",
@@ -140,6 +81,7 @@
     "month": "2026-01",
     "monthly_expiry": false,
     "open_zone": "R1-R2",
+    "sessions_to_expiry": 2,
     "spot": 23145.32,
     "vix": 16.04,
     "vix_pct": null,
@@ -185,7 +127,7 @@
    ]
   },
   {
-   "id": 3,
+   "id": 2,
    "opened": "2026-01-23T09:20:00",
    "closed": "2026-01-23T15:15:00",
    "reason": "time",
@@ -199,6 +141,7 @@
     "month": "2026-01",
     "monthly_expiry": true,
     "open_zone": "P-R1",
+    "sessions_to_expiry": 4,
     "spot": 23015.32,
     "vix": 16.94,
     "vix_pct": null,

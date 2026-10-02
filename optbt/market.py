@@ -135,6 +135,24 @@ class View:
         """Monthly expiries not yet passed, nearest first."""
         return [e for e in self._history.monthly_expiries() if e >= self.day]
 
+    def sessions_to(self, expiry: date) -> int:
+        """Trading sessions after today up to `expiry`: 0 on the session it settles
+        in, 1 on the one before.
+
+        Sessions, not calendar days - the day before a Monday expiry is Friday. An
+        expiry listed on a holiday settles the session before, and counts as 0
+        there. Past the end of the data, weekdays stand in for sessions.
+        """
+        known = self._history.trading_days(self.day, expiry)
+        count = len(known) - 1
+        last = known[-1] if known else self.day
+        if self._history.next_trading_day(last) is None:
+            step = last + timedelta(days=1)
+            while step <= expiry:
+                count += step.weekday() < 5
+                step += timedelta(days=1)
+        return max(0, count)
+
     def chain(self, expiry: date) -> list[Quote]:
         return self._history.chain_at(expiry, self.now)
 

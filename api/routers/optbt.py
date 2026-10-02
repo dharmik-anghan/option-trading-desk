@@ -170,7 +170,7 @@ class DaysIn(BaseModel):
 
     model_config = STRICT
 
-    expiry_day: Literal["any", "only", "skip"] = "any"
+    expiry_day: Literal["any", "only", "skip", "skip_eve"] = "any"
     dte_min: int | None = Field(default=None, ge=0)
     dte_max: int | None = Field(default=None, ge=0)
     vix_min: float | None = None
@@ -261,7 +261,7 @@ class TradeOut(BaseModel):
     net: float
     legs: list[LegOut]
     events: list[str]
-    #: The day at entry: weekday, dte, expiry_day, vix, vix_pct, gap_pct,
+    #: The day at entry: weekday, dte, sessions_to_expiry, expiry_day, vix, vix_pct, gap_pct,
     #: open_zone, month, spot. What the result explorer slices by.
     tags: dict[str, str | float | int | bool | None]
     #: Lowest and highest gross P&L at any minute's close while open.

@@ -305,6 +305,7 @@ export function OptionBacktesting({ onHome }: Props) {
                 <option value="any">Any day</option>
                 <option value="only">Only expiry day</option>
                 <option value="skip">Never expiry day</option>
+                <option value="skip_eve">Not expiry day or the day before</option>
               </select>
             </label>
             <Range

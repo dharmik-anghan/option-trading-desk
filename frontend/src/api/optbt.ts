@@ -44,7 +44,7 @@ export interface OptbtLegIn {
 
 /** Which days to trade. Null bounds mean no condition. */
 export interface OptbtDays {
-  expiry_day: "any" | "only" | "skip";
+  expiry_day: "any" | "only" | "skip" | "skip_eve";
   dte_min: number | null;
   dte_max: number | null;
   vix_min: number | null;
@@ -140,6 +140,8 @@ export interface OptbtTags {
   weekday: string;
   month: string;
   dte: number;
+  /** Trading sessions to the first leg's expiry: 0 on the expiry session. */
+  sessions_to_expiry: number;
   expiry_day: boolean;
   monthly_expiry: boolean;
   spot: number;

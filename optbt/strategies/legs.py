@@ -85,8 +85,9 @@ class DayFilter:
     only. None means "no condition". Weekdays live on `LegsConfig`.
     """
 
-    #: "only": trade only on the day the first leg expires; "skip": never on it.
-    expiry_day: Literal["any", "only", "skip"] = "any"
+    #: "only": trade only on the session the first leg expires in; "skip": never
+    #: on it; "skip_eve": neither on it nor on the session before.
+    expiry_day: Literal["any", "only", "skip", "skip_eve"] = "any"
     #: Calendar days from today to the first leg's expiry.
     dte_min: int | None = None
     dte_max: int | None = None
@@ -118,6 +119,10 @@ class DayFilter:
             return "filter: not an expiry day"
         if self.expiry_day == "skip" and tags.get("expiry_day"):
             return "filter: expiry day"
+        if self.expiry_day == "skip_eve":
+            left = tags.get("sessions_to_expiry")
+            if not isinstance(left, int) or left <= 1:
+                return "filter: expiry day or the day before"
         if outside("dte", self.dte_min, self.dte_max):
             return "filter: days to expiry"
         if outside("vix", self.vix_min, self.vix_max):
@@ -417,7 +422,8 @@ class LegStrategy:
             "weekday": view.day.strftime("%a"),
             "month": view.day.strftime("%Y-%m"),
             "dte": (expiry - view.day).days,
-            "expiry_day": expiry == view.day,
+            "sessions_to_expiry": (sessions := view.sessions_to(expiry)),
+            "expiry_day": sessions == 0,
             "monthly_expiry": expiry in view.monthly_expiries(),
             "spot": round(view.spot(), 2),
             "vix": round(vix, 2) if vix is not None else None,

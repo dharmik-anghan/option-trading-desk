@@ -24,6 +24,7 @@ function trade(
       weekday: "Mon",
       month: day.slice(0, 7),
       dte: 1,
+      sessions_to_expiry: 1,
       expiry_day: false,
       monthly_expiry: false,
       spot: 24000,
