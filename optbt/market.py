@@ -89,6 +89,7 @@ class View:
         self.day = day
         self._bars = bars
         self._i = -1
+        self._sessions: dict[date, int] = {}
 
     @property
     def context(self) -> Context:
@@ -143,6 +144,8 @@ class View:
         expiry listed on a holiday settles the session before, and counts as 0
         there. Past the end of the data, weekdays stand in for sessions.
         """
+        if expiry in self._sessions:
+            return self._sessions[expiry]
         known = self._history.trading_days(self.day, expiry)
         count = len(known) - 1
         last = known[-1] if known else self.day
@@ -151,7 +154,8 @@ class View:
             while step <= expiry:
                 count += step.weekday() < 5
                 step += timedelta(days=1)
-        return max(0, count)
+        self._sessions[expiry] = max(0, count)
+        return self._sessions[expiry]
 
     def chain(self, expiry: date) -> list[Quote]:
         return self._history.chain_at(expiry, self.now)

@@ -13,7 +13,7 @@ from datetime import time
 
 from optbt.engine import Level
 from optbt.strategies.legs import (
-    ExpiryRule,
+    ExpiryChoice,
     LegsConfig,
     LegStrategy,
     atm_strike,
@@ -38,7 +38,7 @@ class StraddleConfig:
 
 def Straddle(config: StraddleConfig | None = None) -> LegStrategy:  # noqa: N802 - reads as a class
     cfg = config or StraddleConfig()
-    expiry = ExpiryRule.WEEK if cfg.expiry_offset == 0 else ExpiryRule.NEXT_WEEK
+    expiry = ExpiryChoice(nth=cfg.expiry_offset + 1)
     legs = tuple(
         leg.__class__(
             side=leg.side,

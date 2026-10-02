@@ -17,14 +17,16 @@ from optbt.engine import Level, Side
 from optbt.strategies.legs import (
     Adjustment,
     DayFilter,
-    ExpiryRule,
+    ExpiryChoice,
     LegsConfig,
     LegSpec,
     StrikeRule,
 )
 
 #: Bumped when the shape changes in a way an older reader would misread.
-VERSION = 1
+#: 2: the expiry is a choice (series, nth, min_left, days), set on the strategy
+#: and optionally on a leg. Version 1's per-leg "week"/"next_week"/... still read.
+VERSION = 2
 
 
 def _level_out(level: Level | None) -> dict[str, Any] | None:
@@ -33,6 +35,25 @@ def _level_out(level: Level | None) -> dict[str, Any] | None:
 
 def _level_in(raw: dict[str, Any] | None) -> Level | None:
     return None if raw is None else Level(raw["kind"], float(raw["value"]))
+
+
+def _expiry_out(choice: ExpiryChoice | None) -> dict[str, Any] | None:
+    if choice is None:
+        return None
+    return {
+        "series": choice.series,
+        "nth": choice.nth,
+        "min_left": choice.min_left,
+        "days": choice.days,
+    }
+
+
+def _expiry_in(raw: Any, days: int = 45) -> ExpiryChoice | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):  # version 1
+        return ExpiryChoice.from_legacy(raw, days)
+    return ExpiryChoice(**raw)
 
 
 def _time_in(raw: str | time) -> time:
@@ -48,8 +69,7 @@ def to_dict(config: LegsConfig) -> dict[str, Any]:
                 "side": "buy" if leg.side is Side.BUY else "sell",
                 "kind": str(leg.kind),
                 "lots": leg.lots,
-                "expiry": str(leg.expiry),
-                "expiry_days": leg.expiry_days,
+                "expiry": _expiry_out(leg.expiry),
                 "strike": {
                     "mode": leg.strike.mode,
                     "offset": leg.strike.offset,
@@ -62,6 +82,7 @@ def to_dict(config: LegsConfig) -> dict[str, Any]:
             }
             for leg in config.legs
         ],
+        "expiry": _expiry_out(config.expiry),
         "entry": config.entry.isoformat(),
         "exit": config.exit.isoformat(),
         "weekdays": sorted(config.weekdays),
@@ -117,14 +138,14 @@ def from_dict(raw: dict[str, Any]) -> LegsConfig:
                 side=Side.BUY if leg["side"] == "buy" else Side.SELL,
                 kind=Kind(leg["kind"]),
                 lots=int(leg.get("lots", 1)),
-                expiry=ExpiryRule(leg.get("expiry", ExpiryRule.WEEK)),
-                expiry_days=int(leg.get("expiry_days", 45)),
+                expiry=_expiry_in(leg.get("expiry"), int(leg.get("expiry_days", 45))),
                 strike=StrikeRule(**(leg.get("strike") or {})),
                 stop=_level_in(leg.get("stop")),
                 target=_level_in(leg.get("target")),
             )
             for leg in raw["legs"]
         ),
+        expiry=_expiry_in(raw.get("expiry")) or ExpiryChoice(),
         entry=_time_in(raw.get("entry", defaults.entry)),
         exit=_time_in(raw.get("exit", defaults.exit)),
         weekdays=frozenset(raw.get("weekdays", defaults.weekdays)),

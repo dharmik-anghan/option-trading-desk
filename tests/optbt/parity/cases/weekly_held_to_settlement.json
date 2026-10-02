@@ -2,14 +2,18 @@
   "start": "2026-01-05",
   "end": "2026-01-23",
   "spec": {
-    "version": 1,
+    "version": 2,
     "legs": [
       {
         "side": "sell",
         "kind": "CE",
         "lots": 1,
-        "expiry": "week",
-        "expiry_days": 45,
+        "expiry": {
+          "series": "weekly",
+          "nth": 1,
+          "min_left": 0,
+          "days": 45
+        },
         "strike": {
           "mode": "atm",
           "offset": 0,
@@ -24,8 +28,12 @@
         "side": "sell",
         "kind": "PE",
         "lots": 1,
-        "expiry": "week",
-        "expiry_days": 45,
+        "expiry": {
+          "series": "weekly",
+          "nth": 1,
+          "min_left": 0,
+          "days": 45
+        },
         "strike": {
           "mode": "atm",
           "offset": 0,
@@ -40,8 +48,12 @@
         "side": "buy",
         "kind": "CE",
         "lots": 1,
-        "expiry": "week",
-        "expiry_days": 45,
+        "expiry": {
+          "series": "weekly",
+          "nth": 1,
+          "min_left": 0,
+          "days": 45
+        },
         "strike": {
           "mode": "atm",
           "offset": 4,
@@ -56,8 +68,12 @@
         "side": "buy",
         "kind": "PE",
         "lots": 1,
-        "expiry": "week",
-        "expiry_days": 45,
+        "expiry": {
+          "series": "weekly",
+          "nth": 1,
+          "min_left": 0,
+          "days": 45
+        },
         "strike": {
           "mode": "atm",
           "offset": 4,
@@ -69,6 +85,12 @@
         "target": null
       }
     ],
+    "expiry": {
+      "series": "weekly",
+      "nth": 1,
+      "min_left": 0,
+      "days": 45
+    },
     "entry": "09:20:00",
     "exit": "15:35:00",
     "weekdays": [

@@ -14,7 +14,17 @@ export interface OptbtCoverage {
   bars: number;
 }
 
-export type OptbtExpiry = "week" | "next_week" | "month" | "next_month" | "days";
+/**
+ * Which expiry: the `nth` of a series, passing over any with fewer than
+ * `min_left` trading sessions left (1 skips an expiry on its own day).
+ * "days" is the monthly nearest `days` calendar days out.
+ */
+export interface OptbtExpiryChoice {
+  series: "weekly" | "monthly" | "days";
+  nth: number;
+  min_left: number;
+  days: number;
+}
 
 export interface OptbtLevel {
   kind: "pct" | "points";
@@ -26,9 +36,8 @@ export interface OptbtLegIn {
   side: "buy" | "sell";
   kind: "CE" | "PE";
   lots: number;
-  expiry: OptbtExpiry;
-  /** For expiry "days": the monthly nearest this many calendar days out. */
-  expiry_days: number;
+  /** This leg's own expiry; null trades the strategy's. */
+  expiry: OptbtExpiryChoice | null;
   /** atm: `offset` strikes from the money. premium: nearest to `premium`. pct: `pct`% from spot. */
   strike: {
     mode: "atm" | "premium" | "pct" | "delta";
@@ -81,6 +90,7 @@ export interface OptbtRunRequest {
   start: string;
   end: string;
   legs: OptbtLegIn[];
+  expiry: OptbtExpiryChoice;
   entry: string;
   exit: string;
   /** Monday is 0. */

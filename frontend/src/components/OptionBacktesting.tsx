@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getOptbtUnderlyings, runOptbt } from "../api";
-import type { OptbtAdjust, OptbtCoverage, OptbtDays, OptbtResult } from "../api";
+import type { OptbtAdjust, OptbtCoverage, OptbtDays, OptbtExpiryChoice, OptbtResult } from "../api";
 import { BackButton } from "./BackButton";
 import { LegRow } from "./optbt/LegRow";
 import { OptResult } from "./optbt/OptResult";
 import { OPENED } from "./optbt/explore";
-import { PRESETS, copyLeg, leg, toRequest } from "./optbt/legs";
+import { ExpiryPicker } from "./optbt/ExpiryPicker";
+import { NEAREST_WEEKLY, PRESETS, copyLeg, leg, toRequest } from "./optbt/legs";
 import type { LegDraft } from "./optbt/legs";
 
 interface Props {
@@ -57,6 +58,7 @@ export function OptionBacktesting({ onHome }: Props) {
 
   const [legs, setLegs] = useState<LegDraft[]>(() => PRESETS[0].legs());
   const [hold, setHold] = useState<"intraday" | "expiry">("intraday");
+  const [expiry, setExpiry] = useState<OptbtExpiryChoice>(NEAREST_WEEKLY);
   const [entry, setEntry] = useState("09:20");
   const [exit, setExit] = useState("15:15");
   const [weekdays, setWeekdays] = useState<number[]>([0, 1, 2, 3, 4]);
@@ -130,7 +132,8 @@ export function OptionBacktesting({ onHome }: Props) {
       underlying,
       start,
       end,
-      legs: legs.map(toRequest),
+      legs: legs.map((l) => toRequest(l, expiry)),
+      expiry,
       entry,
       exit,
       weekdays,
@@ -220,6 +223,7 @@ export function OptionBacktesting({ onHome }: Props) {
               onClick={() => {
                 setLegs(p.legs());
                 if (p.hold) setHold(p.hold);
+                setExpiry(p.expiry ?? NEAREST_WEEKLY);
                 if (p.targetCredit) setTarget({ value: p.targetCredit, unit: "credit" });
                 if (p.stopCredit) setStop({ value: p.stopCredit, unit: "credit" });
                 setAdjust((a) => ({ ...a, enabled: Boolean(p.adjust) }));
@@ -242,6 +246,7 @@ export function OptionBacktesting({ onHome }: Props) {
               onChange={(next) => update(i, next)}
               onCopy={() => setLegs((all) => [...all.slice(0, i + 1), copyLeg(l), ...all.slice(i + 1)])}
               onRemove={legs.length > 1 ? () => setLegs((all) => all.filter((_, k) => k !== i)) : null}
+              daysSeries={expiry.series === "days"}
             />
           ))}
           <div className="ob-legfoot">
@@ -259,6 +264,7 @@ export function OptionBacktesting({ onHome }: Props) {
         </div>
 
         <div className="ob-timing">
+          <ExpiryPicker value={expiry} onChange={setExpiry} />
           <div className="ob-seg" aria-label="Holding">
             <button className={hold === "intraday" ? "on" : ""} onClick={() => setHold("intraday")}>
               Intraday

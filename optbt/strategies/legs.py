@@ -24,8 +24,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from enum import StrEnum
-from typing import Literal
+from typing import ClassVar, Literal
 
 from analytics import black_scholes as bs
 from broker.models import OptionType
@@ -35,15 +34,41 @@ from optbt.market import OptionKey, Quote, View
 from venues.calendar import NSE_CLOSE
 
 
-class ExpiryRule(StrEnum):
-    WEEK = "week"
-    NEXT_WEEK = "next_week"
-    MONTH = "month"
-    NEXT_MONTH = "next_month"
-    #: The monthly expiry closest to `LegSpec.expiry_days` calendar days out -
-    #: "45 DTE". Monthlies, because that is where a trade that long is placed
-    #: and where the far strikes have a market.
-    DAYS = "days"
+@dataclass(frozen=True)
+class ExpiryChoice:
+    """Which expiry to trade: the `nth` of a series, passing over any too close.
+
+    Weekly 1st with `min_left` 1 is "the nearest weekly, but not on its expiry
+    day - take the next one then". Monthly 2nd is next month.
+    """
+
+    #: "weekly": every listed expiry. "monthly": the month-end ones. "days": the
+    #: monthly nearest `days` calendar days out - "45 DTE" - since that is where a
+    #: trade that long is placed and where the far strikes have a market.
+    series: Literal["weekly", "monthly", "days"] = "weekly"
+    #: 1 is the nearest expiry that qualifies, 2 the one after. Not used by "days".
+    nth: int = 1
+    #: Expiries with fewer trading sessions than this left are passed over: 1
+    #: skips an expiry on its own day, 2 on the day before as well. Sessions, so
+    #: the day before a Monday expiry is the Friday.
+    min_left: int = 0
+    #: For "days": calendar days to expiry to aim for.
+    days: int = 45
+
+    #: What the first version of the spec called each choice.
+    LEGACY: ClassVar[dict[str, tuple[str, int]]] = {
+        "week": ("weekly", 1),
+        "next_week": ("weekly", 2),
+        "month": ("monthly", 1),
+        "next_month": ("monthly", 2),
+        "days": ("days", 1),
+    }
+
+    @classmethod
+    def from_legacy(cls, rule: str, days: int = 45) -> ExpiryChoice:
+        """"week", "next_week", "month", "next_month" or "days", as they were."""
+        series, nth = cls.LEGACY[rule]
+        return cls(series, nth, 0, days)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
@@ -68,9 +93,8 @@ class LegSpec:
     side: Side
     kind: Kind
     lots: int = 1
-    expiry: ExpiryRule = ExpiryRule.WEEK
-    #: For ExpiryRule.DAYS: calendar days to expiry to aim for.
-    expiry_days: int = 45
+    #: None trades the strategy's expiry; set, this leg's own - a calendar's far leg.
+    expiry: ExpiryChoice | None = None
     strike: StrikeRule = field(default_factory=StrikeRule)
     stop: Level | None = None
     target: Level | None = None
@@ -173,6 +197,8 @@ class Adjustment:
 @dataclass(frozen=True)
 class LegsConfig:
     legs: tuple[LegSpec, ...]
+    #: The expiry every leg trades unless it names its own.
+    expiry: ExpiryChoice = field(default_factory=ExpiryChoice)
     entry: time = time(9, 20)
     exit: time = time(15, 15)
     #: Monday is 0.
@@ -228,10 +254,8 @@ def strike_step(chain: list[Quote], atm: float) -> float | None:
 DAYS_SLACK = 20
 
 
-def pick_expiry(
-    view: View, rule: ExpiryRule, *, overnight: bool = False, days: int = 45
-) -> date | None:
-    """The expiry a rule means today.
+def pick_expiry(view: View, choice: ExpiryChoice, *, overnight: bool = False) -> date | None:
+    """The expiry a choice means today.
 
     `overnight` is for a position that will be held past today's close. It
     cannot hold a contract that settles at today's close, so on an expiry day
@@ -239,8 +263,14 @@ def pick_expiry(
     Tuesday 8 Sep 2026 bought the contract expiring that afternoon, and its
     stops were hit within fifteen minutes.
     """
-    if rule is ExpiryRule.DAYS:
-        monthlies = [e for e in view.monthly_expiries() if not overnight or e > view.day]
+    def enough(e: date) -> bool:
+        return choice.min_left == 0 or view.sessions_to(e) >= choice.min_left
+
+    days = choice.days
+    if choice.series == "days":
+        monthlies = [
+            e for e in view.monthly_expiries() if (not overnight or e > view.day) and enough(e)
+        ]
         if not monthlies:
             return None
         # Nearest to the target; on a tie, the later one - more time, not less.
@@ -251,15 +281,17 @@ def pick_expiry(
         if abs((best - view.day).days - days) > DAYS_SLACK:
             return None
         return best
-    if rule in (ExpiryRule.WEEK, ExpiryRule.NEXT_WEEK):
-        found = view.expiries()
-        i = 0 if rule is ExpiryRule.WEEK else 1
-    else:
-        found = view.monthly_expiries()
-        i = 0 if rule is ExpiryRule.MONTH else 1
-    if overnight:
-        found = [e for e in found if e > view.day]
-    return found[i] if len(found) > i else None
+    found = view.expiries() if choice.series == "weekly" else view.monthly_expiries()
+    # Nearest first, and asked about only until the nth has been found: the
+    # sessions to an expiry is a question to the calendar.
+    seen = 0
+    for e in found:
+        if (overnight and e <= view.day) or not enough(e):
+            continue
+        seen += 1
+        if seen == choice.nth:
+            return e
+    return None
 
 
 #: The expiry's settlement moment, for time to expiry.
@@ -412,6 +444,9 @@ class LegStrategy:
         self._tried_today = True
         self._enter(ctx)
 
+    def _expiry_of(self, spec: LegSpec) -> ExpiryChoice:
+        return spec.expiry or self.config.expiry
+
     def _describe(self, view: View, expiry: date) -> dict[str, str | float | int | bool | None]:
         """The day as it stood at this decision - what a trade is tagged with and
         what the day filter judges."""
@@ -442,12 +477,7 @@ class LegStrategy:
         spot = view.spot()
         overnight = self.config.hold == "expiry"
         first = (
-            pick_expiry(
-                view,
-                self.config.legs[0].expiry,
-                overnight=overnight,
-                days=self.config.legs[0].expiry_days,
-            )
+            pick_expiry(view, self._expiry_of(self.config.legs[0]), overnight=overnight)
             if self.config.legs
             else None
         )
@@ -462,7 +492,7 @@ class LegStrategy:
         chains: dict[date, list[Quote]] = {}
         orders: list[tuple[OptionKey, LegSpec]] = []
         for spec in self.config.legs:
-            expiry = pick_expiry(view, spec.expiry, overnight=overnight, days=spec.expiry_days)
+            expiry = pick_expiry(view, self._expiry_of(spec), overnight=overnight)
             if expiry is None:
                 ctx.skip("no expiry listed")
                 return

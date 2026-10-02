@@ -8,62 +8,46 @@
         "side": "sell",
         "kind": "CE",
         "lots": 1,
-        "expiry": {
-          "series": "weekly",
-          "nth": 1,
-          "min_left": 0,
-          "days": 45
-        },
+        "expiry": null,
         "strike": {
-          "mode": "pct",
+          "mode": "atm",
           "offset": 0,
           "premium": 0.0,
-          "pct": 0.5,
+          "pct": 0.0,
           "delta": 0.3
         },
         "stop": {
           "kind": "pct",
-          "value": 0.6
+          "value": 0.25
         },
-        "target": {
-          "kind": "points",
-          "value": 15.0
-        }
+        "target": null
       },
       {
         "side": "sell",
         "kind": "PE",
         "lots": 1,
-        "expiry": {
-          "series": "weekly",
-          "nth": 1,
-          "min_left": 0,
-          "days": 45
-        },
+        "expiry": null,
         "strike": {
-          "mode": "pct",
+          "mode": "atm",
           "offset": 0,
           "premium": 0.0,
-          "pct": 0.5,
+          "pct": 0.0,
           "delta": 0.3
         },
         "stop": {
           "kind": "pct",
-          "value": 0.6
+          "value": 0.25
         },
-        "target": {
-          "kind": "points",
-          "value": 15.0
-        }
+        "target": null
       }
     ],
     "expiry": {
       "series": "weekly",
       "nth": 1,
-      "min_left": 0,
+      "min_left": 1,
       "days": 45
     },
-    "entry": "10:00:00",
+    "entry": "09:20:00",
     "exit": "15:15:00",
     "weekdays": [
       0,
@@ -78,7 +62,7 @@
     "target_credit": null,
     "stop_credit": null,
     "exit_dte": null,
-    "trail_to_cost": false,
+    "trail_to_cost": true,
     "days": {
       "expiry_day": "any",
       "dte_min": null,

@@ -1,4 +1,10 @@
-import type { OptbtExpiry, OptbtLegIn } from "../../api";
+import type { OptbtExpiryChoice, OptbtLegIn } from "../../api";
+
+/** Which of a series: counted nearest first. */
+export const NTH = ["1st", "2nd", "3rd"];
+
+/** The nearest weekly: what a strategy trades unless told otherwise. */
+export const NEAREST_WEEKLY: OptbtExpiryChoice = { series: "weekly", nth: 1, min_left: 0, days: 45 };
 
 /** A leg as the form holds it: every field editable, percentages as the user types them. */
 export interface LegDraft {
@@ -6,8 +12,8 @@ export interface LegDraft {
   side: "buy" | "sell";
   kind: "CE" | "PE";
   lots: number;
-  expiry: OptbtExpiry;
-  expiryDays: number;
+  /** 0 trades the strategy's expiry; 1-3 this leg's own nth of the same series. */
+  expiryNth: number;
   /** "atm" with an offset, "premium" with a target premium, "pct" from spot. */
   strikeMode: "atm" | "premium" | "pct" | "delta";
   offset: number;
@@ -33,8 +39,7 @@ export function leg(
     side,
     kind,
     lots: 1,
-    expiry: "week",
-    expiryDays: 45,
+    expiryNth: 0,
     strikeMode: "atm",
     offset,
     premium: 50,
@@ -60,6 +65,7 @@ export interface Preset {
   legs: () => LegDraft[];
   /** Settings a preset brings with it beyond its legs. */
   hold?: "intraday" | "expiry";
+  expiry?: OptbtExpiryChoice;
   targetCredit?: number;
   stopCredit?: number;
   adjust?: boolean;
@@ -87,6 +93,7 @@ export const PRESETS: Preset[] = [
     name: "45 DTE condor",
     say: "Monthly nearest 45 days: sell 0.30 delta, buy 0.17 delta, wings made equal. Positional; out at 50% of the credit, a loss equal to it, or 15 days to expiry. Moves the untested spread in at a wing.",
     hold: "expiry",
+    expiry: { series: "days", nth: 1, min_left: 0, days: 45 },
     targetCredit: 50,
     stopCredit: 100,
     adjust: true,
@@ -102,8 +109,6 @@ export const PRESETS: Preset[] = [
         ] as const
       ).map(([side, kind, delta]) => ({
         ...leg(side, kind),
-        expiry: "days" as const,
-        expiryDays: 45,
         strikeMode: "delta" as const,
         delta,
       })),
@@ -125,25 +130,17 @@ export const PRESETS: Preset[] = [
   },
 ];
 
-export function toRequest(l: LegDraft): OptbtLegIn {
+export function toRequest(l: LegDraft, expiry: OptbtExpiryChoice): OptbtLegIn {
   const level = (kind: "none" | "pct" | "points", value: number) =>
     kind === "none" ? null : { kind, value: kind === "pct" ? value / 100 : value };
   return {
     side: l.side,
     kind: l.kind,
     lots: l.lots,
-    expiry: l.expiry,
-    expiry_days: l.expiryDays,
+    expiry: l.expiryNth && expiry.series !== "days" ? { ...expiry, nth: l.expiryNth } : null,
     strike: { mode: l.strikeMode, offset: l.offset, premium: l.premium, pct: l.pct, delta: l.delta },
     stop: level(l.stopKind, l.stopValue),
     target: level(l.targetKind, l.targetValue),
   };
 }
 
-export const EXPIRY_LABEL: Record<OptbtExpiry, string> = {
-  week: "This week",
-  next_week: "Next week",
-  month: "This month",
-  next_month: "Next month",
-  days: "Days out…",
-};

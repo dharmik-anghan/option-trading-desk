@@ -325,7 +325,7 @@ def test_a_day_whose_expiry_was_never_fetched_is_skipped_not_traded_elsewhere() 
 
 from optbt.engine import Level  # noqa: E402
 from optbt.strategies.legs import (  # noqa: E402
-    ExpiryRule,
+    ExpiryChoice,
     LegsConfig,
     LegSpec,
     LegStrategy,
@@ -459,7 +459,7 @@ def test_monthly_expiry_is_the_one_futures_expire_on() -> None:
     m = _chain_day(expiry=monthly)
     m.conn.execute("INSERT INTO expiry VALUES ('NIFTY', ?, 'futures')", [monthly])
     m.conn.execute("INSERT INTO expiry VALUES ('NIFTY', ?, 'options')", [EXPIRY])
-    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryRule.MONTH)
+    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryChoice("monthly"))
     (trade,) = _run(m, LegsConfig(legs=(leg,))).trades
     assert trade.legs[0].key.expiry == monthly
 
@@ -580,7 +580,7 @@ def test_a_positional_entry_on_expiry_day_takes_the_next_expiry() -> None:
 
 def test_expiry_by_days_takes_the_monthly_nearest_to_the_target() -> None:
     # From 21 Sep: 27 Oct is 36 days, 24 Nov is 64. Nearest to 45 is 27 Oct.
-    from optbt.strategies.legs import ExpiryRule, LegsConfig, LegSpec, LegStrategy
+    from optbt.strategies.legs import ExpiryChoice, LegsConfig, LegSpec, LegStrategy
 
     oct_, nov = date(2026, 10, 27), date(2026, 11, 24)
     m = Market()
@@ -589,7 +589,7 @@ def test_expiry_by_days_takes_the_monthly_nearest_to_the_target() -> None:
         m.conn.execute("INSERT INTO expiry VALUES ('NIFTY', ?, 'futures')", [e])
         for kind in (Kind.CALL, Kind.PUT):
             m.option(DAY, 23450.0, kind, 100.0, expiry=e)
-    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryRule.DAYS, expiry_days=45)
+    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryChoice("days", days=45))
     cfg = LegsConfig(legs=(leg,), hold="expiry", exit=time(23, 0))
     (trade,) = Engine(m.history(), LegStrategy(cfg), FREE).run(DAY, DAY).trades
     assert trade.legs[0].key.expiry == oct_
@@ -723,14 +723,14 @@ def test_a_delta_the_chain_does_not_reach_is_refused() -> None:
 
 def test_no_expiry_near_the_days_asked_for_is_a_skip_not_a_short_trade() -> None:
     # Only 25 Sep is listed - 4 days out. A "45 DTE" trade must not take it.
-    from optbt.strategies.legs import ExpiryRule, LegsConfig, LegSpec, LegStrategy
+    from optbt.strategies.legs import ExpiryChoice, LegsConfig, LegSpec, LegStrategy
 
     m = Market()
     m.index(DAY)
     near = date(2026, 9, 25)
     m.conn.execute("INSERT INTO expiry VALUES ('NIFTY', ?, 'futures')", [near])
     m.option(DAY, 23450.0, Kind.CALL, 100.0, expiry=near)
-    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryRule.DAYS, expiry_days=45)
+    leg = LegSpec(Side.SELL, Kind.CALL, expiry=ExpiryChoice("days", days=45))
     strategy = LegStrategy(LegsConfig(legs=(leg,), hold="expiry"))
     result = Engine(m.history(), strategy, FREE).run(DAY, DAY)
     assert result.trades == [] and result.skipped == {"no expiry listed": 1}

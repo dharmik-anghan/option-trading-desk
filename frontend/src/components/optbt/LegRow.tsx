@@ -1,5 +1,4 @@
-import type { OptbtExpiry } from "../../api";
-import { EXPIRY_LABEL } from "./legs";
+import { NTH } from "./legs";
 import type { LegDraft } from "./legs";
 
 interface Props {
@@ -8,6 +7,8 @@ interface Props {
   onChange: (leg: LegDraft) => void;
   onCopy: () => void;
   onRemove: (() => void) | null;
+  /** A "≈ days out" strategy has one expiry; a leg cannot name the 2nd of it. */
+  daysSeries: boolean;
 }
 
 /** ITM 10 … ATM … OTM 10, counted in listed strikes from the money. */
@@ -17,9 +18,9 @@ const offsetLabel = (o: number) => (o === 0 ? "ATM" : o > 0 ? `OTM ${o}` : `ITM 
 
 /**
  * One leg, read left to right like the order it stands for:
- * sell · CE · 1 lot · this week · ATM · stop 25% · no target.
+ * sell · CE · 1 lot · same expiry · ATM · stop 25% · no target.
  */
-export function LegRow({ index, leg, onChange, onCopy, onRemove }: Props) {
+export function LegRow({ index, leg, onChange, onCopy, onRemove, daysSeries }: Props) {
   const set = <K extends keyof LegDraft>(key: K, value: LegDraft[K]) =>
     onChange({ ...leg, [key]: value });
 
@@ -69,30 +70,21 @@ export function LegRow({ index, leg, onChange, onCopy, onRemove }: Props) {
         <span>{leg.lots === 1 ? "lot" : "lots"}</span>
       </label>
 
-      <div className="ob-strike">
-        <select
-          value={leg.expiry}
-          onChange={(e) => set("expiry", e.target.value as OptbtExpiry)}
-          aria-label="Expiry"
-          title={leg.expiry === "days" ? "The monthly expiry nearest this many calendar days out" : undefined}
-        >
-          {(Object.keys(EXPIRY_LABEL) as OptbtExpiry[]).map((k) => (
-            <option key={k} value={k}>
-              {EXPIRY_LABEL[k]}
-            </option>
-          ))}
-        </select>
-        {leg.expiry === "days" && (
-          <input
-            type="number"
-            min={1}
-            max={120}
-            value={leg.expiryDays}
-            onChange={(e) => set("expiryDays", Math.max(1, Number(e.target.value)))}
-            aria-label="Days to expiry"
-          />
-        )}
-      </div>
+      <select
+        className="ob-legexp"
+        value={daysSeries ? 0 : leg.expiryNth}
+        disabled={daysSeries}
+        onChange={(e) => set("expiryNth", Number(e.target.value))}
+        aria-label="Expiry"
+        title="This leg's own expiry, for a calendar - the nth of the strategy's series"
+      >
+        <option value={0}>Same expiry</option>
+        {NTH.map((label, k) => (
+          <option key={label} value={k + 1}>
+            {label} expiry
+          </option>
+        ))}
+      </select>
 
       <div className="ob-strike">
         <select

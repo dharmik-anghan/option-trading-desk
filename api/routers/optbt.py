@@ -37,7 +37,6 @@ from optbt.market import OptionKey
 from optbt.results import summarise
 from optbt.spec import from_dict as spec_from_dict
 from optbt.strategies.legs import (
-    ExpiryRule,
     LegsConfig,
     LegStrategy,
 )
@@ -152,14 +151,26 @@ class StrikeIn(BaseModel):
     delta: float = Field(default=0.30, gt=0, lt=1)
 
 
+class ExpiryIn(BaseModel):
+    """Which expiry: see optbt.strategies.legs.ExpiryChoice."""
+
+    model_config = STRICT
+
+    series: Literal["weekly", "monthly", "days"] = "weekly"
+    nth: int = Field(default=1, ge=1, le=3)
+    #: Trading sessions an expiry must have left to be taken; 1 skips it on its own day.
+    min_left: int = Field(default=0, ge=0, le=10)
+    days: int = Field(default=45, ge=1, le=120)
+
+
 class LegIn(BaseModel):
     model_config = STRICT
 
     side: Literal["buy", "sell"]
     kind: Literal["CE", "PE"]
     lots: int = Field(default=1, ge=1, le=100)
-    expiry: ExpiryRule = ExpiryRule.WEEK
-    expiry_days: int = Field(default=45, ge=1, le=120)
+    #: This leg's own expiry; none trades the strategy's.
+    expiry: ExpiryIn | None = None
     strike: StrikeIn = Field(default_factory=StrikeIn)
     stop: LevelIn | None = None
     target: LevelIn | None = None
@@ -208,6 +219,7 @@ class RunRequest(BaseModel):
     start: date
     end: date
     legs: list[LegIn] = Field(min_length=1, max_length=8)
+    expiry: ExpiryIn = Field(default_factory=ExpiryIn)
     entry: time = time(9, 20)
     exit: time = time(15, 15)
     #: Monday is 0.

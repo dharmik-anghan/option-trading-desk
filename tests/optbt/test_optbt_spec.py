@@ -14,7 +14,7 @@ from optbt.spec import VERSION, from_dict, to_dict
 from optbt.strategies.legs import (
     Adjustment,
     DayFilter,
-    ExpiryRule,
+    ExpiryChoice,
     LegsConfig,
     LegSpec,
     StrikeRule,
@@ -35,19 +35,12 @@ CONFIGS = {
     ),
     "adjusted delta condor": LegsConfig(
         legs=(
-            LegSpec(
-                Side.SELL, Kind.CALL, expiry=ExpiryRule.DAYS, strike=StrikeRule("delta", delta=0.3)
-            ),
-            LegSpec(
-                Side.BUY, Kind.CALL, expiry=ExpiryRule.DAYS, strike=StrikeRule("delta", delta=0.17)
-            ),
-            LegSpec(
-                Side.SELL, Kind.PUT, expiry=ExpiryRule.DAYS, strike=StrikeRule("delta", delta=0.3)
-            ),
-            LegSpec(
-                Side.BUY, Kind.PUT, expiry=ExpiryRule.DAYS, strike=StrikeRule("delta", delta=0.17)
-            ),
+            LegSpec(Side.SELL, Kind.CALL, strike=StrikeRule("delta", delta=0.3)),
+            LegSpec(Side.BUY, Kind.CALL, strike=StrikeRule("delta", delta=0.17)),
+            LegSpec(Side.SELL, Kind.PUT, strike=StrikeRule("delta", delta=0.3)),
+            LegSpec(Side.BUY, Kind.PUT, strike=StrikeRule("delta", delta=0.17)),
         ),
+        expiry=ExpiryChoice("days", min_left=3),
         entry=time(10, 0),
         hold="expiry",
         weekdays=frozenset({0}),
@@ -64,14 +57,14 @@ CONFIGS = {
                 Side.SELL,
                 Kind.CALL,
                 lots=2,
-                expiry=ExpiryRule.NEXT_WEEK,
+                expiry=ExpiryChoice(nth=2),
                 strike=StrikeRule("pct", pct=2.0),
                 target=Level("points", 20),
             ),
             LegSpec(
                 Side.SELL,
                 Kind.PUT,
-                expiry=ExpiryRule.NEXT_WEEK,
+                expiry=ExpiryChoice(nth=2),
                 strike=StrikeRule("premium", premium=60),
             ),
         ),
@@ -119,3 +112,21 @@ def test_an_api_request_is_read_as_the_same_spec() -> None:
     body = {k: v for k, v in to_dict(config).items() if k != "version"}
     body |= {"start": "2025-01-01", "end": "2025-06-30"}
     assert RunRequest.model_validate_json(json.dumps(body)).config() == config
+
+
+def test_a_version_1_spec_reads_as_the_choice_it_meant() -> None:
+    """Version 1 named each leg's expiry; each name is one choice now."""
+    raw = {
+        "version": 1,
+        "legs": [
+            {"side": "sell", "kind": "CE", "expiry": "next_week"},
+            {"side": "buy", "kind": "CE", "expiry": "days", "expiry_days": 30},
+            {"side": "sell", "kind": "PE"},
+        ],
+    }
+    legs = from_dict(raw).legs
+    assert [leg.expiry for leg in legs] == [
+        ExpiryChoice("weekly", nth=2),
+        ExpiryChoice("days", days=30),
+        None,
+    ]

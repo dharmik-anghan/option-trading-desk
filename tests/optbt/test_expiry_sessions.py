@@ -9,7 +9,8 @@ import duckdb
 import pytest
 
 from optbt.data.history import History
-from optbt.strategies.legs import DayFilter
+from optbt.market import View
+from optbt.strategies.legs import DayFilter, ExpiryChoice, pick_expiry
 from tests.optbt.parity.market import build
 
 HOLIDAY_EXPIRY = date(2026, 1, 15)
@@ -22,10 +23,12 @@ def history() -> Iterator[History]:
     conn.close()
 
 
-def _sessions(history: History, day: date, expiry: date) -> int:
-    from optbt.market import View
+def _view(history: History, day: date) -> View:
+    return View(history, day, history.index_day(day))
 
-    return View(history, day, history.index_day(day)).sessions_to(expiry)
+
+def _sessions(history: History, day: date, expiry: date) -> int:
+    return _view(history, day).sessions_to(expiry)
 
 
 @pytest.mark.parametrize(
@@ -60,3 +63,33 @@ def test_skip_eve_keeps_off_the_expiry_session_and_the_one_before(left: int, tra
 
 def test_skip_eve_does_not_trade_when_the_distance_is_unknown() -> None:
     assert DayFilter(expiry_day="skip_eve").why_not({}) is not None
+
+
+# Weeklies 8, 15 (a holiday, settling the 14th), 22, 29 Jan; monthly 29 Jan.
+@pytest.mark.parametrize(
+    ("day", "choice", "picked"),
+    [
+        # Nearest weekly, as "this week" always was.
+        (date(2026, 1, 8), ExpiryChoice(), date(2026, 1, 8)),
+        # Not on its own day: the next one.
+        (date(2026, 1, 8), ExpiryChoice(min_left=1), date(2026, 1, 15)),
+        (date(2026, 1, 7), ExpiryChoice(min_left=1), date(2026, 1, 8)),
+        # Not on the day before either.
+        (date(2026, 1, 7), ExpiryChoice(min_left=2), date(2026, 1, 15)),
+        # The holiday weekly settles on the 14th, so the 14th is its expiry day.
+        (date(2026, 1, 14), ExpiryChoice(min_left=1), date(2026, 1, 22)),
+        # The 2nd counts from what is left, not from the calendar.
+        (date(2026, 1, 8), ExpiryChoice(nth=2), date(2026, 1, 15)),
+        (date(2026, 1, 8), ExpiryChoice(nth=2, min_left=1), date(2026, 1, 22)),
+        (date(2026, 1, 20), ExpiryChoice("monthly"), date(2026, 1, 29)),
+    ],
+)
+def test_the_expiry_picked_passes_over_any_too_close(
+    history: History, day: date, choice: ExpiryChoice, picked: date
+) -> None:
+    assert pick_expiry(_view(history, day), choice) == picked
+
+
+def test_no_expiry_qualifying_is_no_expiry(history: History) -> None:
+    # The data lists two monthlies; there is no 3rd.
+    assert pick_expiry(_view(history, date(2026, 1, 5)), ExpiryChoice("monthly", nth=3)) is None

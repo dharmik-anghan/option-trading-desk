@@ -4280,6 +4280,18 @@ a.nitem:hover .nhead {
 .ob-lots input {
   width: 44px;
 }
+/* "at least N days left" beside the expiry picker: a small box, as the lots are. */
+.ob-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.ob-strike .ob-left input {
+  width: 44px;
+}
 .ob-strike {
   display: flex;
   gap: 5px;
