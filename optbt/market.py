@@ -31,8 +31,9 @@ import duckdb
 
 from optbt.data.models import Kind
 from optbt.data.source import INDEX_SYMBOL
+from venues.calendar import NSE_OPEN
 
-SESSION_OPEN = time(9, 15)
+SESSION_OPEN = NSE_OPEN
 SESSION_LAST_BAR = time(15, 29)
 
 #: Every lot size each index has used. Per underlying, because a size from another
@@ -284,9 +285,6 @@ class History:
             f"SELECT DISTINCT volume FROM option_bar WHERE {where} AND volume > 0", params
         ).fetchall()
         return [r[0] for r in oi], [r[0] for r in volume]
-
-    def _open_interest(self, day: date, expiry: date | None) -> list[int]:
-        return self._figures(day, expiry)[0]
 
 
 def _vote_lot(

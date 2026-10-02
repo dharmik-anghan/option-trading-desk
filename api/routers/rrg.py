@@ -24,7 +24,6 @@ from pydantic import BaseModel
 from analytics.rrg import DEFAULT_WINDOW, Quadrant, rrg
 from api.deps import bar_service
 from backtest.resample import resample
-from broker.session import IST
 from marketdata import BarService, Interval
 from marketdata.models import Bar
 from universe.nse import (
@@ -36,6 +35,7 @@ from universe.nse import (
     index,
     sectors,
 )
+from venues.calendar import IST
 
 router = APIRouter(tags=["rrg"], prefix="/api/rrg")
 

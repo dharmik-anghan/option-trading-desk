@@ -12,10 +12,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from marketdata.models import Bar, Interval
+from marketdata.errors import RateLimited, Unavailable
+from marketdata.models import Bar, Fetched, Interval
 from marketdata.service import AFTER_REFUSAL, MIN_BETWEEN_FETCHES, BarService
 from marketdata.store import BarStore
-from marketdata.yahoo import Fetched, RateLimited, Unavailable
 
 
 class FakeSource:

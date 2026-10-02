@@ -22,14 +22,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
-from api.dependencies import broker_for
 from api.deps import DbPathDep
 from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
+from broker.factory import broker_for
 from broker.models import OrderRequest as BrokerOrderRequest
 from broker.models import Tick
-from broker.shark.models import ContractSpec
+from broker.perp_models import ContractSpec
 from risk.perps import check_perp_order
 from settings import load_settings
 from storage.perp_order_repo import note_outcome, recent_orders, record_order

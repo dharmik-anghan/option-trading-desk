@@ -17,50 +17,9 @@ export interface PortfolioResponse {
   total_pnl: number;
 }
 
-export interface Leg {
-  option_type: "CE" | "PE";
-  strike: number;
-  premium: number;
-  quantity: number;
-  side: "BUY" | "SELL";
-  symbol: string | null;
-}
-
-export interface RiskCheck {
-  passed: boolean;
-  reason: string;
-}
-
 export interface PayoffPoint {
   spot: number;
   payoff: number;
-}
-
-export interface StrategySignalResponse {
-  strategy: string;
-  symbol: string;
-  underlying_ltp: number;
-  legs: Leg[];
-  // null means unbounded (the backend can't send Infinity - it isn't valid JSON).
-  max_profit: number | null;
-  max_loss: number | null;
-  breakevens: number[];
-  payoff_curve: PayoffPoint[];
-  /** Mark-to-market now. Empty when the feed had no usable IV to price with. */
-  payoff_curve_today: PayoffPoint[];
-  days_to_expiry: number | null;
-  pre_trade_checks: RiskCheck[];
-  can_place: boolean;
-}
-
-export interface OrderResult {
-  order_id: string;
-  message: string;
-}
-
-export interface PlaceOrderResponse {
-  orders: OrderResult[];
-  basket_id: number;
 }
 
 export interface BasketLeg {
@@ -253,39 +212,12 @@ export function getPortfolio(): Promise<PortfolioResponse> {
   return getJson<PortfolioResponse>("/api/portfolio");
 }
 
-export function getStrategySignal(
-  strategy: string,
-  symbol: string,
-  quantity: number,
-  expiry = "",
-): Promise<StrategySignalResponse> {
-  const params = new URLSearchParams({ symbol, quantity: String(quantity) });
-  if (expiry) params.set("expiry", expiry);
-  return getJson<StrategySignalResponse>(`/api/strategies/${strategy}?${params}`);
-}
-
 export function getPortfolioHistory(days = 7): Promise<PortfolioHistoryPoint[]> {
   return getJson<PortfolioHistoryPoint[]>(`/api/portfolio/history?days=${days}`);
 }
 
-export function placeOrder(
-  strategy: string,
-  symbol: string,
-  quantity: number,
-  expiry = "",
-): Promise<PlaceOrderResponse> {
-  return postJson<
-    { strategy: string; symbol: string; quantity: number; expiry: string },
-    PlaceOrderResponse
-  >("/api/orders/place", { strategy, symbol, quantity, expiry });
-}
-
 export function getBaskets(live = false): Promise<Basket[]> {
   return getJson<Basket[]>(`/api/baskets${live ? "?live=true" : ""}`);
-}
-
-export function getBasket(id: number): Promise<Basket> {
-  return getJson<Basket>(`/api/baskets/${id}`);
 }
 
 export interface NewBasketLegInput {
@@ -392,10 +324,6 @@ export interface HistoryMoment {
 /** Read fills from the broker and apply them to structures. Read-only toward the broker. */
 export function syncBaskets(days = 7): Promise<SyncReport> {
   return postJson<Record<string, never>, SyncReport>(`/api/baskets/sync?days=${days}`, {});
-}
-
-export function getPendingFills(): Promise<PendingFill[]> {
-  return getJson<PendingFill[]>("/api/baskets/fills/pending");
 }
 
 export function assignFills(
@@ -713,25 +641,6 @@ export function placePerpOrder(order: PerpOrder): Promise<PerpOrderResult> {
   return postJson<PerpOrder, PerpOrderResult>("/api/perps/orders", order);
 }
 
-export interface PerpOrderRecord {
-  id: number;
-  at: string;
-  symbol: string;
-  side: string;
-  order_type: string;
-  quantity: number;
-  price: number | null;
-  leverage: number;
-  notional: number;
-  sent: boolean;
-  reason: string;
-  venue_order_id: string | null;
-}
-
-export function getPerpOrders(limit = 50): Promise<PerpOrderRecord[]> {
-  return getJson<PerpOrderRecord[]>(`/api/perps/orders?limit=${limit}`);
-}
-
 export interface CloseResult {
   closed: boolean;
   outcome: string;
@@ -958,10 +867,6 @@ export function getAlerts(limit = 200): Promise<AlertsResponse> {
 export async function clearAlerts(): Promise<void> {
   const response = await fetch(`${API_BASE}/api/alerts/clear`, { method: "POST" });
   if (!response.ok) throw new Error(await extractErrorMessage(response));
-}
-
-export function saveLimits(limits: Limits): Promise<Limits> {
-  return putJson<Limits, Limits>("/api/alerts/limits", limits);
 }
 
 export function addWatch(watch: NewWatch): Promise<Watch> {
@@ -1443,10 +1348,6 @@ export interface OptbtSeries {
 export interface OptbtReplay {
   spot: OptbtSeries;
   legs: OptbtSeries[];
-}
-
-export function getOptbtCoverage(): Promise<OptbtCoverage> {
-  return getJson<OptbtCoverage>("/api/optbt/coverage");
 }
 
 /** Every underlying the option store holds, with its tradable window. */

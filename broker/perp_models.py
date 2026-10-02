@@ -1,4 +1,8 @@
-"""A leveraged position, which the shared `Position` cannot describe.
+"""Perpetual futures: a leveraged position, and what a venue will accept.
+
+Venue-neutral, like `broker/models.py`; any perpetuals adapter returns these.
+
+A leveraged position is one the shared `Position` cannot describe.
 
 `broker/models.Position` is an options position: a symbol, a signed quantity, an
 average price and a P&L. A perpetual adds the things that decide whether it

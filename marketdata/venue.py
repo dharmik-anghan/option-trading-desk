@@ -20,8 +20,8 @@ from datetime import UTC, date, datetime, timedelta
 from broker.base import MarketData
 from broker.errors import BrokerError
 from broker.errors import RateLimited as BrokerRateLimited
-from marketdata.models import Bar, Interval
-from marketdata.yahoo import Fetched, RateLimited, Unavailable
+from marketdata.errors import RateLimited, Unavailable
+from marketdata.models import Bar, Fetched, Interval
 
 log = logging.getLogger(__name__)
 

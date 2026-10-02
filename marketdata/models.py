@@ -71,3 +71,14 @@ class Bar:
     low: float
     close: float
     volume: float
+
+
+@dataclass(frozen=True)
+class Fetched:
+    """What one request to a bar source returned, and what the source said about it."""
+
+    bars: list[Bar]
+    #: The source's own name for the instrument, for showing beside a chart drawn
+    #: from it - "Gold Dec 26" is worth seeing when the desk trades a perpetual.
+    name: str
+    currency: str

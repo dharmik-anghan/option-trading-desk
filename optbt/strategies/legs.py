@@ -32,6 +32,7 @@ from broker.models import OptionType
 from optbt.data.models import Kind
 from optbt.engine import Context, Leg, Level, Side
 from optbt.market import OptionKey, Quote, View
+from venues.calendar import NSE_CLOSE
 
 
 class ExpiryRule(StrEnum):
@@ -257,7 +258,7 @@ def pick_expiry(
 
 
 #: The expiry's settlement moment, for time to expiry.
-EXPIRY_CLOSE = time(15, 30)
+EXPIRY_CLOSE = NSE_CLOSE
 
 
 def strike_deltas(
@@ -670,23 +671,10 @@ def straddle(stop: Level | None = QUARTER) -> tuple[LegSpec, ...]:
     return (_leg(Side.SELL, Kind.CALL, 0, stop), _leg(Side.SELL, Kind.PUT, 0, stop))
 
 
-def strangle(width: int = 2, stop: Level | None = QUARTER) -> tuple[LegSpec, ...]:
-    return (_leg(Side.SELL, Kind.CALL, width, stop), _leg(Side.SELL, Kind.PUT, width, stop))
-
-
 def iron_condor(short: int = 4, wing: int = 4) -> tuple[LegSpec, ...]:
     return (
         _leg(Side.SELL, Kind.CALL, short),
         _leg(Side.BUY, Kind.CALL, short + wing),
         _leg(Side.SELL, Kind.PUT, short),
         _leg(Side.BUY, Kind.PUT, short + wing),
-    )
-
-
-def iron_fly(wing: int = 4) -> tuple[LegSpec, ...]:
-    return (
-        _leg(Side.SELL, Kind.CALL, 0),
-        _leg(Side.BUY, Kind.CALL, wing),
-        _leg(Side.SELL, Kind.PUT, 0),
-        _leg(Side.BUY, Kind.PUT, wing),
     )

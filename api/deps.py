@@ -1,7 +1,11 @@
-"""Typed dependency annotations, shared by every router.
+"""FastAPI dependencies: the providers, and the typed annotations routers use.
 
 Held apart from `api/app.py` so a router can import them without importing the
 application - which would be a cycle, since `app.py` imports the routers.
+
+Providers are thin functions rather than values built at import, so tests can
+override them via `app.dependency_overrides` with a `FakeBroker` or a temporary
+database, without real credentials or the real `data/trading.db`.
 """
 
 from __future__ import annotations
@@ -11,12 +15,42 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from api.dependencies import get_broker, get_db_path, get_feeds, get_holidays
+import paths
 from broker.base import OptionsBroker
+from broker.factory import options_broker
 from feeds.fetch import Feeds
 from feeds.holidays import Holidays
 from marketdata import BarService, BarStore
 from marketdata.holder import BarStoreHolder
+
+
+def get_broker() -> OptionsBroker:
+    """The options desk's broker. See `broker/factory.py`."""
+    return options_broker()
+
+
+def get_db_path() -> Path:
+    """Where the database lives. Honours `DB_PATH`, like every script does."""
+    return paths.db_path()
+
+
+# One set of feeds for the process, so the calendar is fetched a few times a
+# day rather than once per request. Holds its own cache - see feeds/fetch.py.
+_feeds = Feeds()
+
+
+def get_feeds() -> Feeds:
+    return _feeds
+
+
+# The exchange's holiday list, fetched once a day. Shared so the session check
+# does not go to the network on every request.
+_holidays = Holidays()
+
+
+def get_holidays() -> Holidays:
+    return _holidays
+
 
 BrokerDep = Annotated[OptionsBroker, Depends(get_broker)]
 FeedsDep = Annotated[Feeds, Depends(get_feeds)]

@@ -302,7 +302,6 @@
   grid-area: baskets;
 }
 
-
 /* ---------- toolbar ---------- */
 .topbar {
   grid-area: tb;
@@ -479,27 +478,6 @@
   border-color: var(--dn);
   color: var(--dn);
 }
-.bbtn {
-  border: 1px solid transparent;
-  border-radius: 3px;
-  padding: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: var(--u);
-  width: 100%;
-}
-.bbtn.buy {
-  background: var(--you);
-  color: var(--you-fg);
-}
-.bbtn.sell {
-  background: var(--sell);
-  color: var(--sell-fg);
-}
-.bbtn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 
 .field {
   display: grid;
@@ -588,27 +566,6 @@ tr.total td {
 .sec .dim {
   font-weight: 400;
 }
-
-/* ---------- instrument rail ---------- */
-.inst {
-  padding: 7px 9px;
-  border-bottom: 1px solid var(--grid);
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border-top: 0;
-  border-right: 0;
-  display: block;
-}
-.inst:hover {
-  background: var(--selbg);
-}
-.inst.on {
-  border-left-color: var(--you);
-  background: var(--selbg);
-}
 .irow {
   display: flex;
   justify-content: space-between;
@@ -618,16 +575,6 @@ tr.total td {
 .irow + .irow {
   margin-top: 2px;
   font-size: 10.5px;
-}
-.inst b {
-  font-weight: 600;
-  font-size: 12.5px;
-}
-.ipx {
-  font-family: var(--n);
-  font-variant-numeric: tabular-nums;
-  font-size: 13.5px;
-  font-weight: 500;
 }
 .irow.dim span:last-child {
   font-family: var(--n);
@@ -843,21 +790,6 @@ tr.total td {
   align-items: baseline;
   line-height: 1.4;
 }
-.checks .mk {
-  flex: none;
-  font-family: var(--n);
-  font-weight: 700;
-}
-.build-foot {
-  padding: 9px 10px;
-  border-top: 1px solid var(--line);
-  display: grid;
-  gap: 7px;
-}
-.warn-live {
-  color: var(--dn);
-  line-height: 1.4;
-}
 
 /* ---------- confirm dialog ---------- */
 .ask {
@@ -1008,44 +940,6 @@ tr.total td {
   cursor: not-allowed;
 }
 
-/* ---------- market context strip ---------- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-}
-.stats .st {
-  padding: 5px 9px;
-  border-right: 1px solid var(--grid);
-  min-width: 0;
-}
-.stats .st:last-child {
-  border-right: 0;
-}
-.stats i {
-  display: block;
-  font-style: normal;
-  color: var(--dim);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  margin-bottom: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.stats b {
-  font-family: var(--n);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-/* strike-valued figures carry the market hue, per the colour law */
-.stats .st.k b {
-  color: var(--mkt);
-}
-
 /* ---------- expiry selector ---------- */
 .expiry {
   display: flex;
@@ -1073,18 +967,6 @@ tr.total td {
 .tag.m {
   background: color-mix(in srgb, var(--mkt) 20%, transparent);
   color: var(--mkt);
-}
-
-/* A proposed leg is an outline; a held one is filled. Same shape, so the
-   chain reads at a glance as "what I have" versus "what I'm considering". */
-.leg.proposed {
-  background: transparent;
-  color: var(--you);
-  box-shadow: inset 0 0 0 1px var(--you);
-}
-.leg.s.proposed {
-  color: var(--sell);
-  box-shadow: inset 0 0 0 1px var(--sell);
 }
 
 /* ---------- market watch ---------- */
@@ -1486,46 +1368,6 @@ a.nitem:hover .nhead {
 }
 .a-watch {
   min-height: 0;
-}
-
-/* ---------- venue switch ----------
-   Two words in the top-left corner. Bordered as one control rather than two
-   buttons, because it is one choice with two positions. */
-.venuesw {
-  display: flex;
-  align-self: center;
-  margin-right: 12px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.venuesw button {
-  font: inherit;
-  font-family: var(--u);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--dim);
-  background: transparent;
-  border: 0;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-.venuesw button + button {
-  border-left: 1px solid var(--line);
-}
-.venuesw button:hover {
-  color: var(--fg);
-}
-/* The selected desk uses the selection hue, the same one a chosen row and a
-   picked strike use. It is a choice of yours, not a market fact. */
-.venuesw button.on {
-  background: var(--you);
-  color: var(--you-fg);
-}
-.venuesw button:focus-visible {
-  outline: 2px solid var(--you);
-  outline-offset: -2px;
 }
 
 /* ---------- instrument rail ---------- */

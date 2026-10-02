@@ -38,7 +38,7 @@ from broker.models import (
     Quote,
     Tick,
 )
-from broker.shark.models import ContractSpec, PerpPosition
+from broker.perp_models import ContractSpec, PerpPosition
 
 
 @runtime_checkable

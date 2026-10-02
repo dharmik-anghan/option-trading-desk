@@ -13,12 +13,11 @@ from typing import Any
 import pytest
 import requests
 
+from marketdata.errors import RateLimited, Unavailable
 from marketdata.models import Interval
 from marketdata.yahoo import (
     FOR_SYMBOL,
     MAX_RANGE_DAYS,
-    RateLimited,
-    Unavailable,
     YahooBars,
     parse_chart,
     yahoo_symbol,

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -26,6 +26,7 @@ from api.schemas import (
     PayoffPoint,
 )
 from api.store import open_db
+from broker.base import FillHistory
 from broker.models import OptionChain, OptionChainRow
 from broker.symbols import parse_contract, series_prefix
 from execution.basket_history import closed_at as basket_closed_at
@@ -49,6 +50,7 @@ from storage.basket_repo import close_leg as repo_close_leg
 from storage.basket_repo import delete_basket as repo_delete_basket
 from storage.basket_repo import delete_leg as repo_delete_leg
 from storage.basket_repo import list_baskets as repo_list_baskets
+from venues.calendar import IST
 
 router = APIRouter()
 
@@ -403,9 +405,6 @@ def put_levels(basket_id: int, body: LevelsRequest, db_path: DbPathDep) -> Baske
 # database. No order is placed, changed or cancelled by any of it: the sync is
 # handed the broker for `get_fills` and `get_positions` alone.
 
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
 class SuggestionOut(BaseModel):
     basket_id: int
     basket_name: str
@@ -476,14 +475,14 @@ def sync_with_broker(db_path: DbPathDep, broker: BrokerDep, days: int = 7) -> Sy
     structure, for you to confirm. Safe to call as often as you like: a fill
     already applied is never applied again.
     """
-    if not hasattr(broker, "get_fills"):
+    if not isinstance(broker, FillHistory):
         raise HTTPException(status_code=400, detail="this venue does not report fills")
     today = datetime.now(IST).date()
     conn = open_db(db_path)
     try:
         report = sync_fills(
             conn,
-            broker,  # type: ignore[arg-type]
+            broker,
             since=today - timedelta(days=max(0, min(days, 60))),
             until=today,
             now=datetime.now(UTC),

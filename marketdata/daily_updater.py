@@ -22,9 +22,9 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 
 from broker.errors import RateLimited
-from broker.session import IST
 from marketdata.models import Bar, Interval, Series
 from marketdata.store import BarStore
+from venues.calendar import IST
 
 log = logging.getLogger(__name__)
 

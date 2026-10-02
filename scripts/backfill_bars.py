@@ -31,13 +31,14 @@ import time  # noqa: E402
 
 import duckdb  # noqa: E402
 
+import paths  # noqa: E402
 from marketdata.backfill import backfill, resume_from  # noqa: E402
 from marketdata.binance import BinanceBars, binance_symbol  # noqa: E402
 from marketdata.funding import BinanceFunding, funding_symbol  # noqa: E402
 from marketdata.models import Interval, Series  # noqa: E402
 from marketdata.store import BarStore  # noqa: E402
 
-DEFAULT_STORE = REPO_ROOT / "data" / "bars.duckdb"
+DEFAULT_STORE = paths.bars_path()
 
 
 def _funding(symbol: str, start: datetime, store_path: Path, *, dry_run: bool) -> int:

@@ -23,7 +23,6 @@ it settles at expiry.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import IntEnum
@@ -251,13 +250,10 @@ class Engine:
         history: History,
         strategy: Strategy,
         costs: CostModel | None = None,
-        *,
-        on_day: Callable[[date], None] | None = None,
     ) -> None:
         self.history = history
         self.strategy = strategy
         self.costs = costs or CostModel()
-        self._on_day = on_day
         self.pending: list[_Order] = []
         self.trade: Trade | None = None
         self.view: View
@@ -286,8 +282,6 @@ class Engine:
             if not bars:
                 continue
             self.view = View(self.history, day, bars, self)
-            if self._on_day:
-                self._on_day(day)
             self.strategy.on_day(ctx)
             for i, bar in enumerate(bars):
                 self._fill(day, bar)

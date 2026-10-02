@@ -20,7 +20,7 @@ from api.routers import perps as perps_router
 from broker.errors import BrokerError
 from broker.models import Candle, OrderResult, Tick
 from broker.models import OrderRequest as BrokerOrderRequest
-from broker.shark.models import ContractSpec, PerpPosition
+from broker.perp_models import ContractSpec, PerpPosition
 from streaming import TickHub
 
 

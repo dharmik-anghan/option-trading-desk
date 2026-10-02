@@ -21,8 +21,8 @@ from typing import Any
 
 import requests
 
-from marketdata.models import Bar, Interval
-from marketdata.yahoo import Fetched, RateLimited, Unavailable
+from marketdata.errors import RateLimited, Unavailable
+from marketdata.models import Bar, Fetched, Interval
 
 log = logging.getLogger(__name__)
 

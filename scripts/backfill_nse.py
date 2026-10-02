@@ -32,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import duckdb  # noqa: E402
 
+import paths  # noqa: E402
 from broker.errors import BrokerError  # noqa: E402
 from broker.fyers import FyersBroker  # noqa: E402
 from broker.token_store import get_access_token  # noqa: E402
@@ -41,7 +42,7 @@ from settings import load_settings  # noqa: E402
 from universe.nse import daily_series  # noqa: E402
 from venues import OPTION_UNDERLYINGS  # noqa: E402
 
-DEFAULT_STORE = REPO_ROOT / "data" / "bars.duckdb"
+DEFAULT_STORE = paths.bars_path()
 SOURCE = "fyers"
 
 #: Days per request. Fyers serves a year of daily bars at a time; asking for

@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import date
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +32,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+import paths
 from alerting.watcher import Watcher
 from api.alert_inputs import gather
-from api.dependencies import broker_for, get_broker, get_db_path, get_feeds, get_holidays
+from api.deps import get_broker, get_db_path, get_feeds, get_holidays
 from api.errors import broker_error_handler
 from api.routers import (
     alerts,
@@ -55,8 +57,9 @@ from api.routers import (
     volatility,
 )
 from api.store import open_db
+from broker.base import OptionsBroker
 from broker.errors import BrokerError
-from broker.session import in_session
+from broker.factory import broker_for
 from broker.shark.stream import SharkStream
 from marketdata import BarService, nse_preopen
 from marketdata.daily_updater import DailyBarUpdater
@@ -71,6 +74,7 @@ from streaming import TickHub
 from universe.nse import daily_series
 from venues import Capability, for_venue, option_underlyings
 from venues import get as get_venue
+from venues.calendar import in_session
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +104,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         if settings.has_telegram
         else None
     )
+    def options_broker() -> OptionsBroker:
+        """The options broker as a request would get it, overrides included, so a
+        test's fake reaches the background jobs too rather than a live account."""
+        provider = application.dependency_overrides.get(get_broker, get_broker)
+        return cast(OptionsBroker, provider())
+
     db_path = get_db_path()
     # Make sure the schema is current before the watcher's first pass, which runs
     # on a worker thread and would otherwise race the first request to do it.
@@ -159,7 +169,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             )
         log.info("bar sources registered: %s", ", ".join(service.sources()) or "none")
 
-    bars = BarStoreHolder(get_db_path().parent / "bars.duckdb", on_open=_register)
+    bars = BarStoreHolder(paths.bars_path(), on_open=_register)
     application.state.bars = bars
 
     def perps_broker() -> object | None:
@@ -177,7 +187,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             return None
 
     watcher = Watcher(
-        gather=lambda: gather(db_path, get_broker(), feeds_cache, hub, perps_broker()),
+        gather=lambda: gather(db_path, options_broker(), feeds_cache, hub, perps_broker()),
         open_conn=lambda: open_db(db_path),
         notifier=notifier,
     )
@@ -194,7 +204,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # own task, because it has to run with the tab closed.
     recorder = VolRecorder(
         underlyings=option_underlyings(),
-        fetch_chain=lambda symbol, strikes: get_broker().get_option_chain(
+        fetch_chain=lambda symbol, strikes: options_broker().get_option_chain(
             symbol, strike_count=strikes
         ),
         open_conn=lambda: open_db(db_path),
@@ -221,7 +231,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         return [
             Bar(ts=c.timestamp, open=c.open, high=c.high, low=c.low, close=c.close,
                 volume=c.volume)
-            for c in get_broker().get_history(symbol, "D", start, end)
+            for c in options_broker().get_history(symbol, "D", start, end)
         ]
 
     daily = DailyBarUpdater(

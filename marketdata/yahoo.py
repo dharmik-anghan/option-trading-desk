@@ -28,13 +28,13 @@ for that reason, and a chart drawn from one should say which.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote
 
 import requests
 
-from marketdata.models import Bar, Interval
+from marketdata.errors import RateLimited, Unavailable
+from marketdata.models import Bar, Fetched, Interval
 
 log = logging.getLogger(__name__)
 
@@ -91,25 +91,6 @@ FOR_SYMBOL: dict[str, str] = {
     "XAUUSDT": "GC=F",
     "CLUSDT": "CL=F",
 }
-
-
-class RateLimited(Exception):
-    """Yahoo refused for asking too often. Expected, not exceptional."""
-
-
-class Unavailable(Exception):
-    """Yahoo could not answer, or answered with something unreadable."""
-
-
-@dataclass(frozen=True)
-class Fetched:
-    """What one request returned, and what the source said about it."""
-
-    bars: list[Bar]
-    #: Yahoo's own name for the instrument, for showing beside a chart drawn from
-    #: it - "Gold Dec 26" is worth seeing when the desk trades a perpetual.
-    name: str
-    currency: str
 
 
 def yahoo_symbol(symbol: str) -> str | None:

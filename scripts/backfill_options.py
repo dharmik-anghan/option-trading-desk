@@ -28,13 +28,14 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from fyers_apiv3 import fyersModel  # noqa: E402
 
+import paths  # noqa: E402
 from broker.token_store import get_access_token  # noqa: E402
 from optbt.data.backfill import backfill  # noqa: E402
 from optbt.data.source import INDEX_SYMBOL, FyersExpired  # noqa: E402
 from optbt.data.store import OptionStore  # noqa: E402
 from settings import load_settings  # noqa: E402
 
-DEFAULT_STORE = REPO_ROOT / "data" / "options.duckdb"
+DEFAULT_STORE = paths.options_store_path()
 
 
 def main() -> int:
@@ -60,7 +61,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     settings = load_settings()
-    log_dir = REPO_ROOT / "logs"
+    log_dir = paths.LOGS_DIR
     log_dir.mkdir(exist_ok=True)
 
     def connect(force: bool = False) -> Any:

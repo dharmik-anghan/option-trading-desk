@@ -29,6 +29,7 @@ records hold bid and ask, and are what this should eventually be calibrated on.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -54,8 +55,8 @@ SCHEDULE: tuple[Rates, ...] = (
 )
 
 
-def rates_on(day: date) -> Rates:
-    return [r for r in SCHEDULE if r.since <= day][-1]
+def rates_on(day: date, schedule: Sequence[Rates] = SCHEDULE) -> Rates:
+    return [r for r in schedule if r.since <= day][-1]
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ class CostModel:
 
     def fill(self, day: date, price: float, quantity: int, *, buy: bool) -> Charges:
         """Charges on one order: `quantity` units at `price` premium."""
-        rates = [r for r in self.schedule if r.since <= day][-1]
+        rates = rates_on(day, self.schedule)
         turnover = price * quantity
         brokerage = self.brokerage_per_order
         exchange = turnover * rates.exchange
@@ -111,5 +112,5 @@ class CostModel:
 
     def exercise(self, day: date, intrinsic: float, quantity: int) -> Charges:
         """A long option settling in the money: STT on intrinsic value, no brokerage."""
-        rates = [r for r in self.schedule if r.since <= day][-1]
+        rates = rates_on(day, self.schedule)
         return Charges(stt=intrinsic * quantity * rates.stt_exercise)

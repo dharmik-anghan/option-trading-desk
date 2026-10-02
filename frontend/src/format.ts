@@ -3,7 +3,6 @@
 // not a real number of paise. Round for display everywhere.
 
 const MINUS = "−"; // true minus, so figures align in tabular columns
-const EN_DASH = "–";
 
 export function round2(value: number): number {
   return Math.round(value * 100) / 100;
@@ -83,10 +82,6 @@ export function dir(value: number): string {
   return value > 0 ? "up" : "dn";
 }
 
-export function range(lo: number, hi: number): string {
-  return `${int(lo)}${EN_DASH}${int(hi)}`;
-}
-
 export function clockIST(iso: string | number | Date): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-GB", {
@@ -105,12 +100,6 @@ export function dayIST(iso: string | number | Date): string {
     Number(d.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", month: "numeric" })) - 1
   ];
   return `${day} ${mon}`;
-}
-
-/** "NSE:NIFTY26OCT24200CE" -> "24200 CE" */
-export function shortContract(symbol: string, strike: number, optionType: string): string {
-  void symbol;
-  return `${int(strike)} ${optionType}`;
 }
 
 /** "NSE:NIFTY26OCT22500PE" -> { strike: 22500, optionType: "PE" } */

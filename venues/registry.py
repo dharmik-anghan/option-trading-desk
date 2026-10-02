@@ -1,7 +1,7 @@
 """The catalogue of venues the desk knows about.
 
 One entry per venue. Adding a venue is adding an entry here plus an adapter in
-`broker/` and a factory line in `api/dependencies.py` - nothing above this
+`broker/` and a factory line in `broker/factory.py` - nothing above this
 package needs to change, which is the whole point of it existing.
 """
 
@@ -84,3 +84,15 @@ def get(venue_id: str | None = None) -> VenueSpec:
 
 def listed() -> list[VenueSpec]:
     return list(VENUES.values())
+
+
+def serving(asset_class: AssetClass) -> VenueSpec:
+    """The venue a desk for this asset class trades on: the first one listed.
+
+    One per desk today. A second options broker becomes a choice the desk
+    offers, and this becomes its default.
+    """
+    for spec in VENUES.values():
+        if spec.asset_class is asset_class:
+            return spec
+    raise UnknownVenueError(f"no venue lists {asset_class.value}")

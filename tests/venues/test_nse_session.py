@@ -4,7 +4,9 @@ from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
-from broker.session import CLOSE, IST, OPEN, in_session, session_bounds
+from venues.calendar import IST, in_session, session_bounds
+from venues.calendar import NSE_CLOSE as CLOSE
+from venues.calendar import NSE_OPEN as OPEN
 
 
 def ist(y: int, m: int, d: int, hh: int, mm: int) -> datetime:

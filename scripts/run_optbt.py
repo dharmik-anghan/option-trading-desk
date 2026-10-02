@@ -17,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+import paths  # noqa: E402
 from optbt.engine import Engine  # noqa: E402
 from optbt.market import History  # noqa: E402
 from optbt.results import report, summarise  # noqa: E402
@@ -28,7 +29,7 @@ def main() -> int:
     parser.add_argument("strategy", choices=["straddle"])
     parser.add_argument("--from", dest="start", type=date.fromisoformat, default=date(2022, 1, 1))
     parser.add_argument("--to", dest="end", type=date.fromisoformat, default=date.today())
-    parser.add_argument("--store", type=Path, default=REPO_ROOT / "data" / "options.duckdb")
+    parser.add_argument("--store", type=Path, default=paths.options_store_path())
     parser.add_argument("--entry", type=time.fromisoformat, default=time(9, 20))
     parser.add_argument("--exit", type=time.fromisoformat, default=time(15, 15))
     parser.add_argument("--stop", type=float, default=0.25, help="per-leg stop, 0.25 = 25%%")

@@ -32,7 +32,7 @@ from typing import Any
 
 import requests
 
-from broker.session import IST
+from venues.calendar import IST
 
 PAGE_URL = "https://www.nseindia.com/market-data/pre-open-market-cm-and-emerge-market"
 API_URL = "https://www.nseindia.com/api/market-data-pre-open"

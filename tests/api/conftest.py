@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from api.dependencies import get_broker, get_db_path
+from api.deps import get_broker, get_db_path
 from broker.fake import FakeBroker
 from broker.models import Position
 

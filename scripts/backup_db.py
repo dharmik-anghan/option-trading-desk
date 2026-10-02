@@ -23,9 +23,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+import paths
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB = REPO_ROOT / "data" / "trading.db"
-DEFAULT_DEST = REPO_ROOT / "data" / "backups"
+DEFAULT_DEST = paths.BACKUPS_DIR
 
 
 def backup_once(db_path: Path, dest_dir: Path, keep: int) -> Path | None:
@@ -74,7 +75,7 @@ def _env_float(name: str, default: float) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, default=Path(os.environ.get("DB_PATH", DEFAULT_DB)))
+    parser.add_argument("--db", type=Path, default=paths.db_path())
     parser.add_argument(
         "--dest", type=Path, default=Path(os.environ.get("BACKUP_DIR", DEFAULT_DEST))
     )

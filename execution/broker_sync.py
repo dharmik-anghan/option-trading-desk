@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
+from broker.base import FillHistory
 from broker.models import Fill, Position
 from broker.symbols import parse_contract
 from storage import fill_repo
@@ -59,10 +60,8 @@ SAME_TRADE = timedelta(minutes=5)
 ADJUSTMENT_WINDOW = timedelta(minutes=30)
 
 
-class FillSource(Protocol):
-    """All the sync may ask of a broker."""
-
-    def get_fills(self, date_from: date, date_to: date) -> list[Fill]: ...
+class FillSource(FillHistory, Protocol):
+    """All the sync may ask of a broker: its fills, and what is open now."""
 
     def get_positions(self) -> list[Position]: ...
 

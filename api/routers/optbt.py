@@ -17,7 +17,6 @@ runs, for instance.
 
 from __future__ import annotations
 
-import os
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -29,6 +28,7 @@ import duckdb
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+import paths
 from optbt.costs import CostModel
 from optbt.data.models import Kind
 from optbt.data.source import INDEX_SYMBOL
@@ -47,14 +47,12 @@ from optbt.strategies.legs import (
 
 router = APIRouter(tags=["optbt"], prefix="/api/optbt")
 
-DEFAULT_STORE = Path(__file__).resolve().parents[2] / "data" / "options.duckdb"
-
 #: Points on the returned equity curve are days, so four years is ~1,000 - small
 #: enough to send whole, which keeps the drawdown on the page the true one.
 
 
 def _store_path() -> Path:
-    return Path(os.environ.get("OPTBT_STORE", DEFAULT_STORE))
+    return paths.options_store_path()
 
 
 #: Requests refuse fields they do not know. A frontend newer than the backend it

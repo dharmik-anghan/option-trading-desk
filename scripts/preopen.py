@@ -19,7 +19,6 @@ stored day is a `conflict` and left alone unless `--replace`.
 from __future__ import annotations
 
 import argparse
-import os
 import sqlite3
 import sys
 from datetime import date
@@ -28,7 +27,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
+import paths  # noqa: E402
 from marketdata.nse_preopen import (  # noqa: E402
     DEFAULT_KEYS,
     KEYS,
@@ -39,8 +38,6 @@ from marketdata.nse_preopen import (  # noqa: E402
 )
 from storage.db import connect, init_schema  # noqa: E402
 from storage.preopen_repo import recorded_days, save_day  # noqa: E402
-
-DEFAULT_DB = REPO_ROOT / "data" / "trading.db"
 
 
 def _files(paths: list[Path]) -> list[Path]:
@@ -114,7 +111,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--db", type=Path,
-                        default=Path(os.environ.get("DB_PATH", DEFAULT_DB)))
+                        default=paths.db_path())
     sub = parser.add_subparsers(dest="command", required=True)
 
     f = sub.add_parser("fetch", help="the latest session, from NSE")

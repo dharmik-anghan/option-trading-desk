@@ -16,9 +16,11 @@ construction and a test that needs a broker has to say so.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
+
+from broker.base import Broker
 
 
 class VenueReachedInTest(AssertionError):
@@ -33,19 +35,39 @@ def _no_live_venues(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     which is explicit and local. A test that forgets gets a loud failure naming
     this file rather than a silent request to a live account.
     """
-    import api.dependencies as dependencies
+    import broker.factory as factory
 
-    def refuse(name: str) -> object:
-        def factory() -> object:
+    def refuse(name: str) -> Callable[[], Broker]:
+        def build() -> Broker:
             raise VenueReachedInTest(
                 f"A test tried to build the live {name} adapter. Stub broker_for or "
                 f"get_broker in the test instead - see tests/conftest.py."
             )
 
-        return factory
+        return build
 
-    monkeypatch.setitem(dependencies.BROKER_FACTORIES, "shark", refuse("Shark"))
-    monkeypatch.setattr(dependencies, "_build_shark", refuse("Shark"))
+    for venue_id, real in list(factory.FACTORIES.items()):
+        monkeypatch.setitem(
+            factory.FACTORIES, venue_id, factory.Factory(refuse(venue_id), cached=real.cached)
+        )
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_daily_bar_pass(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The app's daily-bar updater, idle.
+
+    Entering `TestClient` starts it, and it walks a few hundred symbols with a
+    pause between each. Against the refusing factories above every one fails,
+    so an app start in a test cost over a minute of pauses. Its own tests call
+    `tick()` directly.
+    """
+    import marketdata.daily_updater as daily_updater
+
+    async def idle(self: object) -> None:
+        return None
+
+    monkeypatch.setattr(daily_updater.DailyBarUpdater, "run_forever", idle)
     yield
 
 

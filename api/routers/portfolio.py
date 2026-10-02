@@ -15,10 +15,10 @@ from api.schemas import (
     PortfolioResponse,
 )
 from api.store import open_db
-from broker.session import in_session
 from execution.portfolio_status import PortfolioStatus, get_portfolio_status
 from feeds.holidays import Holidays
 from storage.portfolio_repo import save_portfolio_snapshot, snapshots_since
+from venues.calendar import in_session
 
 router = APIRouter()
 

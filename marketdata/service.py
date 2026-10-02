@@ -41,9 +41,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from marketdata.binance import BinanceBars, binance_symbol
-from marketdata.models import Bar, Interval, Series
+from marketdata.errors import RateLimited, Unavailable
+from marketdata.models import Bar, Fetched, Interval, Series
 from marketdata.store import BarStore
-from marketdata.yahoo import Fetched, RateLimited, Unavailable, YahooBars, yahoo_symbol
+from marketdata.yahoo import YahooBars, yahoo_symbol
 
 log = logging.getLogger(__name__)
 

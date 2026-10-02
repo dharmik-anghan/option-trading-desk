@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from broker.session import IST
 from marketdata.nse_preopen import PreOpenDay, parse_api, read_csv
 from storage.db import connect, init_schema
 from storage.preopen_recorder import PreOpenRecorder, latest_settled_day
 from storage.preopen_repo import quotes_for_day, recorded_days, save_day, symbol_history
+from venues.calendar import IST
 
 FIXTURES = Path(__file__).parent.parent / "marketdata" / "fixtures"
 DAY = date(2026, 9, 29)

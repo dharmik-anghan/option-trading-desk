@@ -29,11 +29,11 @@ from pathlib import Path
 
 from dotenv import set_key
 
+import paths
 from broker.fyers_auth import AutoLoginError, auto_login
 from settings import Settings, load_settings
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-ENV_PATH = REPO_ROOT / ".env"
+ENV_PATH = paths.ENV_FILE
 ENV_TOKEN_KEY = "FYERS_ACCESS_TOKEN"
 
 # Refresh a little before the real expiry so a request that starts just

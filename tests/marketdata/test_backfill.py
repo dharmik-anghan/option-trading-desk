@@ -6,9 +6,9 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 from marketdata.backfill import MAX_REFUSALS, Progress, backfill, resume_from
+from marketdata.errors import RateLimited
 from marketdata.models import Bar, Interval, Series
 from marketdata.store import BarStore
-from marketdata.yahoo import RateLimited
 
 SERIES = Series(source="binance", symbol="BTCUSDT", interval=Interval.M5)
 BEGAN = datetime(2026, 1, 1, tzinfo=UTC)

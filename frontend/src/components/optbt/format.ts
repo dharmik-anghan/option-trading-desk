@@ -5,7 +5,6 @@ export const rupees = (v: number) =>
 /** Rupees with an explicit sign, for a P&L. */
 export const signed = (v: number) => (v > 0 ? `+${rupees(v)}` : rupees(v));
 
-export const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
 
 /** A premium: two decimals, as the exchange quotes it. */
 export const premium = (v: number | null) => (v === null ? "—" : v.toFixed(2));

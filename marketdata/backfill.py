@@ -31,9 +31,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from marketdata.errors import RateLimited
 from marketdata.models import Bar, Interval, Series
 from marketdata.store import BarStore
-from marketdata.yahoo import RateLimited
 
 log = logging.getLogger(__name__)
 

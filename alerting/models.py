@@ -121,28 +121,6 @@ class Outcome:
 
 
 @runtime_checkable
-class LegView(Protocol):
-    """One leg of a structure, as far as the rules care."""
-
-    @property
-    def id(self) -> int: ...
-    @property
-    def side(self) -> str: ...
-    @property
-    def strike(self) -> float: ...
-    @property
-    def option_type(self) -> str: ...
-    @property
-    def is_open(self) -> bool: ...
-    @property
-    def delta(self) -> float | None: ...
-    @property
-    def ltp_change(self) -> float | None: ...
-    @property
-    def oi_change(self) -> int | None: ...
-
-
-@runtime_checkable
 class BasketView(Protocol):
     """A priced structure, as far as the rules care."""
 

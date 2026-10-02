@@ -19,9 +19,9 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
-from broker.session import IST
 from marketdata.nse_preopen import DEFAULT_KEYS, SETTLED_AT, PreOpenDay
 from storage.preopen_repo import save_day
+from venues.calendar import IST
 
 log = logging.getLogger(__name__)
 

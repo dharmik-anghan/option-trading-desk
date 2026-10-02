@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from broker.session import IST
 from marketdata.nse_preopen import (
     PreOpenError,
     merge,
@@ -23,6 +22,7 @@ from marketdata.nse_preopen import (
     parse_csv_name,
     read_csv,
 )
+from venues.calendar import IST
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CSV = FIXTURES / "MW-Pre-Open-Market-NIFTY 50-29-Sep-2026.csv"

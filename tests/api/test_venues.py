@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from api.dependencies import BROKER_FACTORIES
+from broker.factory import FACTORIES
 from venues import Capability, listed
 from venues.registry import VENUES
 
@@ -33,8 +33,8 @@ def test_capabilities_are_sorted_so_the_response_is_stable(client: TestClient) -
 
 
 def test_every_listed_venue_can_actually_be_built() -> None:
-    assert set(VENUES) == set(BROKER_FACTORIES), (
-        "every venue in the catalogue needs an adapter factory in api/dependencies.py"
+    assert set(VENUES) == set(FACTORIES), (
+        "every venue in the catalogue needs an adapter factory in broker/factory.py"
     )
 
 

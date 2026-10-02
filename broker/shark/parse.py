@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from broker.models import Candle, Position, Quote
-from broker.shark.models import ContractSpec, PerpPosition
+from broker.perp_models import ContractSpec, PerpPosition
 
 
 class SharkParseError(ValueError):

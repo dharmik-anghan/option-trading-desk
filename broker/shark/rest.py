@@ -26,7 +26,7 @@ import requests
 
 from broker.errors import BrokerError, BrokerUnreachable, classify_status
 from broker.models import Candle, OrderRequest, OrderResult, Position, Quote
-from broker.shark.models import ContractSpec, PerpPosition
+from broker.perp_models import ContractSpec, PerpPosition
 from broker.shark.parse import (
     parse_contracts,
     parse_klines,

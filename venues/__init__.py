@@ -6,7 +6,7 @@ were the same thing everywhere; this package is where that assumption is
 undone, before a second venue makes it expensive.
 
 Deliberately free of credentials and adapter construction: this package only
-describes venues. Building a broker for one is `api/dependencies.py`'s job, so
+describes venues. Building a broker for one is `broker/factory.py`'s job, so
 that importing the catalogue never needs a key and never touches the network.
 """
 
@@ -19,7 +19,7 @@ from venues.instruments import (
     option_underlyings,
 )
 from venues.models import AssetClass, Capability, VenueSpec
-from venues.registry import FYERS, SHARK, VENUES, get, listed
+from venues.registry import FYERS, SHARK, VENUES, get, listed, serving
 
 __all__ = [
     "FYERS",
@@ -37,4 +37,5 @@ __all__ = [
     "instrument",
     "is_open",
     "listed",
+    "serving",
 ]

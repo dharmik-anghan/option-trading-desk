@@ -31,8 +31,7 @@ from analytics.volatility import (
     parkinson,
     rank_of,
 )
-from api.dependencies import get_broker
-from api.deps import DbPathDep, bar_service
+from api.deps import BrokerDep, DbPathDep, bar_service
 from api.store import open_db
 from broker.errors import BrokerError
 from marketdata import Interval
@@ -115,14 +114,16 @@ def _bars(request: Request, symbol: str, days: int) -> list[Bar]:
 
 
 @router.get("/{underlying:path}", response_model=VolatilityOut)
-def volatility(request: Request, underlying: str, db_path: DbPathDep) -> VolatilityOut:
+def volatility(
+    request: Request, underlying: str, db_path: DbPathDep, broker: BrokerDep
+) -> VolatilityOut:
     """Everything about how much this thing moves, and what that is being sold for."""
     listed = dict(OPTION_UNDERLYINGS)
     if underlying not in listed:
         raise HTTPException(status_code=404, detail=f"{underlying} is not an underlying here")
 
     try:
-        chain = get_broker().get_option_chain(underlying, strike_count=2)
+        chain = broker.get_option_chain(underlying, strike_count=2)
     except BrokerError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
 

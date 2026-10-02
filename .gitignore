@@ -11,7 +11,7 @@ __pycache__/
 fyers_tokens/
 fyersApi.log
 fyersRequests.log
-data/
+/data/
 .DS_Store
 
 # frontend
@@ -21,7 +21,7 @@ frontend/dist/
 # Docker runtime artefacts
 logs/
 !logs/.gitkeep
-data/backups/
+/data/backups/
 
 # The bar store. Rebuildable from the sources, and large.
 *.duckdb

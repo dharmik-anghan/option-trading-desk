@@ -117,13 +117,6 @@ def get(conn: sqlite3.Connection, fill_ids: Iterable[str]) -> list[StoredFill]:
     return [_row(r) for r in rows]
 
 
-def for_basket(conn: sqlite3.Connection, basket_id: int) -> list[StoredFill]:
-    rows = conn.execute(
-        f"SELECT {_COLUMNS} FROM broker_fill WHERE basket_id = ? ORDER BY at", (basket_id,)
-    ).fetchall()
-    return [_row(r) for r in rows]
-
-
 def settle(
     conn: sqlite3.Connection,
     fill_id: str,

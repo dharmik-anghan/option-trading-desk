@@ -140,28 +140,6 @@ export function toRequest(l: LegDraft): OptbtLegIn {
   };
 }
 
-/** "OTM 2", "ATM", "ITM 1", "₹50 premium". */
-export function strikeLabel(
-  l: Pick<LegDraft, "strikeMode" | "offset" | "premium" | "pct" | "delta">,
-): string {
-  if (l.strikeMode === "delta") return `${l.delta.toFixed(2)} delta`;
-  if (l.strikeMode === "premium") return `premium ≈ ₹${l.premium}`;
-  if (l.strikeMode === "pct") return `${l.pct}% ${l.pct >= 0 ? "OTM" : "ITM"}`;
-  if (l.offset === 0) return "ATM";
-  return l.offset > 0 ? `OTM ${l.offset}` : `ITM ${-l.offset}`;
-}
-
-/** One line a leg can be recognised by: "SELL CE OTM 2 · 25% SL". */
-export function legSummary(l: LegDraft): string {
-  const parts = [`${l.side.toUpperCase()} ${l.lots > 1 ? `${l.lots}× ` : ""}${l.kind}`, strikeLabel(l)];
-  if (l.expiry === "days") parts.push(`${l.expiryDays} DTE`);
-  else if (l.expiry !== "week") parts.push(EXPIRY_LABEL[l.expiry].toLowerCase());
-  if (l.stopKind !== "none") parts.push(`SL ${l.stopValue}${l.stopKind === "pct" ? "%" : " pt"}`);
-  if (l.targetKind !== "none")
-    parts.push(`TP ${l.targetValue}${l.targetKind === "pct" ? "%" : " pt"}`);
-  return parts.join(" · ");
-}
-
 export const EXPIRY_LABEL: Record<OptbtExpiry, string> = {
   week: "This week",
   next_week: "Next week",

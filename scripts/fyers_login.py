@@ -35,11 +35,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import paths  # noqa: E402
 from broker.fyers_auth import AutoLoginError, auto_login  # noqa: E402
 from broker.token_store import jwt_subject, persist_token  # noqa: E402
 from settings import Settings, load_settings  # noqa: E402
 
-ENV_PATH = REPO_ROOT / ".env"
+ENV_PATH = paths.ENV_FILE
 
 
 def extract_auth_code(raw: str) -> str:

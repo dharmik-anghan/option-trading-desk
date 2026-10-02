@@ -8,7 +8,7 @@ see tests/broker/test_fyers_parsing.py.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fyers_apiv3 import fyersModel
@@ -28,6 +28,7 @@ from broker.models import (
     Position,
     Quote,
 )
+from venues.calendar import IST
 
 
 def _call(send: Callable[[], Any]) -> Any:
@@ -230,9 +231,6 @@ def parse_positions(raw: dict[str, Any]) -> list[Position]:
         if p["netQty"] != 0
     ]
 
-
-#: Fyers stamps fills in exchange time, without a zone.
-IST = timezone(timedelta(hours=5, minutes=30))
 
 #: Rows per page of trade history. Fyers' own default and maximum.
 HISTORY_PAGE = 100

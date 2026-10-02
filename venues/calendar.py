@@ -1,8 +1,8 @@
 """When a venue trades.
 
-`broker/session.py` answers this for the NSE and is deliberately left alone -
-it is exact, well tested, and knows about pre-open and holidays. This adds the
-one distinction a second venue forces: some markets never close.
+The NSE's session, and the one distinction a second venue forces: some
+markets never close. Pure date arithmetic with the holidays passed in, so it
+can be exercised without a network or a clock.
 
 Worth stating plainly, because a lot of the desk's behaviour hangs off it. The
 portfolio snapshot is skipped outside session hours, staleness warnings assume
@@ -12,10 +12,41 @@ market with no yesterday.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from enum import StrEnum
 
-from broker.session import in_session
+#: India has no daylight saving, so a fixed offset is exact rather than a
+#: simplification.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+#: NSE's continuous session. Pre-open (09:00-09:15) is excluded: orders are
+#: collected then but nothing trades, so prices do not move. The close is also
+#: when an expiring contract settles.
+NSE_OPEN = time(9, 15)
+NSE_CLOSE = time(15, 30)
+
+
+def in_session(at: datetime, holidays: frozenset[date] = frozenset()) -> bool:
+    """Whether the NSE is trading at this instant.
+
+    Weekends and listed holidays are closed, as is anything outside 09:15 to
+    15:30 IST. A naive datetime is read as IST rather than rejected, since the
+    only naive times this sees come from a caller already working in it.
+    """
+    local = at.astimezone(IST) if at.tzinfo is not None else at.replace(tzinfo=IST)
+    if local.weekday() >= 5:  # Saturday, Sunday
+        return False
+    if local.date() in holidays:
+        return False
+    return NSE_OPEN <= local.time() <= NSE_CLOSE
+
+
+def session_bounds(day: date) -> tuple[datetime, datetime]:
+    """The NSE's open and close instants for a given day, in IST."""
+    return (
+        datetime.combine(day, NSE_OPEN, tzinfo=IST),
+        datetime.combine(day, NSE_CLOSE, tzinfo=IST),
+    )
 
 
 class Session(StrEnum):

@@ -27,7 +27,7 @@ from typing import Any
 
 import requests
 
-from marketdata.yahoo import RateLimited, Unavailable
+from marketdata.errors import RateLimited, Unavailable
 
 log = logging.getLogger(__name__)
 

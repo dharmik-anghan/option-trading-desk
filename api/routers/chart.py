@@ -14,9 +14,9 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Request
 
 from api.charting import CandlesResponse, days_for, drawn, series_for
-from api.dependencies import broker_for
 from api.deps import bar_service
 from broker.errors import BrokerError
+from broker.factory import broker_for
 from marketdata import Interval
 from marketdata.models import Bar
 from venues import Capability, for_venue

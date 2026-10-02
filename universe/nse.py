@@ -37,6 +37,8 @@ from pathlib import Path
 
 import requests
 
+import paths
+
 log = logging.getLogger(__name__)
 
 LISTS_URL = "https://nsearchives.nseindia.com/content/indices/{file}.csv"
@@ -198,8 +200,7 @@ def fyers_symbol(member: Member) -> str:
 # On disk
 # ---------------------------------------------------------------------------
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PATH = REPO_ROOT / "data" / "constituents.json"
+DEFAULT_PATH = paths.CONSTITUENTS
 
 
 def save(memberships: dict[str, Membership], path: Path = DEFAULT_PATH) -> None:

@@ -139,8 +139,7 @@ input[type="number"] {
 }
 
 td.l,
-th,
-.lbl {
+th {
   font-family: var(--u);
   font-variant-numeric: normal;
 }

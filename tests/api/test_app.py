@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from api.dependencies import get_broker
+from api.deps import get_broker
 from broker.fake import FakeBroker
 from storage.db import connect, init_schema
 from storage.portfolio_repo import save_portfolio_snapshot

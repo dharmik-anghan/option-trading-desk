@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from venues.calendar import NSE_CLOSE, NSE_OPEN
+
 #: Monday is 0, as `datetime.weekday()` counts.
 WEEKDAYS = frozenset({0, 1, 2, 3, 4})
 
@@ -77,7 +79,7 @@ PRESETS: dict[str, Session] = {
     "newyork": Session("New York", time(8, 0), time(17, 0), "America/New_York"),
     "tokyo": Session("Tokyo", time(9, 0), time(18, 0), "Asia/Tokyo"),
     "sydney": Session("Sydney", time(7, 0), time(16, 0), "Australia/Sydney"),
-    "india": Session("India", time(9, 15), time(15, 30), "Asia/Kolkata"),
+    "india": Session("India", NSE_OPEN, NSE_CLOSE, "Asia/Kolkata"),
 }
 
 
