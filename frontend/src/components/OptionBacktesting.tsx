@@ -224,6 +224,7 @@ export function OptionBacktesting({ onHome }: Props) {
                 setLegs(p.legs());
                 if (p.hold) setHold(p.hold);
                 setExpiry(p.expiry ?? NEAREST_WEEKLY);
+                setDays((d) => ({ ...d, dte_min: p.dte?.[0] ?? null, dte_max: p.dte?.[1] ?? null }));
                 if (p.targetCredit) setTarget({ value: p.targetCredit, unit: "credit" });
                 if (p.stopCredit) setStop({ value: p.stopCredit, unit: "credit" });
                 setAdjust((a) => ({ ...a, enabled: Boolean(p.adjust) }));

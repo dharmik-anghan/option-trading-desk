@@ -553,8 +553,9 @@ class LegStrategy:
                 if cfg.target_credit is not None:
                     by_credit = cfg.target_credit * credit
                     target = by_credit if target is None else min(target, by_credit)
-        if stop is not None or target is not None:
-            pnl = ctx.pnl()
+        # Not while its closes are waiting to fill: the decision is already made.
+        if (stop is not None or target is not None) and not ctx.pending:
+            pnl = ctx.pnl(fresh=True)
             if pnl is not None:
                 if stop is not None and pnl <= -stop:
                     ctx.note(f"position P&L {pnl:+,.0f} reached the {stop:,.0f} stop")

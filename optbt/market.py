@@ -160,7 +160,12 @@ class View:
     def chain(self, expiry: date) -> list[Quote]:
         return self._history.chain_at(expiry, self.now)
 
-    def price(self, key: OptionKey) -> float | None:
+    @property
+    def minutes_open(self) -> int:
+        """Bars closed so far today."""
+        return self._i + 1
+
+    def price(self, key: OptionKey, *, today_only: bool = False) -> float | None:
         """Last traded price of one contract as of the last closed bar.
 
         Today's latest bar if it has traded today; otherwise its last close from
@@ -169,6 +174,9 @@ class View:
         days: the 19400 CE of Jan 2024 did not trade on 4 of its 34 sessions.
         This is a mark, not a fill: an order still waits for the contract to
         actually trade.
+
+        `today_only` refuses that earlier session's close: after a gap it can be
+        nowhere near what the contract is worth now.
         """
         bars = self._history.contract_day(key, self.day)
         bar = bars.get(self.now)
@@ -177,6 +185,8 @@ class View:
         earlier = [ts for ts in bars if ts < self.now]
         if earlier:
             return bars[max(earlier)].close
+        if today_only:
+            return None
         return self._history.prev_close(key, self.day)
 
     def lot_size(self, expiry: date) -> int:

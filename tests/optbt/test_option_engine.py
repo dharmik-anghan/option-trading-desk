@@ -847,3 +847,41 @@ def test_nothing_happens_while_spot_stays_between_the_wings() -> None:
     trade, _ = _condor_days(23450.0)
     assert not any(leg.exit_reason == "adjusted" for leg in trade.legs)
     assert len(trade.legs) == 4
+
+
+def test_an_exit_is_not_decided_on_another_days_price_after_a_gap() -> None:
+    """3 Feb 2026 in miniature. A short call and a long put, flat overnight: both
+    end day 1 marked high (200 and 150), so the position stands at nothing. Day 2
+    the call is back at 100 from the open, but the put does not trade until 09:25
+    - and then at 50, where it started. Valued at yesterday's 150 the put showed
+    a profit of 100 x 65 and took the 50%-of-credit target at 09:16; at today's
+    prices there is no profit at all, and nothing should close."""
+    from optbt.strategies.legs import ExpiryChoice, LegsConfig, LegSpec, LegStrategy
+
+    day1, day2, expiry = date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 29)
+    m = Market()
+    m.index(day1)
+    m.index(day2)
+    for strike in (23400.0, 23450.0, 23500.0):
+        close = strike == 23450
+        m.option(day1, strike, Kind.CALL, 100.0, expiry=expiry,
+                 changes={time(15, 29): (200.0, 200.0, 200.0, 200.0)} if close else None)
+        m.option(day1, strike, Kind.PUT, 50.0, expiry=expiry,
+                 changes={time(15, 29): (150.0, 150.0, 150.0, 150.0)} if close else None)
+        m.option(day2, strike, Kind.CALL, 100.0, expiry=expiry)
+    rows = [
+        f"('NIFTY', DATE '{expiry}', 'PE', 23450.0, TIMESTAMP '{ts}', 50, 50, 50, 50, "
+        f"{LOT}, {LOT * 1000})"
+        for ts in _minutes(day2)
+        if ts.time() >= time(9, 25)
+    ]
+    m.conn.execute(f"INSERT INTO option_bar VALUES {','.join(rows)}")
+
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.BUY, Kind.PUT)),
+        expiry=ExpiryChoice(),
+        hold="expiry",
+        target_credit=0.5,
+    )
+    (trade,) = Engine(m.history(), LegStrategy(config), FREE).run(day1, day2).trades
+    assert all(leg.is_open for leg in trade.legs), trade.events
