@@ -130,3 +130,20 @@ def test_a_version_1_spec_reads_as_the_choice_it_meant() -> None:
         ExpiryChoice("days", days=30),
         None,
     ]
+
+
+def test_an_api_request_in_the_first_format_still_runs_as_it_meant() -> None:
+    """A page loaded before the expiry choice sends each leg's expiry by name."""
+    body = {
+        "start": "2025-01-01",
+        "end": "2025-06-30",
+        "legs": [
+            {"side": "sell", "kind": "CE", "expiry": "days", "expiry_days": 45},
+            {"side": "buy", "kind": "PE", "expiry": "next_week"},
+        ],
+    }
+    legs = RunRequest.model_validate_json(json.dumps(body)).config().legs
+    assert [leg.expiry for leg in legs] == [
+        ExpiryChoice("days", days=45),
+        ExpiryChoice("weekly", nth=2),
+    ]

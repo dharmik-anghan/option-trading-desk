@@ -169,8 +169,12 @@ class LegIn(BaseModel):
     side: Literal["buy", "sell"]
     kind: Literal["CE", "PE"]
     lots: int = Field(default=1, ge=1, le=100)
-    #: This leg's own expiry; none trades the strategy's.
-    expiry: ExpiryIn | None = None
+    #: This leg's own expiry; none trades the strategy's. The first version of
+    #: the request named it - "week", "next_week", "month", "next_month", "days" -
+    #: with `expiry_days` beside it, and a page or script still sending that is
+    #: read as the choice it meant rather than refused.
+    expiry: ExpiryIn | Literal["week", "next_week", "month", "next_month", "days"] | None = None
+    expiry_days: int | None = Field(default=None, ge=1, le=120)
     strike: StrikeIn = Field(default_factory=StrikeIn)
     stop: LevelIn | None = None
     target: LevelIn | None = None

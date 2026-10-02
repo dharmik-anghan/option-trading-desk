@@ -138,7 +138,7 @@ def from_dict(raw: dict[str, Any]) -> LegsConfig:
                 side=Side.BUY if leg["side"] == "buy" else Side.SELL,
                 kind=Kind(leg["kind"]),
                 lots=int(leg.get("lots", 1)),
-                expiry=_expiry_in(leg.get("expiry"), int(leg.get("expiry_days", 45))),
+                expiry=_expiry_in(leg.get("expiry"), int(leg.get("expiry_days") or 45)),
                 strike=StrikeRule(**(leg.get("strike") or {})),
                 stop=_level_in(leg.get("stop")),
                 target=_level_in(leg.get("target")),
