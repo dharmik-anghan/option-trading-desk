@@ -16,9 +16,9 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request
 
 import paths
-from broker.base import OptionsBroker
+from broker.base import Broker, OptionsBroker
 from broker.contracts import ContractCodec
-from broker.factory import codec_for, options_broker
+from broker.factory import broker_for, codec_for, options_broker
 from feeds.fetch import Feeds
 from feeds.holidays import Holidays
 from marketdata import BarService, BarStore
@@ -51,6 +51,19 @@ def get_broker(venue: OptionsVenueDep) -> OptionsBroker:
     return options_broker(venue)
 
 
+def perps_venue() -> VenueSpec:
+    """The venue the perpetuals desk trades on."""
+    return serving(AssetClass.PERPETUALS)
+
+
+PerpsVenueDep = Annotated[VenueSpec, Depends(perps_venue)]
+
+
+def get_perps_broker(venue: PerpsVenueDep) -> Broker:
+    """The perpetuals desk's broker. See `broker/factory.py`."""
+    return broker_for(venue)
+
+
 def get_codec(venue: OptionsVenueDep) -> ContractCodec:
     """How this request's venue spells its contracts. See `broker/contracts.py`."""
     return codec_for(venue)
@@ -81,6 +94,7 @@ def get_holidays() -> Holidays:
 
 BrokerDep = Annotated[OptionsBroker, Depends(get_broker)]
 CodecDep = Annotated[ContractCodec, Depends(get_codec)]
+PerpsBrokerDep = Annotated[Broker, Depends(get_perps_broker)]
 FeedsDep = Annotated[Feeds, Depends(get_feeds)]
 HolidaysDep = Annotated[Holidays, Depends(get_holidays)]
 DbPathDep = Annotated[Path, Depends(get_db_path)]
@@ -104,6 +118,26 @@ def bar_service(request: Request) -> BarService | None:
         return direct
     holder = getattr(request.app.state, "bars", None)
     return holder.service() if isinstance(holder, BarStoreHolder) else None
+
+
+def require_bar_service(request: Request, cannot: str) -> BarService:
+    """The bar store's service, or a 503 saying what `cannot` be done without it.
+
+    Opened on demand and retried, not once at startup: a desk that came up
+    beside a finishing backfill used to answer this for the rest of the day
+    with the file unlocked the whole time.
+    """
+    service = bar_service(request)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"The bar store is open in another process, so {cannot}. "
+                "It is retried every 30 seconds - a backfill script or a second "
+                "copy of the app will be holding it."
+            ),
+        )
+    return service
 
 
 def bar_store(request: Request) -> BarStore | None:

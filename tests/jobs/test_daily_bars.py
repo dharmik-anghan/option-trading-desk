@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
-from marketdata.daily_updater import DailyBarUpdater, latest_final_day
+from jobs.daily_bars import DailyBarUpdater, latest_final_day
 from marketdata.models import Bar, Interval, Series
 from marketdata.store import BarStore
 from venues.calendar import IST

@@ -63,7 +63,7 @@ def _no_daily_bar_pass(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     so an app start in a test cost over a minute of pauses. Its own tests call
     `tick()` directly.
     """
-    import marketdata.daily_updater as daily_updater
+    import jobs.daily_bars as daily_updater
 
     async def idle(self: object) -> None:
         return None

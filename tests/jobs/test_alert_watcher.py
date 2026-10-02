@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from alerting.models import Alert, Limits
-from alerting.watcher import Inputs, Watcher
+from jobs.alert_watcher import Inputs, Watcher
 from storage.alert_repo import load_active, load_log, save_limits, undelivered
 from storage.db import connect, init_schema
 from tests.alerting.conftest import FakeBasket, FakeEvent, FakeLeg

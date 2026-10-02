@@ -188,6 +188,17 @@ def recorded_days(conn: sqlite3.Connection) -> list[RecordedDay]:
     ]
 
 
+def breadth_by_day(conn: sqlite3.Connection) -> dict[date, tuple[int, int, int]]:
+    """Advances, declines and unchanged for every recorded day."""
+    rows = conn.execute(
+        "SELECT day, SUM(change > 0), SUM(change < 0), SUM(change = 0) "
+        "FROM preopen_quote GROUP BY day"
+    ).fetchall()
+    return {
+        date.fromisoformat(r[0]): (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in rows
+    }
+
+
 def quotes_for_day(conn: sqlite3.Connection, day: date) -> list[PreOpenQuote]:
     """A day's stocks, with their books where the API supplied them."""
     key = day.isoformat()

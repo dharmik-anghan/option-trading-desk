@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from analytics.structure import DEFAULT_K, Structure, read
 from api.charting import days_for, series_for
-from api.deps import bar_service
+from api.deps import require_bar_service
 from marketdata import Interval
 from marketdata.models import Bar
 from venues import listed_on
@@ -125,12 +125,7 @@ def structure(
     if name is None:
         raise HTTPException(status_code=404, detail=f"{symbol} is not traded on {source}")
 
-    service = bar_service(request)
-    if service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="The bar store is open in another process, so no structure can be read",
-        )
+    service = require_bar_service(request, "no structure can be read")
 
     frames: list[FrameOut] = []
     missing: list[str] = []

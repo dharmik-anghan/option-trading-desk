@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException
 
 from api.deps import BrokerDep, DbPathDep
-from api.routers.strategies import _evaluate
 from api.schemas import (
     OrderResultResponse,
     PlaceOrderRequest,
@@ -19,6 +18,7 @@ from api.schemas import (
 )
 from api.store import open_db
 from execution.manager import ExecutionManager
+from execution.strategy_review import UnknownStrategy, review
 from storage.basket_repo import NewBasketLeg, create_basket
 
 router = APIRouter()
@@ -28,9 +28,15 @@ router = APIRouter()
 def place_order(
     request: PlaceOrderRequest, broker: BrokerDep, db_path: DbPathDep
 ) -> PlaceOrderResponse:
-    _chain, legs, _payoff, pre_trade = _evaluate(
-        request.strategy, request.symbol, request.quantity, broker, request.expiry or ""
-    )
+    try:
+        reviewed = review(
+            request.strategy, request.symbol, request.quantity, broker, request.expiry or ""
+        )
+    except UnknownStrategy:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown strategy '{request.strategy}'"
+        ) from None
+    legs, pre_trade = reviewed.legs, reviewed.pre_trade
 
     if not pre_trade.passed:
         failed_reasons = [c.reason for c in pre_trade.checks if not c.passed]

@@ -29,9 +29,9 @@ sys.path.insert(0, str(REPO_ROOT))
 from fyers_apiv3 import fyersModel  # noqa: E402
 
 import paths  # noqa: E402
-from broker.fyers.expired import FyersExpired  # noqa: E402
 from broker.fyers.token_store import get_access_token  # noqa: E402
 from optbt.data.backfill import backfill  # noqa: E402
+from optbt.data.fyers import FyersExpired  # noqa: E402
 from optbt.data.store import OptionStore  # noqa: E402
 from settings import load_settings  # noqa: E402
 from venues.instruments import OPTION_SERIES  # noqa: E402

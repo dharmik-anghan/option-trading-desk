@@ -16,6 +16,8 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
+from api.app import app
+from api.deps import get_perps_broker
 from api.routers import perps as perps_router
 from broker.errors import BrokerError
 from broker.models import Candle, OrderResult, Tick
@@ -209,7 +211,7 @@ def stub_venue(monkeypatch: pytest.MonkeyPatch) -> Stub:
     sound order reaches the real account, which is exactly what happened once.
     """
     stub = Stub()
-    monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+    monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
     return stub
 
 
@@ -245,7 +247,7 @@ class TestPositions:
     def test_a_position_is_reported_with_what_decides_its_survival(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(_position()))
         (p,) = client.get("/api/perps").json()["positions"]
         assert p["side"] == "SHORT"
         assert p["name"] == "Gold"  # named, not left as the ticker
@@ -261,7 +263,7 @@ class TestPositions:
         hub = TickHub()
         hub.publish(Tick(symbol="XAUUSDT", price=4200.0, at=datetime.now(UTC)))
         app.state.tick_hub = hub
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(_position()))
         try:
             (p,) = client.get("/api/perps").json()["positions"]
             # Short 0.01 from 4300, now 4200: a gain of one rupee-equivalent.
@@ -276,8 +278,10 @@ class TestPositions:
     def test_the_venues_own_pnl_is_preferred(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(
-            perps_router, "broker_for", lambda spec: Stub(_position(unrealized_pnl=-0.42))
+        monkeypatch.setitem(
+            app.dependency_overrides,
+            get_perps_broker,
+            lambda: Stub(_position(unrealized_pnl=-0.42)),
         )
         (p,) = client.get("/api/perps").json()["positions"]
         assert p["unrealized_pnl"] == -0.42
@@ -289,7 +293,7 @@ class TestPositions:
         # An empty list because a request failed looks exactly like an empty list
         # because nothing is open, and on a leveraged book those are very
         # different things to be told.
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(fail=True))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(fail=True))
         body = client.get("/api/perps").json()
         assert body["positions"] == []
         assert body["positions_error"] is not None
@@ -303,7 +307,7 @@ class TestProtection:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stub = Stub(_position())
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         response = client.post(
             "/api/perps/positions/p-1/protection",
             json={"quantity": 0.01, "stop_loss": 4500},
@@ -315,7 +319,7 @@ class TestProtection:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stub = Stub(_position())
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         client.post(
             "/api/perps/positions/p-1/protection",
             json={"quantity": 0.01, "stop_loss": 4500, "take_profit": 4100},
@@ -326,7 +330,7 @@ class TestProtection:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stub = Stub(_position())
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         assert (
             client.post("/api/perps/positions/p-1/protection", json={"quantity": 0.01}).status_code
             == 422
@@ -337,7 +341,7 @@ class TestProtection:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stub = Stub(_position())
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         assert (
             client.post(
                 "/api/perps/positions/p-1/protection",
@@ -352,7 +356,7 @@ class TestProtection:
     ) -> None:
         # Believing a stop is attached when it is not is worse than knowing there
         # is none.
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(fail=True))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(fail=True))
         response = client.post(
             "/api/perps/positions/p-1/protection",
             json={"quantity": 0.01, "stop_loss": 1},
@@ -363,7 +367,7 @@ class TestProtection:
     def test_an_unprotected_position_says_so(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(_position()))
         (p,) = client.get("/api/perps").json()["positions"]
         assert p["protected"] is False
 
@@ -371,7 +375,7 @@ class TestProtection:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         held = _position(stop_loss_orders=1)
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(held))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(held))
         (p,) = client.get("/api/perps").json()["positions"]
         assert p["protected"] is True
         assert p["stop_loss_orders"] == 1
@@ -712,7 +716,7 @@ class TestClosingAPosition:
         # Read now, not sent by the client: a stale quantity from a page that has
         # not refreshed would leave a remainder open.
         stub = Stub(_position(quantity=0.002, side="LONG"))
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         body = client.post("/api/perps/positions/p-1/close").json()
         assert body["closed"] is True
         assert stub.closed == [("XAUUSDT", "LONG", 0.002)]
@@ -722,7 +726,7 @@ class TestClosingAPosition:
     ) -> None:
         # A stop may have fired, or it was closed elsewhere. Not alarming, but not
         # something to report as done either.
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: Stub(_position()))
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: Stub(_position()))
         assert client.post("/api/perps/positions/not-open/close").status_code == 404
 
     def test_a_venue_refusal_is_reported_and_recorded(
@@ -730,7 +734,7 @@ class TestClosingAPosition:
     ) -> None:
         stub = Stub(_position())
         stub.refuse_close = "Insufficient margin"
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         response = client.post("/api/perps/positions/p-1/close")
         assert response.status_code == 502
         (row,) = client.get("/api/perps/orders").json()
@@ -741,7 +745,7 @@ class TestClosingAPosition:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stub = Stub(_position(quantity=0.002, side="SHORT"))
-        monkeypatch.setattr(perps_router, "broker_for", lambda spec: stub)
+        monkeypatch.setitem(app.dependency_overrides, get_perps_broker, lambda: stub)
         client.post("/api/perps/positions/p-1/close")
         (row,) = client.get("/api/perps/orders").json()
         assert row["sent"] is True

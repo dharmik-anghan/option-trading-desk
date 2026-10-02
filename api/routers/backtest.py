@@ -21,13 +21,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.deps import bar_service, bar_store
-from backtest.engine import Execution, run
+from api.charting import CandleResponse, LineResponse
+from api.deps import bar_store, require_bar_service
+from backtest.engine import Execution
 from backtest.lines import compute
-from backtest.market import FundingSchedule, PerpetualMarket
-from backtest.metrics import Metrics, measure
+from backtest.metrics import Metrics
 from backtest.resample import resample
-from backtest.rules import SpecRule
+from backtest.service import Floors, NoBars, Series, run_stored, stored_interval
 from backtest.spec import SpecError, StrategySpec, parse
 from marketdata import BarService, Interval
 from marketdata.models import Bar
@@ -165,34 +165,6 @@ class RunResponse(BaseModel):
     caveats: list[str]
 
 
-class CandleOut(BaseModel):
-    at: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-
-
-class LineOut(BaseModel):
-    """One indicator, aligned bar for bar with the candles."""
-
-    #: What to call it on the chart: "EMA 9", "EMA 50 1h".
-    label: str
-    name: str
-    length: int
-    #: The timeframe it is read on, when that is not the one being traded.
-    interval: str | None
-    #: Whether this is a price and belongs on the price axis. An RSI runs 0-100
-    #: and a pivot-gap percentile likewise; drawn against price they would each
-    #: flatten every candle into a line at the bottom of the chart.
-    on_price: bool
-    #: Null wherever the indicator was not yet defined, or - on a higher
-    #: timeframe - repeated across the bars for which that value was the newest
-    #: one that had closed. Which is exactly what the rule saw.
-    values: list[float | None]
-
-
 class WindowRequest(BaseModel):
     source: str
     symbol: str
@@ -208,28 +180,12 @@ class WindowResponse(BaseModel):
     source: str
     symbol: str
     interval: str
-    candles: list[CandleOut]
-    lines: list[LineOut] = []
+    candles: list[CandleResponse]
+    lines: list[LineResponse] = []
 
 
 def _service(request: Request) -> BarService:
-    """The bar store, or a refusal that says why.
-
-    Opened on demand and retried, not once at startup: a desk that came up
-    beside a finishing backfill used to answer this for the rest of the day
-    with the file unlocked the whole time.
-    """
-    service = bar_service(request)
-    if service is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The bar store is open in another process, so there is nothing to test on. "
-                "It is retried every 30 seconds - a backfill script or a second "
-                "copy of the app will be holding it."
-            ),
-        )
-    return service
+    return require_bar_service(request, "there is nothing to test on")
 
 
 @router.post("/candles", response_model=WindowResponse)
@@ -272,7 +228,7 @@ def candles(request: Request, body: WindowRequest) -> WindowResponse:
             spec = None
 
     service = _service(request)
-    held = _stored_interval(service, body.source, body.symbol, size)
+    held = stored_interval(service, body.source, body.symbol, size)
     wanted = spec.indicators() if spec else []
     warmup = _warmup(wanted)
 
@@ -295,7 +251,7 @@ def candles(request: Request, body: WindowRequest) -> WindowResponse:
         symbol=body.symbol,
         interval=str(size),
         candles=[
-            CandleOut(
+            CandleResponse(
                 at=bars[i].ts.isoformat(),
                 open=bars[i].open,
                 high=bars[i].high,
@@ -325,7 +281,7 @@ def _warmup(indicators: list[tuple[str, int, Interval | None]]) -> int:
 
 def _lines(
     bars: list[Bar], size: Interval, spec: StrategySpec, inside: list[int]
-) -> list[LineOut]:
+) -> list[LineResponse]:
     """Each indicator's value at each bar of the window.
 
     Through `backtest.lines`, which the trading desk's own chart also uses: two
@@ -333,7 +289,7 @@ def _lines(
     than either being wrong alone.
     """
     return [
-        LineOut(
+        LineResponse(
             label=drawn.label,
             name=drawn.name,
             length=drawn.length,
@@ -347,7 +303,7 @@ def _lines(
 
 @router.post("/run", response_model=RunResponse)
 def run_backtest(request: Request, body: RunRequest) -> RunResponse:
-    """Run one strategy over one series."""
+    """Run one strategy over one series. See `backtest/service.py`."""
     try:
         spec = parse({**body.spec, "interval": body.interval})
     except SpecError as bad:
@@ -359,53 +315,6 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"{body.interval} is not a bar size") from None
 
-    service = _service(request)
-    store = bar_store(request)
-
-    # Stored at the shortest size we hold; anything longer is built from it rather
-    # than fetched, so the two cannot disagree about a bar boundary.
-    held = _stored_interval(service, body.source, body.symbol, size)
-    bars = service.stored(body.source, body.symbol, held, days=body.days).bars
-    if not bars:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"No {held} bars stored for {body.symbol} from {body.source}. "
-                "Run scripts/backfill_bars.py first."
-            ),
-        )
-    if held != size:
-        bars = resample(bars, size)
-
-    caveats: list[str] = []
-    funding = None
-    if body.funding_source and isinstance(store, BarStore):
-        # From the first bar rather than from `days` ago by the wall clock. The
-        # two are not the same thing - a store that ends last week gives a window
-        # that ended last week - and taking the clock's answer fetched funding for
-        # a period the run does not cover, which is to say none of it.
-        rates = store.read_funding(body.funding_source, body.symbol, start=bars[0].ts)
-        if rates:
-            funding = FundingSchedule.of(body.funding_source, rates)
-            if body.funding_source != body.source or body.source != "shark":
-                caveats.append(
-                    f"Funding is {body.funding_source}'s, charged every 8 hours. The venue "
-                    "publishes none of its own, so this is a proxy - and it settles every "
-                    "4 or 8 hours there depending on the contract"
-                )
-        else:
-            caveats.append(
-                "No funding history for this symbol, so none was charged. A perpetual "
-                "held for days pays it, so this reads better than it would have been"
-            )
-
-    market = PerpetualMarket(
-        symbol=body.symbol,
-        funding=funding,
-        min_quantity=body.min_quantity,
-        min_notional=body.min_notional,
-        quantity_dp=body.quantity_dp,
-    )
     execution = Execution(
         capital=body.capital,
         sizing=body.sizing,
@@ -416,24 +325,21 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         slippage_bps=body.slippage_bps,
         maker_entry=body.maker_entry,
     )
-    result = run(bars, SpecRule(spec), market, interval=size, execution=execution)
-    metrics = measure(result.trades, result.equity, bars, result.capital, size)
-    caveats.extend(result.caveats)
-    # A side that was declared and never traded is the kind of thing a result
-    # should say out loud. It usually means the strategy contradicts itself, or
-    # that every signal for that side was consumed by the other side's exit.
-    for side, declared in (("long", spec.long_entry), ("short", spec.short_entry)):
-        if declared is not None and side not in metrics.by_side:
-            caveats.append(
-                f"This strategy declares {side} entries but never took one, so the result "
-                f"is the other side alone"
-            )
-    if body.maker_entry:
-        caveats.append(
-            "Entries are resting limit orders, filled only where a bar traded through "
-            "them. Exits still pay the taker fee"
+    store = bar_store(request)
+    try:
+        done = run_stored(
+            _service(request),
+            store if isinstance(store, BarStore) else None,
+            spec,
+            Series(body.source, body.symbol, size, body.days),
+            execution,
+            funding_source=body.funding_source,
+            floors=Floors(body.min_quantity, body.min_notional, body.quantity_dp),
         )
+    except NoBars as missing:
+        raise HTTPException(status_code=404, detail=str(missing)) from None
 
+    result, bars = done.result, done.bars
     return RunResponse(
         name=spec.name,
         reads=_sentence(spec),
@@ -445,7 +351,7 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         ended=result.ended.isoformat() if result.ended else None,
         capital=result.capital,
         final=result.final,
-        metrics=_metrics_out(metrics),
+        metrics=_metrics_out(done.metrics),
         curve=_thinned(bars, result.equity),
         trades=[_trade_out(t, size, execution) for t in result.trades[-MAX_TRADES:]],
         trades_total=len(result.trades),
@@ -454,27 +360,8 @@ def run_backtest(request: Request, body: RunRequest) -> RunResponse:
         expired_unfilled=result.expired_unfilled,
         skipped_too_small=result.skipped_too_small,
         skipped_unaffordable=result.skipped_unaffordable,
-        caveats=caveats,
+        caveats=done.caveats,
     )
-
-
-def _stored_interval(service: BarService, source: str, symbol: str, wanted: Interval) -> Interval:
-    """The stored series to build `wanted` out of.
-
-    Prefers the exact size when it is held and otherwise the longest stored size
-    that divides it - resampling up is arithmetic, and down is impossible.
-    """
-    held = {
-        series.interval
-        for series, count in service.held()
-        if series.source == source and series.symbol == symbol and count
-    }
-    if wanted in held:
-        return wanted
-    usable = [i for i in held if wanted.seconds % i.seconds == 0 and i.seconds < wanted.seconds]
-    if not usable:
-        return wanted
-    return max(usable, key=lambda i: i.seconds)
 
 
 def _sentence(spec: Any) -> str:

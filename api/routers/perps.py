@@ -22,20 +22,17 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
-from api.deps import DbPathDep
+from api.deps import DbPathDep, PerpsBrokerDep, PerpsVenueDep
 from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
-from broker.factory import broker_for
-from broker.models import OrderRequest as BrokerOrderRequest
 from broker.models import Tick
 from broker.perp_models import ContractSpec
-from risk.perps import check_perp_order
+from execution.perps import PerpOrder, PositionGone, close, perp_limits, place, protect
 from settings import load_settings
-from storage.perp_order_repo import note_outcome, recent_orders, record_order
+from storage.perp_order_repo import recent_orders
 from streaming import TickHub
 from venues import Capability, for_venue
-from venues import get as get_venue
 from venues.calendar import is_open
 from venues.instruments import instrument
 
@@ -43,7 +40,6 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["perps"], prefix="/api/perps")
 
-VENUE_ID = "shark"
 
 
 class InstrumentResponse(BaseModel):
@@ -150,9 +146,8 @@ def _hub(request: Request) -> TickHub | None:
 
 
 @router.get("", response_model=DeskResponse)
-def desk(request: Request) -> DeskResponse:
+def desk(request: Request, spec: PerpsVenueDep, broker: PerpsBrokerDep) -> DeskResponse:
     """Everything the perpetuals desk needs to draw itself once."""
-    spec = get_venue(VENUE_ID)
     hub = _hub(request)
     stream = getattr(request.app.state, "tick_streams", {}).get(spec.id)
     now = datetime.now(UTC)
@@ -161,7 +156,6 @@ def desk(request: Request) -> DeskResponse:
     # falls back to what the instrument carries and the venue does its own
     # rejecting, which is worse but not broken.
     specs: dict[str, ContractSpec] = {}
-    broker = broker_for(spec)
     if isinstance(broker, PerpetualsData):
         try:
             specs = broker.get_contracts()
@@ -169,7 +163,7 @@ def desk(request: Request) -> DeskResponse:
             log.warning("could not read contract limits")
 
     instruments = []
-    for i in for_venue(VENUE_ID):
+    for i in for_venue(spec.id):
         contract = specs.get(i.symbol)
         streamed = hub.price(i.symbol) if hub is not None else None
         instruments.append(
@@ -190,7 +184,7 @@ def desk(request: Request) -> DeskResponse:
             )
         )
     prices = []
-    for i in for_venue(VENUE_ID):
+    for i in for_venue(spec.id):
         tick = hub.tick(i.symbol) if hub is not None else None
         prices.append(
             PriceResponse(
@@ -282,32 +276,26 @@ class ProtectionRequest(BaseModel):
 
 
 @router.post("/positions/{position_id}/protection", status_code=204)
-def set_protection(position_id: str, body: ProtectionRequest) -> None:
+def set_protection(
+    position_id: str, body: ProtectionRequest, spec: PerpsVenueDep, broker: PerpsBrokerDep
+) -> None:
     """Have the venue hold a take-profit and stop-loss against a position.
 
-    A write against a live account, and the one write on this desk that can only
-    reduce risk: both legs are reduce-only by construction, so the worst outcome
-    of a mistake here is a position closed earlier than intended.
-
     The levels are held by the exchange, which is the point - they fire with this
-    app closed and the machine asleep, on a market that trades overnight.
+    app closed and the machine asleep, on a market that trades overnight. See
+    `execution.perps.protect`.
     """
-    spec = get_venue(VENUE_ID)
-    if not spec.can(Capability.PERPETUALS):
-        raise HTTPException(status_code=501, detail="this venue holds no positions")
-    broker = broker_for(spec)
-    if not isinstance(broker, PerpetualsData):
+    if not spec.can(Capability.PERPETUALS) or not isinstance(broker, PerpetualsData):
         raise HTTPException(status_code=501, detail="this venue cannot hold a stop")
     try:
-        broker.set_protection(
+        protect(
+            broker,
             position_id,
             quantity=body.quantity,
             take_profit=body.take_profit,
             stop_loss=body.stop_loss,
         )
     except BrokerError as exc:
-        # Never swallowed: protection that silently failed to attach is worse than
-        # none, because you would believe it was there.
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
 
@@ -362,24 +350,16 @@ class OrderResponse(BaseModel):
 
 
 @router.post("/orders", response_model=OrderResponse)
-def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> OrderResponse:
-    """Check an order, record it, and send it.
-
-    The order of those verbs is the point. Checks run server-side, so a client
-    cannot skip them, and the attempt is written to the log *before* the request
-    leaves - so a process that dies mid-send still leaves a record that something
-    was tried.
-
-    This sends real orders. The caps in `risk/perps.py` are what stands between a
-    mistake in this program and a position, which is why they are checked here
-    rather than in the browser.
+def place_order(
+    request: Request, body: OrderRequest, db_path: DbPathDep, broker: PerpsBrokerDep
+) -> OrderResponse:
+    """Check an order, record it, and send it - see `execution.perps.place`.
 
     Sizing is against the streamed price for a market order. A market order with
     no price to size against is refused rather than sent blind - the notional cap
     cannot be applied without one, and an uncapped market order is the thing the
     caps exist to prevent.
     """
-    spec = get_venue(VENUE_ID)
     if instrument(body.symbol) is None:
         raise HTTPException(status_code=404, detail=f"{body.symbol} is not on this desk")
 
@@ -392,101 +372,34 @@ def place_order(request: Request, body: OrderRequest, db_path: DbPathDep) -> Ord
             detail="No price for this instrument yet, so the order cannot be sized or capped",
         )
 
-    limits = load_settings().perp_limits
-    broker = broker_for(spec)
-
-    # The venue's own rules for this contract: its leverage ceiling, and the
-    # smallest order it will accept at this price. Asked rather than remembered -
-    # they differ per contract and the size floor moves with the price, because it
-    # is a notional minimum rather than a quantity one.
-    venue_max_leverage = 0.0
-    smallest = 0.0
-    if isinstance(broker, PerpetualsData):
-        try:
-            contract = broker.get_contracts().get(body.symbol)
-            if contract is not None:
-                venue_max_leverage = contract.max_leverage
-                smallest = contract.smallest_order(price)
-        except BrokerError:
-            # Not fatal: without the catalogue the venue's own limits go
-            # unchecked, and it will reject the order itself if they are broken.
-            log.warning("could not read contract limits for %s", body.symbol)
-
-    outcome = check_perp_order(
-        body.quantity,
-        price,
-        body.leverage,
-        limits,
-        venue_max_leverage=venue_max_leverage,
-        smallest_order=smallest,
+    order = PerpOrder(
+        symbol=body.symbol,
+        side=body.side,
+        order_type=body.order_type,
+        quantity=body.quantity,
+        leverage=body.leverage,
+        margin_mode=body.margin_mode,
+        limit_price=body.limit_price,
     )
-
-    now = datetime.now(UTC).isoformat()
-    refused = None if outcome.passed else "; ".join(outcome.reasons)
-    reason = refused or "Sending"
-
     conn = open_db(db_path)
     try:
-        record_id = record_order(
-            conn,
-            at=now,
-            symbol=body.symbol,
-            side=body.side,
-            order_type=body.order_type,
-            quantity=body.quantity,
-            price=price,
-            leverage=body.leverage,
-            notional=outcome.notional,
-            sent=False,
-            reason=reason,
+        placed = place(
+            conn, broker, order, price=price, limits=perp_limits(load_settings()),
+            now=datetime.now(UTC),
         )
-
-        sent = False
-        venue_order_id: str | None = None
-        if outcome.passed:
-            try:
-                # Before the order, and the order is abandoned if it fails. The
-                # venue has no leverage or margin-mode field on an order and applies
-                # whatever the symbol was last set to, so skipping this does not
-                # mean "defaults" - it means whatever the account happens to hold,
-                # which on this one was the maximum of 150x against a chosen 10x.
-                if isinstance(broker, PerpetualsData):
-                    # Leverage and margin mode together: an order carries neither,
-                    # so both would otherwise be whatever the symbol was last set
-                    # to. Leverage was already this bug once.
-                    broker.set_preference(body.symbol, body.leverage, body.margin_mode)
-                result = broker.place_order(
-                    BrokerOrderRequest(
-                        symbol=body.symbol,
-                        quantity=body.quantity,
-                        side=body.side,
-                        order_type=body.order_type,
-                        limit_price=body.limit_price or 0.0,
-                    )
-                )
-                sent = True
-                venue_order_id = result.order_id
-                reason = result.message or "Accepted"
-            except BrokerError as exc:
-                # Covers both steps. If the leverage did not take, nothing is
-                # placed: an order at 150x when 10x was asked for is worse than no
-                # order at all.
-                reason = f"Venue refused it: {exc.message}"
-            note_outcome(
-                conn, record_id, sent=sent, reason=reason, venue_order_id=venue_order_id
-            )
     finally:
         conn.close()
 
+    checks = placed.checks
     return OrderResponse(
-        sent=sent,
-        outcome=reason,
-        checks=[CheckResponse(passed=c.passed, reason=c.reason) for c in outcome.checks],
-        reasons=outcome.reasons,
-        notional=outcome.notional,
+        sent=placed.attempt.sent,
+        outcome=placed.attempt.outcome,
+        checks=[CheckResponse(passed=c.passed, reason=c.reason) for c in checks.checks],
+        reasons=checks.reasons,
+        notional=checks.notional,
         price=price,
-        venue_order_id=venue_order_id,
-        record_id=record_id,
+        venue_order_id=placed.attempt.venue_order_id,
+        record_id=placed.attempt.record_id,
     )
 
 
@@ -651,71 +564,32 @@ class CloseResponse(BaseModel):
 
 
 @router.post("/positions/{position_id}/close", response_model=CloseResponse)
-def close_position(position_id: str, db_path: DbPathDep) -> CloseResponse:
-    """Close one position at the market, for its full size.
+def close_position(
+    position_id: str, db_path: DbPathDep, broker: PerpsBrokerDep
+) -> CloseResponse:
+    """Close one position at the market, for its full size - see `execution.perps.close`.
 
     The desk could open a position and not close one, which is the wrong way round:
     if something has gone wrong, this should be where you get out rather than where
     you watch it happen.
-
-    The size and side come from the venue's own view of the position, read now
-    rather than sent by the client. A stale quantity from a page that has not
-    refreshed would either leave a remainder open or - without reduce-only - open a
-    position the other way. The order is reduce-only regardless, so the worst
-    outcome of a race is that nothing happens.
-
-    No risk checks. Every one of them exists to stop a position being opened by
-    mistake, and none of them should be able to stop one being closed.
     """
-    spec = get_venue(VENUE_ID)
-    broker = broker_for(spec)
     if not isinstance(broker, PerpetualsData):
         raise HTTPException(status_code=501, detail="this venue holds no positions")
-
-    try:
-        position = next(
-            (p for p in broker.get_perp_positions() if p.position_id == position_id), None
-        )
-    except BrokerError as exc:
-        raise HTTPException(status_code=502, detail=exc.message) from exc
-    if position is None:
-        # Already gone, by a stop firing or a close elsewhere. Not an error worth
-        # alarming anyone with, but not a success either.
-        raise HTTPException(status_code=404, detail="That position is no longer open")
-
     conn = open_db(db_path)
     try:
-        record_id = record_order(
-            conn,
-            at=datetime.now(UTC).isoformat(),
-            symbol=position.symbol,
-            side="SELL" if position.is_long else "BUY",
-            order_type="MARKET",
-            quantity=position.quantity,
-            price=position.mark_price,
-            leverage=position.leverage,
-            notional=position.quantity * (position.mark_price or position.entry_price),
-            sent=False,
-            reason="Closing",
-        )
-        try:
-            result = broker.close_position(position)
-        except BrokerError as exc:
-            note_outcome(
-                conn, record_id, sent=False, reason=f"Venue refused it: {exc.message}",
-                venue_order_id=None,
-            )
-            raise HTTPException(status_code=502, detail=exc.message) from exc
-        note_outcome(
-            conn, record_id, sent=True, reason=result.message or "closed",
-            venue_order_id=result.order_id,
-        )
+        attempt = close(conn, broker, position_id, now=datetime.now(UTC))
+    except PositionGone:
+        # Already gone, by a stop firing or a close elsewhere. Not an error worth
+        # alarming anyone with, but not a success either.
+        raise HTTPException(status_code=404, detail="That position is no longer open") from None
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
     finally:
         conn.close()
 
     return CloseResponse(
         closed=True,
-        outcome=result.message or "closed",
-        venue_order_id=result.order_id or None,
-        record_id=record_id,
+        outcome=attempt.outcome,
+        venue_order_id=attempt.venue_order_id,
+        record_id=attempt.record_id,
     )

@@ -8,26 +8,40 @@ logic.
 ## Layers
 
 ```
-strategies/  (strategy definitions: legs, entry/exit rules)
-     |
-risk/        (position sizing, max loss, margin checks, portfolio greeks)
-     |
-analytics/   (Black-Scholes, Greeks, IV, payoff diagrams)
-     |
-broker/      (capability protocols  ->  FyersBroker adapter)
-     |
-storage/     (SQLite: trades, positions, option-chain snapshots)
+api/          HTTP: routers, request/response shapes, dependency wiring
+jobs/         background loops the app starts: alerts, recorders, daily bars
+execution/    the only code that places, closes or protects a position
+strategies/ backtest/ optbt/ alerting/ risk/ analytics/   the domain
+marketdata/   bar store and bar sources        storage/   SQLite repositories
+broker/       capability protocols, per-venue adapter packages, the factory
+venues/       the catalogue: what trades where, its calendar. No I/O
+paths.py settings.py   where files live; credentials
 ```
 
-`strategies/`, `risk/`, and `execution/` depend on the abstract broker
-protocols in `broker/base.py`, never on a concrete adapter like
-`broker/fyers.py`. `execution/` (the `ExecutionManager`) is the only code
-that is allowed to call into `broker/` — strategies emit signals, they never
-place orders directly.
+Dependencies point down this list and never back up: there is no package
+import cycle, and adding one should be treated as a bug. `venues/` imports
+nothing else in the repo, so importing the catalogue never needs a key.
 
-`venues/` sits beside all of it as a catalogue rather than a layer: it
-describes what can be traded and where, and deliberately holds no credentials
-and does no I/O, so importing it is free.
+## Adding a venue
+
+A venue is a template with three parts, and nothing above `broker/` names one:
+
+1. An adapter package, `broker/<venue>/` - the broker implementing the
+   protocols it can (see below), its auth, and for an options venue a
+   `ContractCodec` (`broker/contracts.py`) that reads its contract symbols.
+2. A `VenueSpec` in `venues/registry.py` - asset class, currency, calendar,
+   capabilities - and its instruments in `venues/instruments.py`.
+3. A line in `broker/factory.py`'s `FACTORIES`: how to build it, whether reads
+   are cached, its codec, whether settings configure it, its tick stream.
+
+Everything else is shared. The options endpoints take `?venue=` and default to
+the venue serving index options; the app registers bar sources and starts tick
+streams by looping over the catalogue. `tests/api/test_venues.py` fails when a
+catalogue entry has no factory, or an options venue has no codec.
+
+A data source with no account (Yahoo, Binance) is a bar source in
+`marketdata/`, raising `marketdata/errors.py`; a source of option history
+implements `optbt/data/source.py`'s `ExpiredSource`.
 
 ## The broker contract, split by capability
 
@@ -60,12 +74,15 @@ the adapter actually satisfies, so the claim cannot quietly rot into a lie.
 ## The API is routers, not one module
 
 `api/app.py` is composition only: the app, middleware, the broker error
-handler, the routers, and the built frontend. Endpoints live in
-`api/routers/`, one module per area (`system`, `portfolio`, `market`, `feeds`,
-`strategies`, `orders`, `baskets`). Three modules are shared between them:
-`api/deps.py` (dependency annotations), `api/pricing.py` (marks and payoff
-curves, so two routers cannot come to disagree about what a position is
-worth), and `api/store.py` (opening the database, schema included).
+handler, the routers, the background jobs and the built frontend. Endpoints
+live in `api/routers/`, one module per area, and hold request validation and
+response mapping - the work is in `execution/`, `backtest/service.py`, the
+repositories and the domain packages. Shared between routers: `api/deps.py`
+(providers and annotations - override these in tests), `api/pricing.py`
+(marks and payoff curves), `api/basket_view.py` (a basket as the API shows
+it, also read by the alert pass), `api/charting.py` (candles and lines on the
+wire), and `api/store.py` (opening the database, schema included). No module
+imports a router.
 
 ## Schema changes
 
@@ -93,7 +110,7 @@ version where it was, so it is retried rather than skipped.
 - `broker/fake.py` — `FakeBroker`, an in-memory implementation used by
   contract tests and by anything above `broker/` that wants to test without
   network calls
-- `broker/fyers.py` — `FyersBroker`; parsing logic (`parse_quotes`,
+- `broker/fyers/adapter.py` — `FyersBroker`; parsing logic (`parse_quotes`,
   `parse_option_chain`, `parse_candles`) is factored out as pure functions
   tested against real recorded API responses in `tests/broker/fixtures/`
 - `storage/db.py` + `storage/option_chain_repo.py` — SQLite persistence for
@@ -183,7 +200,7 @@ api/        (FastAPI: app.py composes, routers/ holds the endpoints)
 (same broker/analytics/risk/strategies/storage/execution stack as everything else)
 ```
 
-- `api/dependencies.py` — `get_broker()`/`get_db_path()` as FastAPI
+- `api/deps.py` — `get_broker()`/`get_db_path()` as FastAPI
   dependencies, overridden in tests with `FakeBroker`/a temp DB path so
   the test suite never touches real credentials or the real `data/trading.db`
 - `api/schemas.py` — API wire types, separate from internal domain types
@@ -273,7 +290,7 @@ computed once, server-side - the frontend never re-derives payoff numbers.
 
 ## TOTP auto-login
 
-`broker/fyers_auth.py` replicates Fyers' manual login flow (OTP -> TOTP
+`broker/fyers/auth.py` replicates Fyers' manual login flow (OTP -> TOTP
 verify -> PIN verify -> auth code -> token exchange) against undocumented
 endpoints, so the daily token refresh doesn't need a browser. Ported and
 re-audited from the `multi-broker-sdk` PyPI package rather than taken on as
@@ -289,7 +306,7 @@ change without notice, unlike the official OAuth flow.
 
 ### Token lifetime
 
-`broker/token_store.py` owns the token, and nothing else reads
+`broker/fyers/token_store.py` owns the token, and nothing else reads
 `FYERS_ACCESS_TOKEN` directly. Callers ask for `get_access_token(settings)`,
 which returns the cached token from `.env` while it has time left and
 otherwise re-runs the auto-login above and persists the new one (to `.env`

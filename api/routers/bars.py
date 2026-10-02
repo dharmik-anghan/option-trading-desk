@@ -16,7 +16,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from api.deps import bar_service
+from api.charting import CandleResponse
+from api.deps import require_bar_service
 from marketdata import BarService, Interval
 
 router = APIRouter(tags=["bars"], prefix="/api/bars")
@@ -33,42 +34,17 @@ class SeriesResponse(BaseModel):
     last: str | None
 
 
-class BarResponse(BaseModel):
-    at: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-
-
 class BarsResponse(BaseModel):
     source: str
     symbol: str
     interval: str
     #: Why the series may be short or stale, when there is a reason worth saying.
     note: str
-    bars: list[BarResponse]
+    bars: list[CandleResponse]
 
 
 def _service(request: Request) -> BarService:
-    """The bar store, or a refusal that says why.
-
-    Opened on demand and retried, not once at startup: a desk that came up
-    beside a finishing backfill used to answer this for the rest of the day
-    with the file unlocked the whole time.
-    """
-    service = bar_service(request)
-    if service is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The bar store is open in another process, so no history can be read. "
-                "It is retried every 30 seconds - a backfill script or a second "
-                "copy of the app will be holding it."
-            ),
-        )
-    return service
+    return require_bar_service(request, "no history can be read")
 
 
 @router.get("/series", response_model=list[SeriesResponse])
@@ -119,7 +95,7 @@ def bars(
         interval=str(size),
         note=result.note,
         bars=[
-            BarResponse(
+            CandleResponse(
                 at=b.ts.isoformat(),
                 open=b.open,
                 high=b.high,

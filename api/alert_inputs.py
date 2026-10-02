@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from alerting.models import PositionView, WatchKind
-from alerting.watcher import Inputs
+from api.basket_view import basket_view, rows_for_basket, spot_for
 from api.pricing import basket_live_curve
 from api.store import open_db
 from broker.base import OptionsBroker, PerpetualsData
@@ -26,6 +26,7 @@ from broker.models import OptionChain
 from execution.basket_status import get_basket_payoff
 from execution.portfolio_status import get_portfolio_status
 from feeds.fetch import Feeds
+from jobs.alert_watcher import Inputs
 from storage.alert_repo import list_watches
 from storage.basket_repo import list_baskets as repo_list_baskets
 from streaming import TickHub
@@ -70,10 +71,6 @@ def gather(
     one - `events_loaded` carries that distinction, since the two mean opposite
     things to the engine.
     """
-    # Imported here rather than at module scope: the baskets router imports this
-    # module's neighbours, and a top-level import would close the circle.
-    from api.routers.baskets import _basket_to_response, _rows_for_basket, _spot_for
-
     total_pnl: float | None = None
     try:
         status = get_portfolio_status(broker)
@@ -129,11 +126,11 @@ def gather(
         except Exception:  # noqa: BLE001 - an unpriced basket is still worth judging
             valued = ([], None, None)
         views.append(
-            _basket_to_response(
+            basket_view(
                 basket, codec,
                 valued,
-                _rows_for_basket(basket, chains),
-                _spot_for(basket, chains),
+                rows_for_basket(basket, chains),
+                spot_for(basket, chains),
             )
         )
 

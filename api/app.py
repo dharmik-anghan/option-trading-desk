@@ -33,7 +33,6 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 import paths
-from alerting.watcher import Watcher
 from api.alert_inputs import gather
 from api.deps import get_broker, get_db_path, get_feeds, get_holidays
 from api.errors import broker_error_handler
@@ -61,15 +60,16 @@ from broker.base import AsyncStreaming, OptionsBroker
 from broker.errors import BrokerError
 from broker.factory import broker_for, codec_for, is_configured, stream_for
 from broker.factory import options_broker as default_options_broker
+from jobs.alert_watcher import Watcher
+from jobs.daily_bars import DailyBarUpdater
+from jobs.preopen_recorder import PreOpenRecorder
+from jobs.vol_recorder import VolRecorder
 from marketdata import BarService, nse_preopen
-from marketdata.daily_updater import DailyBarUpdater
 from marketdata.holder import BarStoreHolder
 from marketdata.models import Bar
 from marketdata.venue import VenueBars, to_bar
 from notify import Telegram, TelegramConfig
 from settings import load_settings
-from storage.preopen_recorder import PreOpenRecorder
-from storage.vol_recorder import VolRecorder
 from streaming import TickHub
 from universe.nse import daily_series
 from venues import AssetClass, Capability, listed, listed_on, option_underlyings, serving

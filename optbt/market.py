@@ -92,6 +92,22 @@ class Quote:
     oi: int
 
 
+@dataclass(frozen=True)
+class Coverage:
+    """What the store holds for one underlying, and the window a run can use."""
+
+    #: The tradable window: days the index traded that option bars exist for.
+    first_day: date | None
+    last_day: date | None
+    #: Settled expiries the calendar lists, and how many of them are held.
+    expiries_listed: int
+    expiries_held: int
+    first_expiry: date | None
+    last_expiry: date | None
+    contracts: int
+    bars: int
+
+
 class History:
     """Read access to the option store. One underlying per instance.
 
@@ -122,6 +138,46 @@ class History:
 
     def close(self) -> None:
         self._conn.close()
+
+    def underlyings(self) -> list[str]:
+        """Every underlying the store holds option bars for."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT underlying FROM contract WHERE bars > 0 ORDER BY 1"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def coverage(self) -> Coverage:
+        held = self._conn.execute(
+            "SELECT count(DISTINCT expiry), min(expiry), max(expiry), count(*), "
+            "coalesce(sum(bars), 0) FROM contract WHERE underlying = ? AND kind <> 'FUT'",
+            [self.underlying],
+        ).fetchone()
+        # Not the first option bar - a long-dated contract's listing reaches back
+        # to 2021, eighteen months before any index data, which made that the
+        # default start of every run.
+        days = self._conn.execute(
+            "SELECT greatest(min(CAST(i.ts AS DATE)), (SELECT min(CAST(ts AS DATE)) "
+            "FROM option_bar WHERE underlying = ?)), least(max(CAST(i.ts AS DATE)), "
+            "(SELECT max(CAST(ts AS DATE)) FROM option_bar WHERE underlying = ?)) "
+            "FROM index_bar i WHERE i.symbol = ?",
+            [self.underlying, self.underlying, self.index_symbol],
+        ).fetchone()
+        listed = self._conn.execute(
+            "SELECT count(*) FROM expiry WHERE underlying = ? AND kind = 'options' "
+            "AND expiry < current_date",
+            [self.underlying],
+        ).fetchone()
+        assert held is not None and days is not None and listed is not None
+        return Coverage(
+            first_day=days[0],
+            last_day=days[1],
+            expiries_listed=int(listed[0]),
+            expiries_held=int(held[0]),
+            first_expiry=held[1],
+            last_expiry=held[2],
+            contracts=int(held[3]),
+            bars=int(held[4]),
+        )
 
     # ------------------------------------------------------------- calendar
 

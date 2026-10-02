@@ -11,9 +11,6 @@ import math
 from fastapi import APIRouter, HTTPException
 
 from analytics.payoff import (
-    Leg,
-    PayoffResult,
-    analyze,
     payoff_curve_points,
 )
 from api.deps import BrokerDep
@@ -27,62 +24,10 @@ from api.schemas import (
     RiskCheckResponse,
     StrategySignalResponse,
 )
-from broker.base import OptionsBroker
-from broker.models import OptionChain
-from risk.pre_trade_check import (
-    DEFAULT_MAX_LOSS_LIMIT,
-    DEFAULT_MAX_RISK_PCT,
-    DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
-    PreTradeCheckResult,
-    run_pre_trade_checks,
-)
-from strategies.base import Strategy
-from strategies.credit_spread import CreditSpread
-from strategies.iron_condor import IronCondor
-from strategies.short_strangle import ShortStrangle
+from execution.strategy_review import UnknownStrategy, review
 
 router = APIRouter()
 
-
-_STRATEGY_STRIKE_COUNT = 40
-
-def _strategies() -> dict[str, Strategy]:
-    # Built fresh per request rather than module-level, so each request
-    # gets its own strategy instance (they're mutable dataclasses).
-    return {
-        "short_strangle": ShortStrangle(),
-        "iron_condor": IronCondor(),
-        "credit_spread_bullish": CreditSpread(direction="bullish"),
-        "credit_spread_bearish": CreditSpread(direction="bearish"),
-    }
-
-def _evaluate(
-    name: str, symbol: str, quantity: int, broker: OptionsBroker, expiry_token: str = ""
-) -> tuple[OptionChain, list[Leg], PayoffResult, PreTradeCheckResult]:
-    strategy = _strategies().get(name)
-    if strategy is None:
-        raise HTTPException(status_code=404, detail=f"Unknown strategy '{name}'")
-    strategy.quantity = quantity  # type: ignore[attr-defined]
-
-    # 40 either side, not 15: a 0.08-delta wing on a monthly expiry sits well
-    # outside a +/-3% window, and clamping it to the window edge is what made
-    # the short and long legs land on the same strike.
-    chain = broker.get_option_chain(
-        symbol, strike_count=_STRATEGY_STRIKE_COUNT, expiry_token=expiry_token
-    )
-    legs = strategy.build_legs(chain)
-    payoff = analyze(legs)
-
-    funds = broker.get_funds()
-    pre_trade = run_pre_trade_checks(
-        payoff=payoff,
-        available_funds=funds.available_balance,
-        required_margin=DEFAULT_REQUIRED_MARGIN_PLACEHOLDER,
-        capital=funds.total_balance,
-        max_risk_pct=DEFAULT_MAX_RISK_PCT,
-        max_loss_limit=DEFAULT_MAX_LOSS_LIMIT,
-    )
-    return chain, legs, payoff, pre_trade
 
 @router.get("/api/strategies/{name}", response_model=StrategySignalResponse)
 def strategy_signal(
@@ -92,7 +37,13 @@ def strategy_signal(
     quantity: int = 1,
     expiry: str = "",
 ) -> StrategySignalResponse:
-    chain, legs, result, pre_trade = _evaluate(name, symbol, quantity, broker, expiry)
+    try:
+        reviewed = review(name, symbol, quantity, broker, expiry)
+    except UnknownStrategy:
+        raise HTTPException(status_code=404, detail=f"Unknown strategy '{name}'") from None
+    chain, legs, result, pre_trade = (
+        reviewed.chain, reviewed.legs, reviewed.payoff, reviewed.pre_trade
+    )
     years = years_to_expiry(chain)
 
     return StrategySignalResponse(

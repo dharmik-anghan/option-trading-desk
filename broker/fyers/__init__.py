@@ -4,7 +4,9 @@
     auth.py         TOTP auto-login, for the daily token
     token_store.py  where the token is kept, and refreshing it
     symbols.py      reading Fyers' contract symbols
-    expired.py      the expired F&O endpoints, for option history
+
+The expired F&O client, for option history, is `optbt/data/fyers.py`: it
+answers the backtester's own interface, so it lives beside it.
 """
 
 from broker.fyers.adapter import FyersBroker

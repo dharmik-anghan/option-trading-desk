@@ -104,41 +104,7 @@ class Coverage(BaseModel):
 
 
 def _coverage(h: History) -> Coverage:
-    conn = h._conn
-    held = conn.execute(
-        "SELECT count(DISTINCT expiry), min(expiry), max(expiry), count(*), "
-        "coalesce(sum(bars), 0) FROM contract WHERE underlying = ? AND kind <> 'FUT'",
-        [h.underlying],
-    ).fetchone()
-    # The tradable window: days the index traded (a run steps through those)
-    # that option bars exist for. Not the first option bar - a long-dated
-    # contract's listing reaches back to 2021, eighteen months before any
-    # index data, which made that the default start of every run.
-    days = conn.execute(
-        "SELECT greatest(min(CAST(i.ts AS DATE)), (SELECT min(CAST(ts AS DATE)) "
-        "FROM option_bar WHERE underlying = ?)), least(max(CAST(i.ts AS DATE)), "
-        "(SELECT max(CAST(ts AS DATE)) FROM option_bar WHERE underlying = ?)) "
-        "FROM index_bar i WHERE i.symbol = ?",
-        [h.underlying, h.underlying, h.index_symbol],
-    ).fetchone()
-    listed = conn.execute(
-        "SELECT count(*) FROM expiry WHERE underlying = ? AND kind = 'options' "
-        "AND expiry < current_date",
-        [h.underlying],
-    ).fetchone()
-    assert held is not None and days is not None and listed is not None
-    return Coverage(
-        store=str(_store_path()),
-        underlying=h.underlying,
-        first_day=days[0],
-        last_day=days[1],
-        expiries_listed=int(listed[0]),
-        expiries_held=int(held[0]),
-        first_expiry=held[1],
-        last_expiry=held[2],
-        contracts=int(held[3]),
-        bars=int(held[4]),
-    )
+    return Coverage(store=str(_store_path()), underlying=h.underlying, **vars(h.coverage()))
 
 
 @router.get("/coverage")
@@ -155,12 +121,7 @@ def underlyings() -> list[Coverage]:
     a change to the page.
     """
     with _history() as h:
-        names = [
-            r[0]
-            for r in h._conn.execute(
-                "SELECT DISTINCT underlying FROM contract WHERE bars > 0 ORDER BY 1"
-            ).fetchall()
-        ]
+        names = h.underlyings()
     out = []
     for name in names:
         if name in OPTION_SERIES:

@@ -1,7 +1,7 @@
 """Where option history comes from: what a source must answer.
 
 The backfill asks for expiries, the contracts listed on one, and their candles.
-An adapter answers - Fyers' expired F&O client is `broker/fyers/expired.py`;
+An adapter answers - Fyers' expired F&O client is `optbt/data/fyers.py`;
 tests use a fake.
 """
 

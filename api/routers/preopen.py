@@ -1,13 +1,12 @@
 """NSE's pre-open auction, as the desk has recorded it.
 
-Read-only. The recorder in `storage/preopen_recorder.py` writes it each morning
+Read-only. The recorder in `jobs/preopen_recorder.py` writes it each morning
 and `scripts/preopen.py` imports older days from downloaded files; this only
 shows what is there.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from pydantic import BaseModel
 
 from api.deps import DbPathDep
 from api.store import open_db
-from storage.preopen_repo import quotes_for_day, recorded_days
+from storage.preopen_repo import breadth_by_day, quotes_for_day, recorded_days
 from universe.nse import INDICES, load
 
 router = APIRouter(tags=["preopen"], prefix="/api/preopen")
@@ -96,21 +95,13 @@ class SessionOut(BaseModel):
     filters: list[FilterOut]
 
 
-def _breadth(conn: sqlite3.Connection) -> dict[str, tuple[int, int, int]]:
-    rows = conn.execute(
-        "SELECT day, SUM(change > 0), SUM(change < 0), SUM(change = 0) "
-        "FROM preopen_quote GROUP BY day"
-    ).fetchall()
-    return {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in rows}
-
-
 def _days(db_path: Path) -> list[DayOut]:
     conn = open_db(db_path)
     try:
-        breadth = _breadth(conn)
+        breadth = breadth_by_day(conn)
         out = []
         for d in recorded_days(conn):
-            up, down, flat = breadth.get(d.day.isoformat(), (0, 0, 0))
+            up, down, flat = breadth.get(d.day, (0, 0, 0))
             out.append(DayOut(
                 day=d.day, source=d.source, as_of=d.as_of, rows=d.rows,
                 index=IndexOut(**vars(d.index)) if d.index else None,

@@ -7,7 +7,7 @@
     python scripts/preopen.py list
 
 The desk records each session by itself while it is running (see
-`storage/preopen_recorder.py`); this is for a day it was not running, and for
+`jobs/preopen_recorder.py`); this is for a day it was not running, and for
 files downloaded from the page before any of this existed. NSE serves only the
 latest session, so no older day can be fetched - a CSV is the only way back.
 

@@ -8,39 +8,9 @@ which is the reading anyone comparing days would want.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
 from datetime import date, datetime
 
-
-@dataclass(frozen=True)
-class VolSnapshot:
-    """What the market was charging, on one day, for one underlying."""
-
-    underlying: str
-    day: date
-    at: datetime
-    spot: float
-    expiry: str
-    days_to_expiry: float
-    atm_strike: float
-    call_iv: float | None
-    put_iv: float | None
-    atm_iv: float | None
-    straddle: float | None
-    india_vix: float | None
-
-    @property
-    def expected_move_pct(self) -> float | None:
-        """The straddle as a share of spot: the market's own expected move.
-
-        Not annualised and not a standard deviation - it is what the options are
-        priced to cover between now and this expiry, which is the number a seller
-        is actually short.
-        """
-        if self.straddle is None or self.spot <= 0:
-            return None
-        return self.straddle / self.spot * 100.0
-
+from analytics.vol_snapshot import VolSnapshot
 
 
 def save_vol_snapshot(conn: sqlite3.Connection, snapshot: VolSnapshot) -> None:

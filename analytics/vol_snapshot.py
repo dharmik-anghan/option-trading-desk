@@ -13,10 +13,40 @@ are recorded; neither substitutes for the other.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from broker.models import OptionChain
-from storage.vol_repo import VolSnapshot
+
+
+@dataclass(frozen=True)
+class VolSnapshot:
+    """What the market was charging, on one day, for one underlying."""
+
+    underlying: str
+    day: date
+    at: datetime
+    spot: float
+    expiry: str
+    days_to_expiry: float
+    atm_strike: float
+    call_iv: float | None
+    put_iv: float | None
+    atm_iv: float | None
+    straddle: float | None
+    india_vix: float | None
+
+    @property
+    def expected_move_pct(self) -> float | None:
+        """The straddle as a share of spot: the market's own expected move.
+
+        Not annualised and not a standard deviation - it is what the options are
+        priced to cover between now and this expiry, which is the number a seller
+        is actually short.
+        """
+        if self.straddle is None or self.spot <= 0:
+            return None
+        return self.straddle / self.spot * 100.0
 
 
 def _day_in_ist(at: datetime) -> date:

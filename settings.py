@@ -5,8 +5,6 @@ import sys
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from risk.perps import PerpLimits
-
 
 class Settings(BaseSettings):
     """Configuration for every venue the desk can talk to.
@@ -76,14 +74,6 @@ class Settings(BaseSettings):
     @property
     def has_shark(self) -> bool:
         return bool(self.shark_api_key and self.shark_api_secret)
-
-    @property
-    def perp_limits(self) -> PerpLimits:
-        return PerpLimits(
-            max_quantity=self.shark_max_quantity,
-            max_notional=self.shark_max_notional,
-            max_leverage=self.shark_max_leverage,
-        )
 
     @property
     def has_telegram(self) -> bool:
