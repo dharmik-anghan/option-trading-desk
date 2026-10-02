@@ -6,8 +6,8 @@ without actually logging in (which would burn the day's real login and
 require checking in real credentials), so instead these tests inject a fake
 HTTP session and assert the request sequence and shape is correct - the
 same dependency-injection approach used elsewhere in this codebase for
-untestable I/O boundaries (e.g. `execution.manager.ExecutionManager` takes
-a `Broker`, tested here against a fake).
+untestable I/O boundaries (e.g. `execution.perps.place` takes a `Broker`,
+tested against a stub).
 """
 
 from __future__ import annotations

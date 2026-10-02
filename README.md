@@ -7,10 +7,11 @@ It is built around the positions you already hold rather than around order
 entry: what they are worth, what they would be worth if the index moved, which
 short is being tested, and what is scheduled to happen before they expire.
 
-> **This connects to a live brokerage account.** The desk reads real positions
-> and real funds. The order-placement UI has been removed for now, but
-> `POST /api/orders/place` still exists and places real orders with real money.
-> Treat the credentials in `.env` accordingly — see [Security](#security).
+> **This connects to live brokerage accounts.** The desk reads real positions
+> and real funds. The options desk places no orders, but the perpetuals desk
+> does: `POST /api/perps/orders` places real orders with real money, behind the
+> caps in `risk/perps.py`. Treat the credentials in `.env` accordingly — see
+> [Security](#security).
 
 ## What is on the screen
 

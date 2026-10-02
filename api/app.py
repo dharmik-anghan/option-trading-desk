@@ -5,13 +5,6 @@ manageable while the desk had one venue and one asset class. It no longer is, so
 the endpoints live in `api/routers/`, grouped by what they are about, and what
 is left here is assembly: the app, its middleware, the broker error handler, the
 routers, and the built frontend.
-
-Where the safety model lives, since it is easy to lose in a split: the review
-step (`GET /api/strategies/{name}`) returns the same pre-trade checks that
-`POST /api/orders/place` re-runs and enforces server-side. Placement is refused
-with a 400 when they fail - never merely hidden behind a disabled button, since
-a client-side-only gate is trivially bypassable. The deliberate-click part of
-that model is the frontend's review screen.
 """
 
 from __future__ import annotations
@@ -45,12 +38,10 @@ from api.routers import (
     feeds,
     market,
     optbt,
-    orders,
     perps,
     portfolio,
     preopen,
     rrg,
-    strategies,
     structure,
     system,
     volatility,
@@ -316,8 +307,6 @@ for _router in (
     perps.router,
     rrg.router,
     feeds.router,
-    strategies.router,
-    orders.router,
     baskets.router,
     structure.router,
     volatility.router,

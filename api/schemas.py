@@ -22,44 +22,9 @@ class PortfolioResponse(BaseModel):
     total_pnl: float
 
 
-class LegResponse(BaseModel):
-    option_type: OptionType
-    strike: float
-    premium: float
-    quantity: int
-    side: Side
-    symbol: str | None
-
-
-class RiskCheckResponse(BaseModel):
-    passed: bool
-    reason: str
-
-
 class PayoffPoint(BaseModel):
     spot: float
     payoff: float
-
-
-class StrategySignalResponse(BaseModel):
-    strategy: str
-    symbol: str
-    underlying_ltp: float
-    legs: list[LegResponse]
-    # None represents unbounded risk/reward (Python's math.inf/-math.inf).
-    # json.dumps would otherwise emit the literal token `Infinity`, which
-    # is not valid JSON and a browser's JSON.parse rejects outright.
-    max_profit: float | None
-    max_loss: float | None
-    breakevens: list[float]
-    payoff_curve: list[PayoffPoint]
-    # What the position is worth *now* rather than at expiry, priced off each
-    # leg's live IV. Empty when the feed gave us no usable IV or no expiry to
-    # measure time against - better to draw one curve than a made-up second.
-    payoff_curve_today: list[PayoffPoint]
-    days_to_expiry: float | None
-    pre_trade_checks: list[RiskCheckResponse]
-    can_place: bool
 
 
 class PortfolioHistoryPoint(BaseModel):
@@ -67,27 +32,6 @@ class PortfolioHistoryPoint(BaseModel):
     realized_pnl: float
     unrealized_pnl: float
     total_pnl: float
-
-
-class PlaceOrderRequest(BaseModel):
-    strategy: str
-    symbol: str
-    quantity: int = 1
-    basket_name: str | None = None
-    # Which expiry to trade. Empty means the nearest one, matching the chain
-    # endpoint's default - if it were left implicit, the order could fill a
-    # different expiry than the one previewed.
-    expiry: str | None = None
-
-
-class OrderResultResponse(BaseModel):
-    order_id: str
-    message: str
-
-
-class PlaceOrderResponse(BaseModel):
-    orders: list[OrderResultResponse]
-    basket_id: int
 
 
 class NewBasketLegRequest(BaseModel):

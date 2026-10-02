@@ -153,7 +153,8 @@ ticks (see `docs/PHASES.md`).
   strategies from the chain row - payoff math itself doesn't need it, only
   `execution/` does, to place a real order
 - `broker/base.py` gained `place_order()`/`get_positions()`
-- `execution/manager.py` — `ExecutionManager`: the *only* code allowed to
+- `execution/manager.py` (**removed 2026-10**, with the order and strategy
+  review endpoints, once nothing called them) — `ExecutionManager`: the *only* code allowed to
   call `Broker.place_order`, converting `Leg`s to `OrderRequest`s
 - `execution/confirm.py` — `confirm_and_place`: the human-in-the-loop gate.
   Requires the exact string `CONFIRM`; never even prompts if Phase 4's
@@ -223,7 +224,8 @@ The CLI's typed-`CONFIRM` gate doesn't translate one-to-one to a browser;
 the dashboard uses a single-click "Place order" button on a review screen
 instead (explicit choice — less friction than the CLI). Because a
 disabled-button-only gate is trivially bypassable (anyone can call the API
-directly), **the server is the real gate**: `POST /api/orders/place`
+directly), **the server is the real gate** (this flow was **removed in
+2026-10**; `execution/perps.py` follows the same rule for perpetuals): `POST /api/orders/place`
 re-evaluates the strategy and re-runs `risk.pre_trade_check.run_pre_trade_checks`
 itself, and refuses with `400` if any check fails, regardless of what the
 client sends. `GET /api/strategies/{name}` returns the same

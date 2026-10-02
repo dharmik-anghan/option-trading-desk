@@ -122,7 +122,7 @@ export function getHealth(): Promise<Health> {
  * either way.
  * ---------------------------------------------------------------------- */
 
-/** The strategies the backend actually registers (api/app.py `_strategies`). */
+/** Strategy names a structure can be labelled with. */
 export const STRATEGIES = [
   { id: "iron_condor", label: "Iron condor" },
   { id: "short_strangle", label: "Short strangle" },

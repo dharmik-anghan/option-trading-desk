@@ -3,8 +3,8 @@
 The order of those verbs is the point. Checks run here, server-side, so no
 client can skip them, and the attempt is written to the log *before* the
 request leaves - so a process that dies mid-send still leaves a record that
-something was tried. Like `execution/manager.py` for options, this is the only
-code that places, closes or protects a perpetuals position.
+something was tried. This is the only code that places, closes or protects a
+perpetuals position.
 """
 
 from __future__ import annotations

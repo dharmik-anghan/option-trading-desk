@@ -7,9 +7,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from api.app import app
-from api.deps import get_broker
-from broker.fake import FakeBroker
 from storage.db import connect, init_schema
 from storage.portfolio_repo import save_portfolio_snapshot
 
@@ -43,122 +40,6 @@ def test_option_chain_endpoint_returns_chain(client: TestClient) -> None:
     data = response.json()
     assert data["underlying_symbol"] == "NSE:NIFTY50-INDEX"
     assert len(data["rows"]) > 0
-
-
-def test_strategy_endpoint_returns_signal(client: TestClient) -> None:
-    response = client.get("/api/strategies/iron_condor?symbol=NSE:NIFTY50-INDEX")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["strategy"] == "iron_condor"
-    assert len(data["legs"]) == 4
-    assert isinstance(data["max_loss"], float)
-    assert len(data["payoff_curve"]) > 0
-    assert all("spot" in p and "payoff" in p for p in data["payoff_curve"])
-
-
-def test_strategy_endpoint_serializes_unbounded_risk_as_json_null(client: TestClient) -> None:
-    # A naked short strangle has unbounded max loss (math.inf/-math.inf in
-    # Python). Python's json module happily emits the literal token
-    # `Infinity`, but that is NOT valid JSON - a browser's JSON.parse
-    # rejects it outright. Must serialize as `null`, not a raw float.
-    response = client.get("/api/strategies/short_strangle?symbol=NSE:NIFTY50-INDEX")
-
-    assert response.status_code == 200
-    assert "Infinity" not in response.text
-    data = response.json()
-    assert data["max_loss"] is None
-
-
-def test_strategy_endpoint_rejects_unknown_strategy(client: TestClient) -> None:
-    response = client.get("/api/strategies/not_a_real_strategy?symbol=NSE:NIFTY50-INDEX")
-
-    assert response.status_code == 404
-
-
-def test_strategy_endpoint_includes_pre_trade_checks(client: TestClient) -> None:
-    response = client.get("/api/strategies/iron_condor?symbol=NSE:NIFTY50-INDEX")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["can_place"] is True
-    assert len(data["pre_trade_checks"]) >= 1
-    assert all("passed" in c and "reason" in c for c in data["pre_trade_checks"])
-
-
-def test_strategy_endpoint_cannot_place_when_funds_insufficient() -> None:
-    broker = FakeBroker(underlying_ltp=100.0, available_balance=1.0)
-    app.dependency_overrides[get_broker] = lambda: broker
-    try:
-        response = TestClient(app).get(
-            "/api/strategies/iron_condor?symbol=NSE:NIFTY50-INDEX"
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    assert response.json()["can_place"] is False
-
-
-def test_place_order_succeeds_and_reaches_the_broker(
-    client: TestClient, fake_broker: FakeBroker
-) -> None:
-    response = client.post(
-        "/api/orders/place",
-        json={"strategy": "iron_condor", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["orders"]) == 4
-    assert len(fake_broker.placed_orders) == 4
-    assert isinstance(data["basket_id"], int)
-
-
-def test_place_order_creates_a_basket_with_the_placed_legs(client: TestClient) -> None:
-    place_response = client.post(
-        "/api/orders/place",
-        json={
-            "strategy": "iron_condor",
-            "symbol": "NSE:NIFTY50-INDEX",
-            "quantity": 1,
-            "basket_name": "My 45 DTE IC",
-        },
-    )
-    basket_id = place_response.json()["basket_id"]
-
-    basket_response = client.get(f"/api/baskets/{basket_id}")
-
-    assert basket_response.status_code == 200
-    basket = basket_response.json()
-    assert basket["name"] == "My 45 DTE IC"
-    assert basket["strategy"] == "iron_condor"
-    assert len(basket["legs"]) == 4
-    assert all(leg["is_open"] for leg in basket["legs"])
-
-
-def test_place_order_blocked_when_pre_trade_checks_fail() -> None:
-    broker = FakeBroker(underlying_ltp=100.0, available_balance=1.0)
-    app.dependency_overrides[get_broker] = lambda: broker
-    try:
-        response = TestClient(app).post(
-            "/api/orders/place",
-            json={"strategy": "iron_condor", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 400
-    assert len(broker.placed_orders) == 0
-
-
-def test_place_order_rejects_unknown_strategy(client: TestClient) -> None:
-    response = client.post(
-        "/api/orders/place",
-        json={"strategy": "not_real", "symbol": "NSE:NIFTY50-INDEX", "quantity": 1},
-    )
-
-    assert response.status_code == 404
 
 
 def test_portfolio_history_endpoint_returns_saved_snapshots(
