@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import bisect
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime
 
-from optbt.market import SESSION_LAST_BAR, SESSION_OPEN, History
+from optbt.source import MarketSource
 from venues.instruments import INDIA_VIX
 
 #: Where the open sits against the day's pivots. Ordered low to high.
@@ -83,42 +83,23 @@ class Day:
 class Context:
     """Daily context for one underlying, loaded once per run."""
 
-    def __init__(self, history: History) -> None:
-        self._history = history
-        conn = history._conn
-        session = "CAST(ts AS TIME) BETWEEN ? AND ?"
-        rows = conn.execute(
-            f"""
-            SELECT CAST(ts AS DATE) AS d, arg_min(open, ts), max(high), min(low), arg_max(close, ts)
-            FROM index_bar WHERE symbol = ? AND resolution = '1' AND {session}
-            GROUP BY d ORDER BY d
-            """,
-            [history.index_symbol, SESSION_OPEN, SESSION_LAST_BAR],
-        ).fetchall()
-        vix = dict(
-            conn.execute(
-                f"""
-                SELECT CAST(ts AS DATE) AS d, arg_max(close, ts)
-                FROM index_bar WHERE symbol = ? AND resolution = '1' AND {session}
-                GROUP BY d
-                """,
-                [INDIA_VIX, SESSION_OPEN, SESSION_LAST_BAR],
-            ).fetchall()
-        )
+    def __init__(self, source: MarketSource) -> None:
+        self._source = source
+        vix = {d: c for d, _o, _h, _lo, c in source.daily(INDIA_VIX)}
         self._days: dict[date, Day] = {}
         prev: tuple[float, float, float] | None = None
-        for d, o, h, lo, c in rows:
+        for d, o, h, lo, c in source.daily(source.index_symbol):
             self._days[d] = Day(
                 day=d,
-                open=float(o),
-                high=float(h),
-                low=float(lo),
-                close=float(c),
+                open=o,
+                high=h,
+                low=lo,
+                close=c,
                 prev_close=prev[2] if prev else None,
                 pivots=Pivots.of(*prev) if prev else None,
-                vix_close=float(vix[d]) if d in vix else None,
+                vix_close=vix.get(d),
             )
-            prev = (float(h), float(lo), float(c))
+            prev = (h, lo, c)
         self._order = sorted(self._days)
         self._vix_closes = [self._days[d].vix_close for d in self._order]
 
@@ -127,12 +108,7 @@ class Context:
 
     def vix_at(self, ts: datetime) -> float | None:
         """India VIX at the close of the bar named `ts`, or the last one before."""
-        row = self._history._conn.execute(
-            "SELECT close FROM index_bar WHERE symbol = ? AND resolution = '1' "
-            "AND ts <= ? AND ts >= ? ORDER BY ts DESC LIMIT 1",
-            [INDIA_VIX, ts, datetime.combine(ts.date(), time(0))],
-        ).fetchone()
-        return float(row[0]) if row else None
+        return self._source.close_at(INDIA_VIX, ts)
 
     def vix_percentile(self, d: date, value: float, lookback: int = 252) -> float | None:
         """Where `value` ranks among the `lookback` sessions' VIX closes before `d`.

@@ -30,7 +30,8 @@ from typing import Literal, Protocol
 
 from optbt.context import Context as DailyContext
 from optbt.costs import TICK, Charges, CostModel
-from optbt.market import Bar, History, OptionKey, View
+from optbt.market import Bar, OptionKey, View
+from optbt.source import MarketSource
 
 #: Bars an opening order may wait for a price before it is abandoned.
 OPEN_ORDER_PATIENCE = 5
@@ -247,7 +248,7 @@ class Result:
 class Engine:
     def __init__(
         self,
-        history: History,
+        history: MarketSource,
         strategy: Strategy,
         costs: CostModel | None = None,
     ) -> None:
@@ -281,7 +282,7 @@ class Engine:
             bars = self.history.index_day(day)
             if not bars:
                 continue
-            self.view = View(self.history, day, bars, self)
+            self.view = View(self.history, day, bars, lambda: self.context)
             self.strategy.on_day(ctx)
             for i, bar in enumerate(bars):
                 self._fill(day, bar)

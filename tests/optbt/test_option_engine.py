@@ -13,10 +13,11 @@ import duckdb
 import pytest
 
 from optbt.costs import Charges, CostModel
+from optbt.data.history import History
 from optbt.data.models import Candle, Contract, Kind
 from optbt.data.store import SCHEMA
 from optbt.engine import Context, Engine, Side
-from optbt.market import History, OptionKey
+from optbt.market import OptionKey
 from optbt.strategies.straddle import Straddle, StraddleConfig, atm_strike
 
 DAY = date(2026, 9, 21)
@@ -515,7 +516,7 @@ def test_a_leg_whose_expiry_is_a_holiday_settles_on_the_session_before() -> None
 def test_old_lot_positions_in_open_interest_do_not_shrink_the_lot() -> None:
     # The 27 Mar 2025 monthly: 75 was the lot, but 6% of its open interest was
     # still lots of 25 from 2024. 25 divides every figure; it must not win.
-    from optbt.market import _vote_lot
+    from optbt.data.history import _vote_lot
 
     oi = [75 * k for k in range(1, 95)] + [25 * k for k in range(1, 20) if k % 3]
     volume = [75 * k for k in range(1, 50)]
@@ -524,7 +525,7 @@ def test_old_lot_positions_in_open_interest_do_not_shrink_the_lot() -> None:
 
 def test_stray_volumes_do_not_hide_the_lot_open_interest_shows() -> None:
     # 25 Mar 2026: lot 65, open interest 89% whole lots, volume only 60%.
-    from optbt.market import _vote_lot
+    from optbt.data.history import _vote_lot
 
     oi = [65 * k for k in range(1, 90)] + [75 * k for k in range(1, 11)]
     volume = [65 * k for k in range(1, 61)] + [45502 + k for k in range(40)]

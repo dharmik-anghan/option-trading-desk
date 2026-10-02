@@ -30,9 +30,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import paths
 from optbt.costs import CostModel
+from optbt.data.history import History
 from optbt.data.models import Kind
 from optbt.engine import Engine, Leg, Level, Result, Side, Trade
-from optbt.market import History, OptionKey
+from optbt.market import OptionKey
 from optbt.results import summarise
 from optbt.strategies.legs import (
     Adjustment,

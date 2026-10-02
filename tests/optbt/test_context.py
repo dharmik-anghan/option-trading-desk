@@ -8,8 +8,8 @@ import duckdb
 import pytest
 
 from optbt.context import Context, Pivots
+from optbt.data.history import History
 from optbt.data.store import SCHEMA
-from optbt.market import History
 from optbt.strategies.legs import DayFilter
 
 

@@ -18,8 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import paths  # noqa: E402
+from optbt.data.history import History  # noqa: E402
 from optbt.engine import Engine  # noqa: E402
-from optbt.market import History  # noqa: E402
 from optbt.results import report, summarise  # noqa: E402
 from optbt.strategies.straddle import Straddle, StraddleConfig  # noqa: E402
 
