@@ -239,6 +239,13 @@ def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]
     high reports a break on every bar after it, and the chart becomes a row of
     identical lines rather than a record of the moments something gave way.
 
+    A failed attempt moves the level. A bar that trades through it but closes
+    back on the near side has swept it, and what has to be closed beyond now is
+    that bar's extreme: a wick to 105 through a high at 100 that closes at 99
+    means a later close at 101 is not a break - only a close above 105 is. A
+    second, further sweep moves it again, so the level is always the furthest
+    failed attempt since the swing.
+
     Whether a break continues the structure or cracks it is judged on the trend
     *at that bar*, not on the trend now - a change of character is interesting
     because of what it did to the reading at the time.
@@ -247,8 +254,10 @@ def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]
     found: list[Break] = []
     highs: list[Swing] = []
     lows: list[Swing] = []
-    high: Swing | None = None
-    low: Swing | None = None
+    # The level to close beyond and when it was set: the swing's own, until a
+    # sweep moves it out to the bar that failed.
+    high: tuple[float, datetime] | None = None
+    low: tuple[float, datetime] | None = None
     taken_high = taken_low = False
     nxt = 0
 
@@ -259,33 +268,39 @@ def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]
             swing = ordered[nxt]
             if swing.kind is Kind.HIGH:
                 highs.append(swing)
-                high, taken_high = swing, False
+                high, taken_high = (swing.price, swing.at), False
             else:
                 lows.append(swing)
-                low, taken_low = swing, False
+                low, taken_low = (swing.price, swing.at), False
             nxt += 1
 
         trend = _trend(_label(highs, "HH", "LH"), _label(lows, "HL", "LL"))
-        if high is not None and not taken_high and bar.close > high.price:
-            found.append(
-                Break(
-                    at=bar.ts,
-                    price=bar.close,
-                    level=high.price,
-                    from_at=high.at,
-                    continuation=trend is not Trend.DOWN,
+        if high is not None and not taken_high:
+            if bar.close > high[0]:
+                found.append(
+                    Break(
+                        at=bar.ts,
+                        price=bar.close,
+                        level=high[0],
+                        from_at=high[1],
+                        continuation=trend is not Trend.DOWN,
+                    )
                 )
-            )
-            taken_high = True
-        if low is not None and not taken_low and bar.close < low.price:
-            found.append(
-                Break(
-                    at=bar.ts,
-                    price=bar.close,
-                    level=low.price,
-                    from_at=low.at,
-                    continuation=trend is not Trend.UP,
+                taken_high = True
+            elif bar.high > high[0]:
+                high = (bar.high, bar.ts)
+        if low is not None and not taken_low:
+            if bar.close < low[0]:
+                found.append(
+                    Break(
+                        at=bar.ts,
+                        price=bar.close,
+                        level=low[0],
+                        from_at=low[1],
+                        continuation=trend is not Trend.UP,
+                    )
                 )
-            )
-            taken_low = True
+                taken_low = True
+            elif bar.low < low[0]:
+                low = (bar.low, bar.ts)
     return found

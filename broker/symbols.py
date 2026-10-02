@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-from broker.models import Expiry
+from broker.models import Expiry, OptionType
 
 _MONTH_ABBR = (
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -64,6 +64,28 @@ def expiry_infix(date: str, *, weekly: bool) -> str | None:
     if weekly:
         return f"{yy}{_MONTH_LETTER[month - 1]}{day:02d}"
     return f"{yy}{_MONTH_ABBR[month - 1]}"
+
+
+_CONTRACT = re.compile(
+    r"^(?P<series>[A-Z]+:[A-Z&]+\d{2}(?:[A-Z]{3}|[1-9OND]\d{2}))"
+    r"(?P<strike>\d+(?:\.\d+)?)(?P<kind>CE|PE)$"
+)
+
+
+def parse_contract(symbol: str) -> tuple[str, float, OptionType] | None:
+    """An option symbol's series, strike and type, or None if it is not one.
+
+    "NSE:NIFTY26OCT23100CE" -> ("NSE:NIFTY26OCT", 23100.0, "CE"), and a weekly
+    "NSE:NIFTY2692225000CE" -> ("NSE:NIFTY26922", 25000.0, "CE"). The expiry is
+    five characters in both spellings - YYMON, or YY, a month digit or O/N/D,
+    and DD - so the strike is whatever follows it. For reading a fill that
+    arrives with nothing but its symbol.
+    """
+    match = _CONTRACT.match(symbol)
+    if match is None:
+        return None
+    kind: OptionType = "CE" if match["kind"] == "CE" else "PE"
+    return match["series"], float(match["strike"]), kind
 
 
 def series_prefix(symbol: str, strike: float) -> str | None:

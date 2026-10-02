@@ -1,4 +1,5 @@
-export const API_BASE = "http://127.0.0.1:8000";
+/** The backend. Overridable (VITE_API_BASE) so a second copy can run beside the desk. */
+export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 export interface Position {
   symbol: string;
@@ -109,6 +110,12 @@ export interface Basket {
   /** The directional sum of the quoted deltas, unweighted — the figure on the
       legs table and the scale a delta limit is set in. */
   net_delta_per_contract: number | null;
+  /** Banked by legs already closed — part of the structure's result. */
+  realized: number;
+  /** realized + mtm: the whole result so far. Null when mtm is. */
+  total_pnl: number | null;
+  /** When the last leg came off; null while any is open. */
+  closed_at: string | null;
   legs: BasketLeg[];
   max_profit: number | null;
   max_loss: number | null;
@@ -314,6 +321,112 @@ export interface BasketLevels {
 
 export function setBasketLevels(id: number, levels: BasketLevels): Promise<Basket> {
   return putJson<BasketLevels, Basket>(`/api/baskets/${id}/levels`, levels);
+}
+
+// --- Following the broker ---------------------------------------------------
+// Everything here reads the broker and writes only the desk's own records. None
+// of it places, changes or cancels an order.
+
+export interface FillSuggestion {
+  basket_id: number;
+  basket_name: string;
+  why: string;
+}
+
+export interface PendingFill {
+  fill_id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  at: string;
+  suggestion: FillSuggestion | null;
+}
+
+export interface SyncReport {
+  since: string;
+  fills_read: number;
+  already_seen: number;
+  closed: {
+    basket_id: number;
+    basket_name: string;
+    symbol: string;
+    quantity: number;
+    price: number;
+    at: string;
+    realized: number;
+  }[];
+  covered: number;
+  outside: number;
+  pending: PendingFill[];
+  /** Open legs the broker no longer holds, with no fill found to close them. */
+  unexplained: {
+    basket_id: number;
+    basket_name: string;
+    leg_id: number;
+    symbol: string;
+    side: "BUY" | "SELL";
+    quantity: number;
+    broker_quantity: number;
+  }[];
+}
+
+export interface HistoryMoment {
+  at: string;
+  kind: "opened" | "adjusted" | "added" | "reduced" | "closed";
+  events: {
+    at: string;
+    action: "open" | "close";
+    leg_id: number;
+    symbol: string;
+    side: "BUY" | "SELL";
+    quantity: number;
+    price: number;
+    realized: number | null;
+  }[];
+  realized: number;
+  premium: number;
+  realized_to_date: number;
+}
+
+/** Read fills from the broker and apply them to structures. Read-only toward the broker. */
+export function syncBaskets(days = 7): Promise<SyncReport> {
+  return postJson<Record<string, never>, SyncReport>(`/api/baskets/sync?days=${days}`, {});
+}
+
+export function getPendingFills(): Promise<PendingFill[]> {
+  return getJson<PendingFill[]>("/api/baskets/fills/pending");
+}
+
+export function assignFills(
+  fillIds: string[],
+  to: { basketId: number } | { name: string; strategy?: string },
+): Promise<Basket> {
+  return postJson<object, Basket>("/api/baskets/fills/assign", {
+    fill_ids: fillIds,
+    ...("basketId" in to ? { basket_id: to.basketId } : { name: to.name, strategy: to.strategy }),
+  });
+}
+
+export async function ignoreFills(fillIds: string[]): Promise<void> {
+  // Answered with 204 and no body, so not through postJson, which reads one.
+  const response = await fetch(`${API_BASE}/api/baskets/fills/ignore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fill_ids: fillIds }),
+  });
+  if (!response.ok) throw new Error(await extractErrorMessage(response));
+}
+
+export function addBasketLeg(
+  basketId: number,
+  leg: { symbol: string; side: "BUY" | "SELL"; quantity: number; entry_price: number; entry_at?: string },
+): Promise<Basket> {
+  return postJson<typeof leg, Basket>(`/api/baskets/${basketId}/legs`, leg);
+}
+
+export function getBasketHistory(basketId: number): Promise<HistoryMoment[]> {
+  return getJson<HistoryMoment[]>(`/api/baskets/${basketId}/history`);
 }
 
 export function closeBasketLeg(basketId: number, legId: number, exitPrice: number): Promise<Basket> {
@@ -1131,6 +1244,229 @@ export function runBacktest(request: BacktestRequest): Promise<BacktestResult> {
   return postJson<BacktestRequest, BacktestResult>("/api/backtest/run", request);
 }
 
+// --- Options backtesting ---------------------------------------------------
+
+/** What the option store holds. Runs outside it have nothing to trade. */
+export interface OptbtCoverage {
+  store: string;
+  underlying: string;
+  first_day: string | null;
+  last_day: string | null;
+  expiries_listed: number;
+  expiries_held: number;
+  first_expiry: string | null;
+  last_expiry: string | null;
+  contracts: number;
+  bars: number;
+}
+
+export type OptbtExpiry = "week" | "next_week" | "month" | "next_month" | "days";
+
+export interface OptbtLevel {
+  kind: "pct" | "points";
+  /** A fraction for pct: 0.25 is 25%. */
+  value: number;
+}
+
+export interface OptbtLegIn {
+  side: "buy" | "sell";
+  kind: "CE" | "PE";
+  lots: number;
+  expiry: OptbtExpiry;
+  /** For expiry "days": the monthly nearest this many calendar days out. */
+  expiry_days: number;
+  /** atm: `offset` strikes from the money. premium: nearest to `premium`. pct: `pct`% from spot. */
+  strike: {
+    mode: "atm" | "premium" | "pct" | "delta";
+    offset: number;
+    premium: number;
+    pct: number;
+    /** Absolute delta to aim for, e.g. 0.30. */
+    delta: number;
+  };
+  stop: OptbtLevel | null;
+  target: OptbtLevel | null;
+}
+
+/** Which days to trade. Null bounds mean no condition. */
+export interface OptbtDays {
+  expiry_day: "any" | "only" | "skip";
+  dte_min: number | null;
+  dte_max: number | null;
+  vix_min: number | null;
+  vix_max: number | null;
+  vix_pct_min: number | null;
+  vix_pct_max: number | null;
+  vix_lookback: number;
+  gap_min: number | null;
+  gap_max: number | null;
+  /** Pivot zones the open must sit in; empty means anywhere. */
+  open_zones: string[];
+}
+
+/** Move the untested side in when spot reaches a condor's wing. Distances in index points. */
+export interface OptbtAdjust {
+  enabled: boolean;
+  /** Spot within this many points of a long strike. */
+  near_points: number;
+  /** On a fall: the new short call is placed this many points above the long (or short) put. */
+  fall_from: "long" | "short";
+  fall_points: number;
+  /** On a rise: the new short put is placed this many points below the short (or long) call. */
+  rise_from: "long" | "short";
+  rise_points: number;
+  /** Move the wing with the short, keeping the spread's width. */
+  move_wing: boolean;
+  max_per_trade: number;
+}
+
+export const PIVOT_ZONES = ["below S2", "S2-S1", "S1-P", "P-R1", "R1-R2", "above R2"] as const;
+
+export interface OptbtRunRequest {
+  underlying: string;
+  start: string;
+  end: string;
+  legs: OptbtLegIn[];
+  entry: string;
+  exit: string;
+  /** Monday is 0. */
+  weekdays: number[];
+  hold: "intraday" | "expiry";
+  mtm_stop: number | null;
+  mtm_target: number | null;
+  /** Fractions of the credit taken in. */
+  target_credit: number | null;
+  stop_credit: number | null;
+  exit_dte: number | null;
+  trail_to_cost: boolean;
+  days: OptbtDays;
+  adjust: OptbtAdjust;
+  equal_wings: boolean;
+  slippage: number;
+  min_slip: number;
+  brokerage: number;
+}
+
+export interface OptbtLeg {
+  tag: string;
+  expiry: string;
+  strike: number;
+  kind: "CE" | "PE";
+  side: "buy" | "sell";
+  lots: number;
+  lot_size: number;
+  entry_at: string;
+  entry: number;
+  stop: number | null;
+  exit_at: string | null;
+  exit: number | null;
+  ended: string | null;
+  pnl: number;
+  charges: number;
+}
+
+export interface OptbtTrade {
+  id: number;
+  opened: string;
+  closed: string | null;
+  ended: string;
+  gross: number;
+  charges: number;
+  net: number;
+  legs: OptbtLeg[];
+  events: string[];
+  /** The day at entry, for slicing results. */
+  tags: OptbtTags;
+  /** Lowest and highest gross P&L at any minute's close while open. */
+  worst: number;
+  best: number;
+}
+
+export interface OptbtTags {
+  weekday: string;
+  month: string;
+  dte: number;
+  expiry_day: boolean;
+  monthly_expiry: boolean;
+  spot: number;
+  vix: number | null;
+  vix_pct: number | null;
+  gap_pct: number | null;
+  open_zone: string | null;
+}
+
+export interface OptbtSummary {
+  trades: number;
+  wins: number;
+  win_rate: number;
+  gross: number;
+  charges: number;
+  net: number;
+  average: number;
+  median: number;
+  best: number;
+  worst: number;
+  profit_factor: number | null;
+  max_drawdown: number;
+  worst_share: number | null;
+  cost_share: number | null;
+  exits: Record<string, number>;
+  by_year: Record<string, number>;
+  abandoned_orders: number;
+}
+
+export interface OptbtResult {
+  request: OptbtRunRequest;
+  days: number;
+  skipped: Record<string, number>;
+  summary: OptbtSummary;
+  charges: {
+    brokerage: number;
+    stt: number;
+    exchange: number;
+    sebi: number;
+    stamp: number;
+    gst: number;
+    total: number;
+  };
+  /** [day, cumulative net] at each close. */
+  equity: [string, number][];
+  by_month: Record<string, number>;
+  trades: OptbtTrade[];
+}
+
+export interface OptbtSeries {
+  label: string;
+  points: [string, number][];
+}
+
+export interface OptbtReplay {
+  spot: OptbtSeries;
+  legs: OptbtSeries[];
+}
+
+export function getOptbtCoverage(): Promise<OptbtCoverage> {
+  return getJson<OptbtCoverage>("/api/optbt/coverage");
+}
+
+/** Every underlying the option store holds, with its tradable window. */
+export function getOptbtUnderlyings(): Promise<OptbtCoverage[]> {
+  return getJson<OptbtCoverage[]>("/api/optbt/underlyings");
+}
+
+export function runOptbt(request: OptbtRunRequest): Promise<OptbtResult> {
+  return postJson<OptbtRunRequest, OptbtResult>("/api/optbt/run", request);
+}
+
+export function getOptbtReplay(request: {
+  underlying?: string;
+  start: string;
+  end: string;
+  legs: { expiry: string; strike: number; kind: "CE" | "PE" }[];
+}): Promise<OptbtReplay> {
+  return postJson<typeof request, OptbtReplay>("/api/optbt/replay", request);
+}
+
 // --- Relative rotation -----------------------------------------------------
 
 export interface RrgIndexOption {
@@ -1185,6 +1521,10 @@ export interface RrgSnapshot {
   missing: string[];
   members_as_at: string | null;
   caveats: string[];
+  /** The last session the benchmark's stored bars reach (IST date). */
+  bars_to: string | null;
+  updater_running: boolean;
+  updater_error: string | null;
 }
 
 export function getRrgOptions(): Promise<RrgOptions> {
@@ -1333,4 +1673,73 @@ export function getStructure(
   return getJson<MarketStructure>(
     `/api/structure/${encodeURIComponent(source)}/${encodeURIComponent(symbol)}?${query}`,
   );
+}
+
+// --- Pre-open auction ------------------------------------------------------
+
+export interface PreOpenIndex {
+  name: string;
+  price: number;
+  change: number;
+  pct_change: number;
+}
+
+export interface PreOpenDay {
+  day: string;
+  /** `nse` from the API (with the book), `csv` from a downloaded file (without). */
+  source: "nse" | "csv";
+  as_of: string | null;
+  rows: number;
+  index: PreOpenIndex | null;
+  advances: number;
+  declines: number;
+  unchanged: number;
+}
+
+export interface PreOpenDays {
+  days: PreOpenDay[];
+  recorder: { running: boolean; last_day: string | null; last_error: string | null };
+}
+
+export interface PreOpenLevel {
+  price: number;
+  buy_qty: number;
+  sell_qty: number;
+  is_iep: boolean;
+}
+
+export interface PreOpenQuote {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  /** Today's membership of the option indices, not the membership on the day. */
+  indices: string[];
+  prev_close: number;
+  final_price: number;
+  final_quantity: number;
+  change: number;
+  pct_change: number;
+  turnover_cr: number | null;
+  ffm_cap_cr: number | null;
+  best_bid: number | null;
+  best_ask: number | null;
+  total_buy_qty: number | null;
+  total_sell_qty: number | null;
+  year_high: number | null;
+  year_low: number | null;
+  book: PreOpenLevel[];
+}
+
+export interface PreOpenSession {
+  day: PreOpenDay;
+  quotes: PreOpenQuote[];
+  filters: { id: string; name: string }[];
+}
+
+export function getPreOpenDays(): Promise<PreOpenDays> {
+  return getJson<PreOpenDays>("/api/preopen/days");
+}
+
+export function getPreOpenSession(day: string): Promise<PreOpenSession> {
+  return getJson<PreOpenSession>(`/api/preopen/days/${day}`);
 }

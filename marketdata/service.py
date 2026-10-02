@@ -21,10 +21,15 @@ quick succession. Yahoo answers 429 after about ten requests in two minutes, so 
 desk that fetched on every chart render would spend most of its time refused - and
 the bars it wanted were on disk the whole time.
 
-What "necessary" means is deliberately crude: if the newest bar held is older than
-one bar's width, the tail is refetched. Not a diff of every gap. A source that
-serves a fixed window cannot fill an arbitrary hole anyway, and the complexity of
-tracking holes buys nothing a refetch of the window does not.
+What "necessary" means is deliberately crude: outside the cooldown, the tail is
+refetched. Not a diff of every gap. A source that serves a fixed window cannot
+fill an arbitrary hole anyway, and the complexity of tracking holes buys nothing
+a refetch of the window does not.
+
+The cooldown is the whole of the rule, and it used to not be: a series whose
+newest bar had not closed yet was called up to date and left alone. That is right
+for a backtest and wrong for a live chart, because the unclosed bar is the one
+that is moving. See `_due`.
 """
 
 from __future__ import annotations
@@ -68,6 +73,11 @@ class BarsResult:
     fetched: bool
     #: Why a fetch did not happen or did not work, when that is worth reporting.
     note: str = ""
+    #: False when the source could not be read: it refused, it was unreachable, or
+    #: it does not carry this symbol at all. A fetch that was simply not due is not
+    #: a failure, and the difference matters to a chart - one of those two is worth
+    #: saying on screen and the other is the cache working.
+    ok: bool = True
     #: The source's own name for the instrument, when it has told us one. Worth
     #: showing: Yahoo's gold is "Gold Dec 26", a dated contract, not the perpetual
     #: the desk trades.
@@ -135,8 +145,21 @@ class BarService:
             return "yahoo", mapped, self._yahoo
         return None
 
-    def _due(self, series: Series, interval: Interval) -> tuple[bool, str]:
-        """Whether to ask the source, and why not when the answer is no."""
+    def _due(self, series: Series) -> tuple[bool, str]:
+        """Whether to ask the source, and why not when the answer is no.
+
+        The cooldown is the only thing that holds a fetch back. There used to be a
+        second rule - a series whose newest bar was younger than one bar's width
+        was called up to date - and on a live chart that had it exactly backwards.
+        The bar that has not closed yet is the one whose high, low and close are
+        still moving; declining to refetch it froze the right-hand edge of every
+        chart for the width of a bar, which on a daily chart meant it did not move
+        again after the first fetch of the morning.
+
+        What stops that becoming a flood is the cooldown above, which is shorter
+        than the shortest bar the desk offers, so the cost of a moving last bar is
+        at most one request a minute per series.
+        """
         last = self._store.last_fetch(series)
         now = self._now()
         if last is not None:
@@ -145,15 +168,6 @@ class BarService:
             if now - at < wait:
                 held = "held off" if ok else f"held off after: {note}"
                 return False, held
-
-        span = self._store.span(series)
-        if span is None:
-            return True, ""
-        _first, newest = span
-        # One bar's width of staleness is the trigger. Anything tighter asks for a
-        # bar that has not closed yet.
-        if now - newest < timedelta(seconds=interval.seconds):
-            return False, "up to date"
         return True, ""
 
     def bars(
@@ -182,6 +196,7 @@ class BarService:
                 bars=[],
                 fetched=False,
                 note=f"{named} {symbol}",
+                ok=False,
             )
         # `provider` rather than `source`: the parameter above is a source *name*,
         # and mypy caught the two sharing one name as a string with no fetch method.
@@ -191,7 +206,8 @@ class BarService:
         note = ""
         name = ""
         fetched = False
-        due, why = self._due(series, interval) if refresh else (False, "not asked")
+        ok = True
+        due, why = self._due(series) if refresh else (False, "not asked")
         if due:
             try:
                 got = provider.fetch(mapped, interval, days)
@@ -206,10 +222,12 @@ class BarService:
                 # than raised: the store still has yesterday.
                 self._store.note_fetch(series, ok=False, note=str(exc), at=self._now())
                 note = f"{exc}. Showing what is stored."
+                ok = False
                 log.info("%s rate limited for %s %s", source_name, mapped, interval)
             except Unavailable as exc:
                 self._store.note_fetch(series, ok=False, note=str(exc), at=self._now())
                 note = f"{exc}. Showing what is stored."
+                ok = False
                 log.warning("%s unavailable for %s %s: %s", source_name, mapped, interval, exc)
         else:
             note = why
@@ -219,9 +237,19 @@ class BarService:
             series=series,
             bars=self._store.read(series, start=start),
             fetched=fetched,
+            ok=ok,
             note=note,
             name=name,
         )
+
+    def sources(self) -> list[str]:
+        """The sources registered at runtime, for saying so at startup.
+
+        Worth logging: a desk whose chart is silently reading nothing but the store
+        looks exactly like a quiet market, and the one line that would have shown
+        it was a source that never got registered.
+        """
+        return sorted(self._extra)
 
     def held(self) -> list[tuple[Series, int]]:
         return self._store.series_held()

@@ -166,6 +166,14 @@ class BasketResponse(BaseModel):
     #: against. Zero in both for a balanced structure, which is how one gets
     #: mistaken for the other.
     net_delta_per_contract: float | None = None
+    #: Banked by legs already closed. Part of the structure's result: rolling a
+    #: spread realizes P&L on the old one, and a structure that forgets it reads
+    #: better or worse than it is.
+    realized: float = 0.0
+    #: realized + mtm: the structure's whole result so far. None when mtm is.
+    total_pnl: float | None = None
+    #: When the last leg came off; None while any is open.
+    closed_at: str | None = None
     legs: list[BasketLegResponse]
     max_profit: float | None
     max_loss: float | None

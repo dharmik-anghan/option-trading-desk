@@ -82,11 +82,12 @@ YAHOO_INTERVAL: dict[Interval, str] = {
     Interval.W1: "1wk",
 }
 
-#: The three the desk cares about, and what Yahoo calls them. Held here rather than
+#: What the desk cares about, and what Yahoo calls them. Held here rather than
 #: guessed: "XAUUSD=X" looks right and is delisted, while GC=F and CL=F are the
 #: contracts that actually serve data.
 FOR_SYMBOL: dict[str, str] = {
     "BTCUSDT": "BTC-USD",
+    "ETHUSDT": "ETH-USD",
     "XAUUSDT": "GC=F",
     "CLUSDT": "CL=F",
 }

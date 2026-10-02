@@ -1,0 +1,623 @@
+import { useEffect, useRef, useState } from "react";
+import { getOptbtUnderlyings, runOptbt } from "../api";
+import type { OptbtAdjust, OptbtCoverage, OptbtDays, OptbtResult } from "../api";
+import { BackButton } from "./BackButton";
+import { LegRow } from "./optbt/LegRow";
+import { OptResult } from "./optbt/OptResult";
+import { OPENED } from "./optbt/explore";
+import { PRESETS, copyLeg, leg, toRequest } from "./optbt/legs";
+import type { LegDraft } from "./optbt/legs";
+
+interface Props {
+  onHome: () => void;
+}
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+
+const ANY_DAY: OptbtDays = {
+  expiry_day: "any",
+  dte_min: null,
+  dte_max: null,
+  vix_min: null,
+  vix_max: null,
+  vix_pct_min: null,
+  vix_pct_max: null,
+  vix_lookback: 252,
+  gap_min: null,
+  gap_max: null,
+  open_zones: [],
+};
+
+/** How many entry conditions are set - shown on the folded section. */
+function countDays(d: OptbtDays): number {
+  return [
+    d.expiry_day !== "any",
+    d.dte_min !== null || d.dte_max !== null,
+    d.vix_min !== null || d.vix_max !== null,
+    d.vix_pct_min !== null || d.vix_pct_max !== null,
+    d.gap_min !== null || d.gap_max !== null,
+    d.open_zones.length > 0,
+  ].filter(Boolean).length;
+}
+
+/**
+ * An option strategy, built leg by leg and run over stored history.
+ *
+ * The strategy is what runs; the results below can then be filtered without
+ * running it again. "Trade only when" is part of the strategy - conditions
+ * checked before each entry - which is what a positional trade or the
+ * optimiser needs, and is folded away until wanted.
+ */
+export function OptionBacktesting({ onHome }: Props) {
+  const [underlyings, setUnderlyings] = useState<OptbtCoverage[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [underlying, setUnderlying] = useState("NIFTY");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+
+  const [legs, setLegs] = useState<LegDraft[]>(() => PRESETS[0].legs());
+  const [hold, setHold] = useState<"intraday" | "expiry">("intraday");
+  const [entry, setEntry] = useState("09:20");
+  const [exit, setExit] = useState("15:15");
+  const [weekdays, setWeekdays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [days, setDays] = useState<OptbtDays>(ANY_DAY);
+  const [stop, setStop] = useState<{ value: number | null; unit: "rs" | "credit" }>({
+    value: null,
+    unit: "rs",
+  });
+  const [target, setTarget] = useState<{ value: number | null; unit: "rs" | "credit" }>({
+    value: null,
+    unit: "rs",
+  });
+  const [exitDte, setExitDte] = useState<number | null>(null);
+  const [adjust, setAdjust] = useState<OptbtAdjust>({
+    enabled: false,
+    near_points: 50,
+    fall_from: "long",
+    fall_points: 200,
+    rise_from: "short",
+    rise_points: 0,
+    move_wing: true,
+    max_per_trade: 1,
+  });
+  const [equalWings, setEqualWings] = useState(false);
+  const [trail, setTrail] = useState(false);
+  const [slippage, setSlippage] = useState(0.3);
+  const [minSlip, setMinSlip] = useState(0.05);
+  const [brokerage, setBrokerage] = useState(20);
+
+  const [result, setResult] = useState<OptbtResult | null>(null);
+  const [finished, setFinished] = useState<{ at: Date; seconds: number } | null>(null);
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const started = useRef(0);
+
+  useEffect(() => {
+    void getOptbtUnderlyings()
+      .then((list) => {
+        setUnderlyings(list);
+        const first = list.find((u) => u.underlying === "NIFTY") ?? list[0];
+        if (first) {
+          setUnderlying(first.underlying);
+          setStart(first.first_day ?? "");
+          setEnd(first.last_day ?? "");
+        }
+      })
+      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(
+      () => setElapsed(Math.round((performance.now() - started.current) / 1000)),
+      500,
+    );
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const window_ = underlyings?.find((u) => u.underlying === underlying);
+  const timesOk = hold === "expiry" || entry < exit;
+  const canRun =
+    Boolean(start && end && start <= end) && timesOk && legs.length > 0 && weekdays.length > 0 && !running;
+
+  const run = () => {
+    setRunning(true);
+    setElapsed(0);
+    setError(null);
+    started.current = performance.now();
+    void runOptbt({
+      underlying,
+      start,
+      end,
+      legs: legs.map(toRequest),
+      entry,
+      exit,
+      weekdays,
+      hold,
+      mtm_stop: stop.unit === "rs" ? stop.value : null,
+      mtm_target: target.unit === "rs" ? target.value : null,
+      stop_credit: stop.unit === "credit" && stop.value !== null ? stop.value / 100 : null,
+      target_credit: target.unit === "credit" && target.value !== null ? target.value / 100 : null,
+      exit_dte: hold === "expiry" ? exitDte : null,
+      trail_to_cost: trail,
+      days,
+      adjust: { ...adjust, enabled: adjust.enabled && hold === "expiry" },
+      equal_wings: equalWings,
+      slippage: slippage / 100,
+      min_slip: minSlip,
+      brokerage,
+    })
+      .then((r) => {
+        setResult(r);
+        setFinished({ at: new Date(), seconds: (performance.now() - started.current) / 1000 });
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRunning(false));
+  };
+
+  const update = (i: number, next: LegDraft) => setLegs((all) => all.map((l, k) => (k === i ? next : l)));
+  const conditions = countDays(days);
+  const exits =
+    [stop.value, target.value, hold === "expiry" ? exitDte : null].filter((v) => v !== null).length +
+    (trail ? 1 : 0);
+
+  return (
+    <main className="bt obt ob">
+      <header className="ob-top">
+        <BackButton onClick={onHome} />
+        <h1>Options backtest</h1>
+        <div className="ob-scope">
+          <select
+            value={underlying}
+            onChange={(e) => {
+              const u = underlyings?.find((x) => x.underlying === e.target.value);
+              setUnderlying(e.target.value);
+              if (u) {
+                setStart(u.first_day ?? "");
+                setEnd(u.last_day ?? "");
+              }
+            }}
+            aria-label="Underlying"
+            disabled={!underlyings?.length}
+          >
+            {(underlyings ?? [{ underlying: "NIFTY" } as OptbtCoverage]).map((u) => (
+              <option key={u.underlying} value={u.underlying}>
+                {u.underlying}
+              </option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={start}
+            min={window_?.first_day ?? undefined}
+            max={window_?.last_day ?? undefined}
+            onChange={(e) => setStart(e.target.value)}
+            aria-label="From"
+          />
+          <span className="ob-to">to</span>
+          <input
+            type="date"
+            value={end}
+            min={window_?.first_day ?? undefined}
+            max={window_?.last_day ?? undefined}
+            onChange={(e) => setEnd(e.target.value)}
+            aria-label="To"
+          />
+        </div>
+      </header>
+
+      {loadError && <p className="ob-error">{loadError}</p>}
+      {underlyings && !underlyings.length && (
+        <p className="ob-error">No option history yet. Run scripts/backfill_options.py to fetch it.</p>
+      )}
+
+      <section className="ob-strategy" aria-label="Strategy">
+        <div className="ob-presets">
+          {PRESETS.map((p) => (
+            <button
+              key={p.name}
+              onClick={() => {
+                setLegs(p.legs());
+                if (p.hold) setHold(p.hold);
+                if (p.targetCredit) setTarget({ value: p.targetCredit, unit: "credit" });
+                if (p.stopCredit) setStop({ value: p.stopCredit, unit: "credit" });
+                setAdjust((a) => ({ ...a, enabled: Boolean(p.adjust) }));
+                setEqualWings(Boolean(p.equalWings));
+                if (p.exitDte !== undefined) setExitDte(p.exitDte);
+              }}
+              title={p.say}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="ob-legs">
+          {legs.map((l, i) => (
+            <LegRow
+              key={l.id}
+              index={i}
+              leg={l}
+              onChange={(next) => update(i, next)}
+              onCopy={() => setLegs((all) => [...all.slice(0, i + 1), copyLeg(l), ...all.slice(i + 1)])}
+              onRemove={legs.length > 1 ? () => setLegs((all) => all.filter((_, k) => k !== i)) : null}
+            />
+          ))}
+          <div className="ob-legfoot">
+            <button className="ob-add" onClick={() => setLegs((l) => [...l, leg("sell", "CE")])}>
+              + Add leg
+            </button>
+            <label
+              className="ob-field ob-check"
+              title="After strikes are picked, both wings of a condor are set to the same width - the average of the two"
+            >
+              <input type="checkbox" checked={equalWings} onChange={(e) => setEqualWings(e.target.checked)} />
+              <span>Equal wings</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="ob-timing">
+          <div className="ob-seg" aria-label="Holding">
+            <button className={hold === "intraday" ? "on" : ""} onClick={() => setHold("intraday")}>
+              Intraday
+            </button>
+            <button className={hold === "expiry" ? "on" : ""} onClick={() => setHold("expiry")}>
+              Positional
+            </button>
+          </div>
+          <label className="ob-field">
+            <span>Enter</span>
+            <input type="time" step={60} value={entry} onChange={(e) => setEntry(e.target.value)} />
+          </label>
+          <label className="ob-field" title={hold === "expiry" ? "On the day the nearest leg expires" : undefined}>
+            <span>{hold === "expiry" ? "Exit on expiry day" : "Exit"}</span>
+            <input type="time" step={60} value={exit} onChange={(e) => setExit(e.target.value)} />
+          </label>
+          <div className="ob-seg days" aria-label="Weekdays">
+            {WEEKDAYS.map((d, i) => (
+              <button
+                key={d}
+                className={weekdays.includes(i) ? "on" : ""}
+                aria-pressed={weekdays.includes(i)}
+                onClick={() =>
+                  setWeekdays((w) => (w.includes(i) ? w.filter((x) => x !== i) : [...w, i].sort()))
+                }
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <details className="ob-more">
+          <summary>
+            Trade only when{conditions > 0 && <em>{conditions}</em>}
+          </summary>
+          <div className="ob-grid">
+            <label className="ob-field">
+              <span>Expiry day</span>
+              <select
+                value={days.expiry_day}
+                onChange={(e) => setDays({ ...days, expiry_day: e.target.value as OptbtDays["expiry_day"] })}
+              >
+                <option value="any">Any day</option>
+                <option value="only">Only expiry day</option>
+                <option value="skip">Never expiry day</option>
+              </select>
+            </label>
+            <Range
+              label="Days to expiry"
+              lo={days.dte_min}
+              hi={days.dte_max}
+              onChange={(lo, hi) => setDays({ ...days, dte_min: lo, dte_max: hi })}
+            />
+            <Range
+              label="VIX"
+              lo={days.vix_min}
+              hi={days.vix_max}
+              onChange={(lo, hi) => setDays({ ...days, vix_min: lo, vix_max: hi })}
+            />
+            <Range
+              label="VIX percentile"
+              lo={days.vix_pct_min}
+              hi={days.vix_pct_max}
+              onChange={(lo, hi) => setDays({ ...days, vix_pct_min: lo, vix_pct_max: hi })}
+              title="0–100, ranked against the previous year of sessions"
+            />
+            <Range
+              label="Gap at open, %"
+              lo={days.gap_min}
+              hi={days.gap_max}
+              onChange={(lo, hi) => setDays({ ...days, gap_min: lo, gap_max: hi })}
+            />
+            <label className="ob-field" title="Classic pivots from the previous day's high, low and close">
+              <span>Opened</span>
+              <select
+                value={Object.keys(OPENED).find((k) => same(OPENED[k].zones, days.open_zones)) ?? ""}
+                onChange={(e) =>
+                  setDays({ ...days, open_zones: e.target.value ? OPENED[e.target.value].zones : [] })
+                }
+              >
+                <option value="">Anywhere</option>
+                {Object.entries(OPENED).map(([k, o]) => (
+                  <option key={k} value={k}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {conditions > 0 && (
+              <button className="ob-reset" onClick={() => setDays(ANY_DAY)}>
+                Clear conditions
+              </button>
+            )}
+          </div>
+        </details>
+
+        <details className="ob-more">
+          <summary>
+            Exit the whole position{exits > 0 && <em>{exits}</em>}
+          </summary>
+          <div className="ob-grid">
+            <Limit label="Stop at a loss of" value={stop} onChange={setStop} />
+            <Limit label="Take profit at" value={target} onChange={setTarget} />
+            {hold === "expiry" && (
+              <label className="ob-field" title="Closes at the exit time on that day, whatever the P&L">
+                <span>Close at days to expiry</span>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="off"
+                  value={exitDte ?? ""}
+                  onChange={(e) =>
+                    setExitDte(e.target.value === "" ? null : Math.max(0, Number(e.target.value)))
+                  }
+                />
+              </label>
+            )}
+            <label className="ob-field">
+              <span>After one leg stops</span>
+              <select value={trail ? "cost" : "keep"} onChange={(e) => setTrail(e.target.value === "cost")}>
+                <option value="keep">Leave the others</option>
+                <option value="cost">Move their stops to cost</option>
+              </select>
+            </label>
+          </div>
+        </details>
+
+        {hold === "expiry" && (
+          <details className="ob-more">
+            <summary>
+              Adjust{adjust.enabled && <em>on</em>}
+            </summary>
+            <div className="ob-grid">
+              <label className="ob-field ob-check">
+                <input
+                  type="checkbox"
+                  checked={adjust.enabled}
+                  onChange={(e) => setAdjust({ ...adjust, enabled: e.target.checked })}
+                />
+                <span>Move the untested side in when spot nears a wing</span>
+              </label>
+              <Points
+                label="Spot within, points of a long strike"
+                value={adjust.near_points}
+                onChange={(v) => setAdjust({ ...adjust, near_points: v })}
+              />
+              <div className="ob-field">
+                <span>On a fall: new short call</span>
+                <div className="ob-limit">
+                  <input
+                    type="number"
+                    step={50}
+                    value={adjust.fall_points}
+                    onChange={(e) => setAdjust({ ...adjust, fall_points: Number(e.target.value) })}
+                    aria-label="Points above"
+                  />
+                  <select
+                    value={adjust.fall_from}
+                    onChange={(e) => setAdjust({ ...adjust, fall_from: e.target.value as "long" | "short" })}
+                    aria-label="Above which put"
+                  >
+                    <option value="long">pts above the long put</option>
+                    <option value="short">pts above the short put</option>
+                  </select>
+                </div>
+              </div>
+              <div className="ob-field" title="0 below the short call is an iron fly">
+                <span>On a rise: new short put</span>
+                <div className="ob-limit">
+                  <input
+                    type="number"
+                    step={50}
+                    value={adjust.rise_points}
+                    onChange={(e) => setAdjust({ ...adjust, rise_points: Number(e.target.value) })}
+                    aria-label="Points below"
+                  />
+                  <select
+                    value={adjust.rise_from}
+                    onChange={(e) => setAdjust({ ...adjust, rise_from: e.target.value as "long" | "short" })}
+                    aria-label="Below which call"
+                  >
+                    <option value="short">pts below the short call</option>
+                    <option value="long">pts below the long call</option>
+                  </select>
+                </div>
+              </div>
+              <label className="ob-field ob-check">
+                <input
+                  type="checkbox"
+                  checked={adjust.move_wing}
+                  onChange={(e) => setAdjust({ ...adjust, move_wing: e.target.checked })}
+                />
+                <span>Move the wing too, same width</span>
+              </label>
+              <Count
+                label="At most, per trade"
+                value={adjust.max_per_trade}
+                min={1}
+                onChange={(v) => setAdjust({ ...adjust, max_per_trade: v })}
+                title="Never two on the same day. Exits stay measured against the first credit."
+              />
+            </div>
+          </details>
+        )}
+
+        <details className="ob-more">
+          <summary>
+            Costs<span className="ob-sum">
+              {slippage}% slippage · ₹{brokerage} an order
+            </span>
+          </summary>
+          <div className="ob-grid">
+            <label className="ob-field" title="Charged on every fill, against you">
+              <span>Slippage, % of premium</span>
+              <input type="number" min={0} step={0.05} value={slippage}
+                onChange={(e) => setSlippage(Math.max(0, Number(e.target.value)))} />
+            </label>
+            <label className="ob-field">
+              <span>At least, ₹</span>
+              <input type="number" min={0} step={0.05} value={minSlip}
+                onChange={(e) => setMinSlip(Math.max(0, Number(e.target.value)))} />
+            </label>
+            <label className="ob-field" title="Each leg, in and out. Taxes are added at each day's rates.">
+              <span>Brokerage, ₹ an order</span>
+              <input type="number" min={0} value={brokerage}
+                onChange={(e) => setBrokerage(Math.max(0, Number(e.target.value)))} />
+            </label>
+          </div>
+        </details>
+
+        <div className="ob-go">
+          {!timesOk && <span className="ob-error">Exit must be after entry.</span>}
+          {error && <span className="ob-error">{error}</span>}
+          <button className="ob-run" onClick={run} disabled={!canRun}>
+            {running ? `Running… ${elapsed} s` : "Run backtest"}
+          </button>
+        </div>
+      </section>
+
+      {result && finished && (
+        <OptResult result={result} stale={running} finishedAt={finished.at} seconds={finished.seconds} />
+      )}
+    </main>
+  );
+}
+
+function Points({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="ob-field">
+      <span>{label}</span>
+      <input type="number" min={0} step={25} value={value}
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value)))} />
+    </label>
+  );
+}
+
+/** A small whole number: strikes, or a count. */
+function Count({
+  label,
+  value,
+  min,
+  onChange,
+  title,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  onChange: (v: number) => void;
+  title?: string;
+}) {
+  return (
+    <label className="ob-field" title={title}>
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={10}
+        value={value}
+        onChange={(e) => onChange(Math.max(min, Math.min(10, Math.round(Number(e.target.value)))))}
+      />
+    </label>
+  );
+}
+
+const same = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+
+function Range({
+  label,
+  lo,
+  hi,
+  onChange,
+  title,
+}: {
+  label: string;
+  lo: number | null;
+  hi: number | null;
+  onChange: (lo: number | null, hi: number | null) => void;
+  title?: string;
+}) {
+  const read = (text: string) => (text === "" ? null : Number(text));
+  return (
+    <div className="ob-field ob-range" title={title}>
+      <span>{label}</span>
+      <div>
+        <input type="number" step="any" placeholder="from" value={lo ?? ""}
+          onChange={(e) => onChange(read(e.target.value), hi)} aria-label={`${label} from`} />
+        <input type="number" step="any" placeholder="to" value={hi ?? ""}
+          onChange={(e) => onChange(lo, read(e.target.value))} aria-label={`${label} to`} />
+      </div>
+    </div>
+  );
+}
+
+/** A whole-position level: rupees, or a share of the credit taken in. */
+function Limit({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: { value: number | null; unit: "rs" | "credit" };
+  onChange: (v: { value: number | null; unit: "rs" | "credit" }) => void;
+}) {
+  return (
+    <div
+      className="ob-field"
+      title={value.unit === "credit" ? "Of the credit this trade took in: a ₹10,000 credit at 50% is ₹5,000" : undefined}
+    >
+      <span>{label}</span>
+      <div className="ob-limit">
+        <input
+          type="number"
+          min={0}
+          step={value.unit === "rs" ? 500 : 10}
+          placeholder="off"
+          value={value.value ?? ""}
+          onChange={(e) =>
+            onChange({ ...value, value: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })
+          }
+          aria-label={label}
+        />
+        <select
+          value={value.unit}
+          onChange={(e) => onChange({ ...value, unit: e.target.value as "rs" | "credit" })}
+          aria-label={`${label} in`}
+        >
+          <option value="rs">₹</option>
+          <option value="credit">% of credit</option>
+        </select>
+      </div>
+    </div>
+  );
+}

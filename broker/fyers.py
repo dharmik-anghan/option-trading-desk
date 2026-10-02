@@ -8,7 +8,7 @@ see tests/broker/test_fyers_parsing.py.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 from fyers_apiv3 import fyersModel
@@ -18,6 +18,7 @@ from broker.errors import BrokerError, BrokerUnreachable, classify_status
 from broker.models import (
     Candle,
     Expiry,
+    Fill,
     Funds,
     Greeks,
     OptionChain,
@@ -230,6 +231,64 @@ def parse_positions(raw: dict[str, Any]) -> list[Position]:
     ]
 
 
+#: Fyers stamps fills in exchange time, without a zone.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+#: Rows per page of trade history. Fyers' own default and maximum.
+HISTORY_PAGE = 100
+
+
+def _fill_time(text: str) -> datetime:
+    """"29-Sep-2026 10:36:04" (IST) -> aware UTC."""
+    return datetime.strptime(text, "%d-%b-%Y %H:%M:%S").replace(tzinfo=IST).astimezone(UTC)
+
+
+def parse_fills(raw: dict[str, Any], *, history: bool) -> list[Fill]:
+    """Fills from the day's tradebook, or from trade history.
+
+    The two endpoints describe the same thing under different names -
+    `tradedQty`/`tradePrice` today, `traded_qty`/`trade_price` for past days, and
+    the rows under `tradeBook` or `data`. Their trade numbers differ too: today's
+    is "<order>-<exchange trade>", history's the exchange trade alone. The fill id
+    uses the part both share, so a fill seen today and again tomorrow in history
+    is recognised as the same one.
+    """
+    _check_ok(raw)
+    rows = raw.get("data") if history else raw.get("tradeBook")
+    fills = []
+    for row in rows or []:
+        order_id = str(row["orderNumber"])
+        trade_no = str(row["tradeNumber"]).split("-")[-1]
+        fills.append(
+            Fill(
+                fill_id=f"{order_id}:{trade_no}",
+                order_id=order_id,
+                symbol=row["symbol"],
+                side="BUY" if int(row["side"]) == 1 else "SELL",
+                quantity=float(row["traded_qty"] if history else row["tradedQty"]),
+                price=float(row["trade_price"] if history else row["tradePrice"]),
+                at=_fill_time(row["orderDateTime"]),
+            )
+        )
+    return fills
+
+
+def parse_booked(raw: dict[str, Any]) -> float:
+    """What has been realized today, from the positions response.
+
+    Not from funds: its "Realized Profit and Loss" read 0 at 13:15 on 29 Sep
+    2026, after a call spread closed at 10:36 for +4,881.50 - the figure the
+    positions response carried, as `overall.pl_realized` and as the sum of its
+    rows' `realized_profit`. The funds number evidently waits for settlement;
+    a desk showing today's P&L cannot.
+    """
+    _check_ok(raw)
+    overall = raw.get("overall") or {}
+    if "pl_realized" in overall:
+        return float(overall["pl_realized"])
+    return float(sum(p.get("realized_profit", 0) for p in raw.get("netPositions", [])))
+
+
 _ORDER_SIDE = {"BUY": 1, "SELL": -1}
 _ORDER_TYPE = {"MARKET": 2, "LIMIT": 1}
 
@@ -294,6 +353,40 @@ class FyersBroker(Broker):
             }
         )
         return parse_place_order(raw)
+
+    def get_fills(self, date_from: date, date_to: date) -> list[Fill]:
+        """Fills between two dates, from two read-only endpoints.
+
+        Today's come from the tradebook; earlier days from trade history, which
+        does not include today. Neither call can place or alter an order.
+        """
+        today = datetime.now(IST).date()
+        fills: list[Fill] = []
+        if date_from < today:
+            last = min(date_to, today - timedelta(days=1))
+            page = 1
+            while True:
+                query = {
+                    "from_date": date_from.isoformat(),
+                    "to_date": last.isoformat(),
+                    "page_no": page,
+                    "page_size": HISTORY_PAGE,
+                    "segment_type": "0",
+                    "exchange_type": "0",
+                }
+                raw = _call(lambda query=query: self._client.tradehistory(query))  # type: ignore[misc]
+                batch = parse_fills(raw, history=True)
+                fills.extend(batch)
+                if len(batch) < HISTORY_PAGE:
+                    break
+                page += 1
+        if date_to >= today:
+            fills.extend(parse_fills(_call(self._client.tradebook), history=False))
+        return sorted(fills, key=lambda f: f.at)
+
+    def get_booked_pnl(self) -> float:
+        """Realized today, from positions (read-only). See `parse_booked`."""
+        return parse_booked(_call(self._client.positions))
 
     def get_positions(self) -> list[Position]:
         raw = _call(self._client.positions)

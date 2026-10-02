@@ -242,3 +242,58 @@ class TestEveryBreak:
         found = read(_series(closes), k=2)
 
         assert [b for b in found.breaks if b.price > b.level] == []
+
+
+def _ohlc(rows: list[tuple[float, float, float]]) -> list[Bar]:
+    """Bars from (high, low, close)."""
+    return [
+        Bar(ts=START + timedelta(days=i), open=c, high=h, low=lo, close=c, volume=1.0)
+        for i, (h, lo, c) in enumerate(rows)
+    ]
+
+
+class TestAFailedBreakMovesTheLevel:
+    """A wick through a level that closes back inside it is a sweep, not a break.
+
+    The level becomes that wick's extreme: after a high at 100 is swept to 105
+    with a close at 99, a close at 101 takes nothing out, and the break is the
+    close above 105.
+    """
+
+    # swing high 100 at index 2, known from index 4
+    _RISE = [(96, 94, 95), (98, 96, 97), (100, 97, 98), (98, 95, 96), (97, 94, 95)]
+
+    def _highs(self, rows: list[tuple[float, float, float]]) -> list[tuple[float, float]]:
+        found = read(_ohlc(self._RISE + rows), k=2)
+        return [(b.level, b.price) for b in found.breaks if b.price > b.level]
+
+    def test_a_close_under_the_wick_is_not_a_break(self) -> None:
+        # sweep to 105, closes 99; then closes at 101 and 104
+        assert self._highs([(105, 97, 99), (102, 99, 101), (104.5, 100, 104)]) == []
+
+    def test_a_close_at_the_level_is_a_sweep_too(self) -> None:
+        assert self._highs([(105, 97, 100), (102, 99, 101)]) == []
+
+    def test_the_break_is_a_close_above_the_wick(self) -> None:
+        breaks = self._highs([(105, 97, 99), (102, 99, 101), (107, 103, 106)])
+        assert breaks == [(105, 106)]
+
+    def test_a_further_sweep_moves_it_again(self) -> None:
+        rows = [(105, 97, 99), (107, 100, 104), (106.5, 103, 106), (109, 104, 108)]
+        assert self._highs(rows) == [(107, 108)]
+
+    def test_the_break_is_drawn_from_the_sweep(self) -> None:
+        bars = _ohlc(self._RISE + [(105, 97, 99), (107, 103, 106)])
+        br = [b for b in read(bars, k=2).breaks if b.price > b.level]
+        assert br[0].from_at == bars[5].ts
+
+    def test_a_clean_close_through_is_still_a_break_of_the_swing(self) -> None:
+        assert self._highs([(102, 97, 101)]) == [(100, 101)]
+
+    def test_lows_are_swept_the_same_way(self) -> None:
+        # swing low 90 at index 2, swept to 85 closing 91, then closes 89 and 84
+        rows = [(96, 94, 95), (94, 92, 93), (93, 90, 91), (95, 92, 94), (96, 93, 95)]
+        rows += [(93, 85, 91), (92, 88, 89), (88, 83, 84)]
+        found = read(_ohlc(rows), k=2)
+        below = [(b.level, b.price) for b in found.breaks if b.price < b.level]
+        assert below == [(85, 84)]

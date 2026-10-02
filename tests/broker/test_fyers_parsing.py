@@ -132,3 +132,72 @@ def test_parse_positions_returns_only_open_positions() -> None:
 def test_parse_positions_raises_on_error_response() -> None:
     with pytest.raises(FyersApiError):
         parse_positions({"s": "error", "code": -1, "message": "boom"})
+
+
+# --- fills: shapes as Fyers returned them on 29 Sep 2026, client id removed ---
+
+_TRADEBOOK = {
+    "s": "ok", "code": 200, "message": "",
+    "tradeBook": [{
+        "clientId": "XX00000", "exchange": 10, "fyToken": "101126102751356",
+        "orderNumber": "26092900154023", "exchangeOrderNo": "1000000048877662",
+        "tradeNumber": "26092900154023-2736155", "tradePrice": 176.1, "segment": 11,
+        "productType": "MARGIN", "tradedQty": 65, "symbol": "NSE:NIFTY26OCT23100CE",
+        "row": 1790658409, "orderDateTime": "29-Sep-2026 10:36:49", "tradeValue": 11446.5,
+        "side": -1, "orderType": 1, "orderTag": "1:MOW",
+    }],
+}
+
+_HISTORY = {
+    "s": "ok", "code": 200, "message": "Trade Book data fetched successfully",
+    "data": [{
+        "clientId": "XX00000", "description": "NIFTY26OCT22900PE", "exchange": 10,
+        "exchangeOrderNo": "1300000180221438", "is_symbol_active": True,
+        "orderDateTime": "15-Sep-2026 15:12:34", "orderNumber": "26091500434655",
+        "product_type": "Overnight", "segment": 11, "side": -1,
+        "symbol": "NSE:NIFTY26OCT22900PE", "tradeNumber": "9791230", "trade_price": 225.35,
+        "trade_value": 14647.75, "traded_qty": 65,
+    }],
+}
+
+
+def test_a_tradebook_row_becomes_a_fill_in_utc() -> None:
+    from datetime import UTC, datetime
+
+    from broker.fyers import parse_fills
+
+    (fill,) = parse_fills(_TRADEBOOK, history=False)
+    assert (fill.symbol, fill.side, fill.quantity, fill.price) == (
+        "NSE:NIFTY26OCT23100CE", "SELL", 65, 176.1)
+    assert fill.at == datetime(2026, 9, 29, 5, 6, 49, tzinfo=UTC)  # 10:36:49 IST
+    # Keyed on the order and the exchange's trade number - the part the trade
+    # history spells the same way - so a fill is recognised on both.
+    assert fill.fill_id == "26092900154023:2736155"
+
+
+def test_a_trade_history_row_reads_its_own_field_names() -> None:
+    from broker.fyers import parse_fills
+
+    (fill,) = parse_fills(_HISTORY, history=True)
+    assert (fill.side, fill.quantity, fill.price) == ("SELL", 65, 225.35)
+    assert fill.fill_id == "26091500434655:9791230"
+
+
+def test_booked_is_read_from_positions_not_funds() -> None:
+    # 29 Sep 2026 at 13:15: funds said 0 realized; positions carried the
+    # +4,881.50 of the call spread closed at 10:36.
+    from broker.fyers import parse_booked
+
+    raw = {
+        "s": "ok", "code": 200,
+        "overall": {"count_open": 4, "count_total": 6, "pl_realized": 4881.5,
+                    "pl_total": -585.0, "pl_unrealized": -5466.5},
+        "netPositions": [
+            {"symbol": "NSE:NIFTY26OCT24200CE", "netQty": 0, "realized_profit": -4927},
+            {"symbol": "NSE:NIFTY26OCT23800CE", "netQty": 0, "realized_profit": 9808.5},
+        ],
+    }
+    assert parse_booked(raw) == 4881.5
+    # Without the summary block, the rows add up to the same.
+    del raw["overall"]
+    assert parse_booked(raw) == 4881.5

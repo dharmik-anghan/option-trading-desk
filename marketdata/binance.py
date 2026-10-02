@@ -51,7 +51,10 @@ BINANCE_INTERVAL: dict[Interval, str] = {
 #: the desk's perpetual symbols came from a venue with a Binance-shaped API - but
 #: mapped explicitly rather than assumed, because the day they diverge should be a
 #: missing entry and not a wrong chart.
-FOR_SYMBOL: dict[str, str] = {"BTCUSDT": "BTCUSDT"}
+#:
+#: Only the crypto pairs. Binance quotes no gold or oil, so XAUUSDT and CLUSDT are
+#: absent here on purpose and reach Yahoo instead.
+FOR_SYMBOL: dict[str, str] = {"BTCUSDT": "BTCUSDT", "ETHUSDT": "ETHUSDT"}
 
 
 def binance_symbol(symbol: str) -> str | None:

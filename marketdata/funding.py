@@ -40,7 +40,7 @@ MAX_ROWS = 1000
 #: What the desk calls these against what Binance's futures API calls them.
 #: Only the perpetuals it lists: there is no Binance funding for gold or oil, and
 #: inventing one would be worse than having none.
-FOR_SYMBOL: dict[str, str] = {"BTCUSDT": "BTCUSDT"}
+FOR_SYMBOL: dict[str, str] = {"BTCUSDT": "BTCUSDT", "ETHUSDT": "ETHUSDT"}
 
 
 def funding_symbol(symbol: str) -> str | None:

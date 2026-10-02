@@ -249,6 +249,125 @@ def _vol_snapshot(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _broker_fills(conn: sqlite3.Connection) -> None:
+    """Every broker fill the desk has seen, and what it did with each.
+
+    Structures were edited only by hand, so a leg closed at the broker stayed
+    open on the desk until someone noticed. Reconciling from fills fixes that,
+    and needs a memory of which fills were already applied - a sync run twice
+    must not close a leg twice.
+
+    `status` is what the fill meant: `applied` (it opened or closed a leg),
+    `covered` (a leg already recorded it), `pending` (it opened something no
+    structure holds yet - waiting for you to say where it belongs), `outside`
+    (a round trip that never touched a structure), `ignored` (you said so), or
+    `detached` (its structure or leg was since deleted).
+
+    No foreign keys: a structure deleted as a bookkeeping correction should not
+    be blocked by, or take with it, the record of what the broker executed.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS broker_fill (
+            fill_id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            price REAL NOT NULL,
+            at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            basket_id INTEGER,
+            leg_id INTEGER,
+            -- 'open' or 'close', for an applied fill
+            action TEXT,
+            seen_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_broker_fill_status ON broker_fill(status);
+        CREATE INDEX IF NOT EXISTS idx_broker_fill_basket ON broker_fill(basket_id);
+    """)
+
+
+def _preopen(conn: sqlite3.Connection) -> None:
+    """NSE's pre-open auction, one row per stock per day.
+
+    NSE shows the latest session and nothing older, so a day not written down
+    that day is gone - the same reason `vol_snapshot` exists. Kept for testing
+    ideas that read the open before it happens: gap direction, auction volume,
+    buy and sell imbalance.
+
+    `preopen_day` says where a day came from: `nse` (the API, with the book and
+    buy and sell totals) or `csv` (a file downloaded from the page, which has
+    neither). `fingerprint` is what the rows hash to, so the same file saved
+    under two names is caught rather than recorded as two days.
+
+    `preopen_book` is the top ten levels the auction was struck from. From the
+    API only; the downloaded file does not have it.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS preopen_day (
+            day TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            -- NSE's own timestamp for the figures; null from a CSV
+            as_of TEXT,
+            fingerprint TEXT NOT NULL,
+            rows INTEGER NOT NULL,
+            recorded_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS preopen_quote (
+            day TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            series TEXT NOT NULL,
+            prev_close REAL NOT NULL,
+            final_price REAL NOT NULL,
+            final_quantity INTEGER NOT NULL,
+            change REAL NOT NULL,
+            pct_change REAL NOT NULL,
+            iep REAL,
+            turnover_cr REAL,
+            ffm_cap_cr REAL,
+            best_bid REAL,
+            best_bid_qty INTEGER,
+            best_ask REAL,
+            best_ask_qty INTEGER,
+            total_buy_qty INTEGER,
+            total_sell_qty INTEGER,
+            ato_buy_qty INTEGER,
+            ato_sell_qty INTEGER,
+            imbalance_at_iep INTEGER,
+            imbalance_at_market INTEGER,
+            year_high REAL,
+            year_low REAL,
+            PRIMARY KEY (day, symbol)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_preopen_quote_symbol ON preopen_quote(symbol, day);
+
+        CREATE TABLE IF NOT EXISTS preopen_book (
+            day TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            price REAL NOT NULL,
+            buy_qty INTEGER NOT NULL,
+            sell_qty INTEGER NOT NULL,
+            is_iep INTEGER NOT NULL,
+            PRIMARY KEY (day, symbol, price)
+        );
+    """)
+
+
+def _preopen_index(conn: sqlite3.Connection) -> None:
+    """NIFTY 50's own pre-open figure, beside the day's stocks.
+
+    Where the index was set to open is the gap the options open into, and it is
+    the one pre-open number an index options backtest reads first. NSE sends it
+    only with the NIFTY 50 list, and only from the API - a downloaded file does
+    not have it, so these stay null for a day that came from one.
+    """
+    for column in ("index_price", "index_change", "index_pct_change"):
+        conn.execute(f"ALTER TABLE preopen_day ADD COLUMN {column} REAL")
+
+
 #: Ordered, append-only. Never edit a step that has shipped.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, reason="baseline: the schema init_schema creates", apply=_noop),
@@ -264,6 +383,12 @@ MIGRATIONS: tuple[Migration, ...] = (
               apply=_perp_order_log),
     Migration(version=7, reason="what options cost each day, which cannot be fetched later",
               apply=_vol_snapshot),
+    Migration(version=8, reason="broker fills, so structures follow what was executed",
+              apply=_broker_fills),
+    Migration(version=9, reason="NSE's pre-open auction, which is only served on the day",
+              apply=_preopen),
+    Migration(version=10, reason="NIFTY 50's own pre-open figure, the gap options open into",
+              apply=_preopen_index),
 )
 
 

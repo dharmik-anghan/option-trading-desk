@@ -20,6 +20,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import date
+from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -41,9 +43,11 @@ from api.routers import (
     chart,
     feeds,
     market,
+    optbt,
     orders,
     perps,
     portfolio,
+    preopen,
     rrg,
     strategies,
     structure,
@@ -54,14 +58,18 @@ from api.store import open_db
 from broker.errors import BrokerError
 from broker.session import in_session
 from broker.shark.stream import SharkStream
-from marketdata import BarService
+from marketdata import BarService, nse_preopen
+from marketdata.daily_updater import DailyBarUpdater
 from marketdata.holder import BarStoreHolder
+from marketdata.models import Bar
 from marketdata.venue import VenueBars
 from notify import Telegram, TelegramConfig
 from settings import load_settings
+from storage.preopen_recorder import PreOpenRecorder
 from storage.vol_recorder import VolRecorder
 from streaming import TickHub
-from venues import for_venue, option_underlyings
+from universe.nse import daily_series
+from venues import Capability, for_venue, option_underlyings
 from venues import get as get_venue
 
 log = logging.getLogger(__name__)
@@ -109,24 +117,47 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     shutting_down = asyncio.Event()
     application.state.shutting_down = shutting_down
 
-    # The bar store, and the venue registered as a source under its own name. The
-    # venue's candles are what a trading chart shows - the instrument an order would
-    # be in - and storing them is what turns a few hundred bars into a history.
+    # The bar store, and every venue that serves history registered as a source
+    # under its own name. The venue's candles are what a trading chart shows - the
+    # instrument an order would be in - and storing them is what turns a few
+    # hundred bars into a history.
+    #
+    # Both venues, not just the perpetuals one. Registering only Shark meant the
+    # options desk's chart had no live source at all: `BarService` found nothing
+    # mapped to "fyers", so every request fell through to whatever the offline
+    # backfill had written - and since that script needs the desk stopped to take
+    # the store's write lock, the chart sat frozen at the last time it was run.
     #
     # Opened lazily and retried, not once here. DuckDB permits one writer, so a
     # copy of this app still shutting down or a backfill just finishing holds the
     # file for a few seconds - and a desk that tried once at boot answered "the
     # bar store is not open" for the rest of its life, with the file unlocked the
     # whole time. See `marketdata/holder.py`.
+    # What each venue may be asked for, in its own spelling. A symbol a source does
+    # not list draws nothing rather than something else, which is why these are
+    # written out: the options desk charts the five index underlyings and nothing
+    # else. Its constituents are in the store too - the rotation graph reads them -
+    # but nothing charts one, so nothing needs them kept current.
+    charted: dict[str, tuple[str, ...]] = {
+        "fyers": option_underlyings(),
+        "shark": tuple(i.symbol for i in for_venue("shark")),
+    }
+
     def _register(service: BarService) -> None:
-        if not settings.has_shark:
-            return
-        shark = broker_for(get_venue("shark"))
-        service.register(
-            "shark",
-            VenueBars(shark),
-            {i.symbol: i.symbol for i in for_venue("shark")},
-        )
+        for venue_id, symbols in charted.items():
+            spec = get_venue(venue_id)
+            if not spec.can(Capability.HISTORY) or not symbols:
+                continue
+            if venue_id == "shark" and not settings.has_shark:
+                continue
+            service.register(
+                venue_id,
+                # A way to get an adapter rather than an adapter: the options
+                # venue's token expires every morning. See `VenueBars`.
+                VenueBars(partial(broker_for, spec)),
+                {symbol: symbol for symbol in symbols},
+            )
+        log.info("bar sources registered: %s", ", ".join(service.sources()) or "none")
 
     bars = BarStoreHolder(get_db_path().parent / "bars.duckdb", on_open=_register)
     application.state.bars = bars
@@ -173,6 +204,35 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     vol_task = asyncio.create_task(recorder.run_forever(), name="vol-recorder")
     log.info("volatility recorder started for %d underlyings", len(option_underlyings()))
 
+    # NSE's pre-open auction, for the same reason: NSE serves the latest session
+    # and nothing older. Asks NSE directly, not the broker, so it needs no login.
+    preopen = PreOpenRecorder(
+        fetch=nse_preopen.fetch,
+        open_conn=lambda: open_db(db_path),
+        holidays=lambda: get_holidays().dates(),
+    )
+    application.state.preopen_recorder = preopen
+    preopen_task = asyncio.create_task(preopen.run_forever(), name="preopen-recorder")
+
+    # The daily bars the rotation graph and the volatility ranks read. Only the
+    # backfill script wrote them, and it needs the desk stopped, so they sat at
+    # whatever day it was last run. The desk holds the store, so it keeps them.
+    def _daily(symbol: str, start: date, end: date) -> list[Bar]:
+        return [
+            Bar(ts=c.timestamp, open=c.open, high=c.high, low=c.low, close=c.close,
+                volume=c.volume)
+            for c in get_broker().get_history(symbol, "D", start, end)
+        ]
+
+    daily = DailyBarUpdater(
+        symbols=lambda: [symbol for _, symbol in daily_series()],
+        fetch=_daily,
+        store=lambda: bars.store,
+        holidays=lambda: get_holidays().dates(),
+    )
+    application.state.daily_updater = daily
+    daily_task = asyncio.create_task(daily.run_forever(), name="daily-bars")
+
     # The perpetuals venue pushes prices rather than being polled for them, which
     # is not a nicety: its budget is 60 requests a minute against Fyers' ~200, and
     # three instruments across several panels would spend it on nothing. The hub
@@ -197,10 +257,19 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         shutting_down.set()
         task.cancel()
         vol_task.cancel()
+        preopen_task.cancel()
+        daily_task.cancel()
         with suppress(asyncio.CancelledError):
             await task
         with suppress(asyncio.CancelledError):
             await vol_task
+        with suppress(asyncio.CancelledError):
+            await preopen_task
+        with suppress(asyncio.CancelledError):
+            await daily_task
+        # So the pre-open page does not report a recorder that has stopped.
+        application.state.preopen_recorder = None
+        application.state.daily_updater = None
         if stream is not None:
             await stream.stop()
         bars.close()
@@ -233,6 +302,8 @@ for _router in (
     system.router,
     alerts.router,
     backtest.router,
+    optbt.router,
+    preopen.router,
     bars.router,
     chart.router,
     portfolio.router,

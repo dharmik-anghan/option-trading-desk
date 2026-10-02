@@ -15,6 +15,7 @@ bars is that it is one query.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 from analytics.rrg import DEFAULT_WINDOW, Quadrant, rrg
 from api.deps import bar_service
 from backtest.resample import resample
+from broker.session import IST
 from marketdata import BarService, Interval
 from marketdata.models import Bar
 from universe.nse import (
@@ -98,6 +100,11 @@ class SnapshotResponse(BaseModel):
     #: not exist then.
     members_as_at: str | None
     caveats: list[str]
+    #: The last session on the graph, in IST.
+    bars_to: str | None = None
+    #: Whether the desk is keeping those bars current, and why not if it is not.
+    updater_running: bool = False
+    updater_error: str | None = None
 
 
 def _service(request: Request) -> BarService:
@@ -235,15 +242,6 @@ def snapshot(
             )
         )
 
-    # Said out loud, because it is the difference between two charts that look
-    # like they disagree. The same sector can read leading at a window of 14,
-    # improving at 21 and weakening on weekly bars, from identical prices - so a
-    # result that does not carry its settings cannot be reconciled with anything.
-    caveats.append(
-        f"Measured against {mark.name} over a {window}-period window on {timeframe} "
-        "bars. Another benchmark or window will move things between quadrants"
-    )
-
     if missing:
         caveats.append(
             f"{len(missing)} of {len(plotted)} could not be placed for want of stored "
@@ -251,7 +249,17 @@ def snapshot(
             + (" and others" if len(missing) > 8 else "")
         )
 
+    updater = getattr(request.app.state, "daily_updater", None)
     return SnapshotResponse(
+        # The graph's own last point, not the benchmark's last bar: the chart
+        # stores the index live, so that can be today's candle so far.
+        bars_to=max(
+            (datetime.fromisoformat(s.path[-1].at).astimezone(IST).date().isoformat()
+             for s in out if s.path),
+            default=None,
+        ),
+        updater_running=updater is not None,
+        updater_error=getattr(updater, "last_error", None),
         index_id=wanted_id,
         index_name="All sectors" if wanted_id == "SECTORS" else _name(wanted_id),
         benchmark=mark.id,

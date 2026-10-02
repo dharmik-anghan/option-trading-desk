@@ -26,8 +26,8 @@ short is being tested, and what is scheduled to happen before they expire.
 | **News / Calendar** | Market headlines and the economic calendar, with events that land before one of your expiries marked. Headlines filter by topic — India, crypto, metals and oil — and default to whichever desk you are on |
 | **Option chain** | Collapsed by default. Expiry selection, open-interest buildup, greeks |
 
-A second desk covers perpetual futures on Shark Exchange - Bitcoin, gold and
-crude - reached through `GET /api/perps`. It lists what is open with the figures
+A second desk covers perpetual futures on Shark Exchange - Bitcoin, Ethereum, gold
+and crude - reached through `GET /api/perps`. It lists what is open with the figures
 leverage makes matter: the margin behind a position, and how far it is from the
 price the venue closes it at, as a percentage rather than in points so gold at
 4,300 and Bitcoin at 84,000 can be read side by side. A stop or a target can be
@@ -141,6 +141,19 @@ uv run python scripts/backup_db.py --loop      # what the container runs
 Tune with `BACKUP_EVERY_HOURS` and `BACKUP_KEEP` in `docker-compose.yml`, and
 point the desk at another file with `DB_PATH`.
 Restoring is a file copy: stop the desk, replace `data/trading.db`, start it.
+
+### Pre-open auction
+
+NSE serves only the latest session's pre-open (09:00–09:08), so the desk records
+it each morning by itself: every F&O stock with its ten-level book, plus NIFTY
+50's own pre-open figure, into the `preopen_*` tables. For a day the desk was
+not running, or files downloaded from NSE's pre-open page:
+
+```bash
+uv run python scripts/preopen.py fetch            # the latest session, from NSE
+uv run python scripts/preopen.py import ~/Downloads
+uv run python scripts/preopen.py list
+```
 
 ## How it is laid out
 

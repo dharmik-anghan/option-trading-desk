@@ -38,7 +38,7 @@ from broker.token_store import get_access_token  # noqa: E402
 from marketdata.models import Bar, Interval, Series  # noqa: E402
 from marketdata.store import BarStore  # noqa: E402
 from settings import load_settings  # noqa: E402
-from universe.nse import INDICES, fyers_symbol, load  # noqa: E402
+from universe.nse import daily_series  # noqa: E402
 from venues import OPTION_UNDERLYINGS  # noqa: E402
 
 DEFAULT_STORE = REPO_ROOT / "data" / "bars.duckdb"
@@ -52,35 +52,6 @@ WINDOW_DAYS = 360
 #: minute, and this is nowhere near either - it is about not being the reason
 #: the desk beside it gets rate limited.
 BETWEEN = 0.2
-
-
-#: Series the desk needs that are in no index's constituent list.
-#:
-#: India VIX is the reason this exists. It is not an index with members and it
-#: is not a stock, but it is the one series that makes an implied volatility
-#: reading mean anything - a figure of 12 says nothing until you know the last
-#: two years ran between 9 and 28.
-EXTRAS: tuple[tuple[str, str], ...] = (
-    ("INDIAVIX", "NSE:INDIAVIX-INDEX"),
-)
-
-
-def wanted() -> list[tuple[str, str]]:
-    """Every series to fetch, as (label, symbol), indices first.
-
-    Indices first because they are the benchmarks: a run interrupted early
-    leaves the graph able to draw sectors against Nifty even with no stocks.
-    """
-    out: list[tuple[str, str]] = [(spec.id, spec.symbol) for spec in INDICES]
-    out.extend(EXTRAS)
-    seen = {symbol for _, symbol in out}
-    for membership in load().values():
-        for member in membership.members:
-            symbol = fyers_symbol(member)
-            if symbol not in seen:
-                seen.add(symbol)
-                out.append((member.symbol, symbol))
-    return out
 
 
 def fetch_symbol(broker: FyersBroker, symbol: str, years: int) -> list[Bar]:
@@ -191,7 +162,7 @@ def main() -> int:
     if args.intraday:
         return _intraday(args.store, args.years, dry_run=args.dry_run)
 
-    series = wanted()
+    series = daily_series()
     if args.only:
         series = [(label, symbol) for label, symbol in series if args.only in symbol]
 

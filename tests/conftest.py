@@ -47,3 +47,30 @@ def _no_live_venues(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setitem(dependencies.BROKER_FACTORIES, "shark", refuse("Shark"))
     monkeypatch.setattr(dependencies, "_build_shark", refuse("Shark"))
     yield
+
+
+class NseReachedInTest(AssertionError):
+    """A test tried to fetch from NSE."""
+
+
+@pytest.fixture(autouse=True)
+def _no_nse(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """NSE's pre-open, refused, and the app's own database moved aside.
+
+    The same accident as above in a quieter form: a test entering `TestClient`
+    runs the app's lifespan, which starts the pre-open recorder, which fetched
+    NSE for real and wrote the answer into `data/trading.db`. The dependency
+    override on `get_db_path` does not reach the lifespan - it calls the function
+    directly - so `DB_PATH` points it at a scratch file instead.
+    """
+    import tempfile
+
+    import marketdata.nse_preopen as nse_preopen
+
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise NseReachedInTest("A test tried to fetch from NSE. Stub nse_preopen.fetch.")
+
+    monkeypatch.setattr(nse_preopen, "fetch", refuse)
+    with tempfile.TemporaryDirectory() as scratch:
+        monkeypatch.setenv("DB_PATH", f"{scratch}/trading.db")
+        yield

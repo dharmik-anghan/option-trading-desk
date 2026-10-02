@@ -105,17 +105,37 @@ class TestNotAskingTwice:
         svc.bars("BTCUSDT", Interval.H1, 5)
         assert len(source.calls) == 2
 
-    def test_fresh_bars_are_not_refetched_even_after_the_cooldown(self, store: BarStore) -> None:
-        # Asking for a bar that has not closed yet is asking for nothing.
+    def test_a_bar_that_has_not_closed_is_refetched_after_the_cooldown(
+        self, store: BarStore
+    ) -> None:
+        # The opposite of what this used to assert, and the reason the options
+        # chart sat still all session. A series whose newest bar had not closed was
+        # called up to date and left alone - but the unclosed bar is precisely the
+        # one whose high, low and close are still moving, so on a daily chart that
+        # froze the right-hand edge from the first fetch of the morning onwards.
+        # The cooldown is what keeps the traffic down; freshness is not.
         source = FakeSource()
         clock = {"t": NOW}
         source.bars = [bar(0, at=NOW)]
         svc = _service(store, source, clock)
         svc.bars("BTCUSDT", Interval.H1, 5)
-        clock["t"] = NOW + timedelta(minutes=5)
+        clock["t"] = NOW + MIN_BETWEEN_FETCHES + timedelta(seconds=5)
+        out = svc.bars("BTCUSDT", Interval.H1, 5)
+        assert len(source.calls) == 2
+        assert out.fetched is True
+
+    def test_a_forming_bar_is_still_not_refetched_inside_the_cooldown(
+        self, store: BarStore
+    ) -> None:
+        source = FakeSource()
+        clock = {"t": NOW}
+        source.bars = [bar(0, at=NOW)]
+        svc = _service(store, source, clock)
+        svc.bars("BTCUSDT", Interval.H1, 5)
+        clock["t"] = NOW + timedelta(seconds=10)
         out = svc.bars("BTCUSDT", Interval.H1, 5)
         assert len(source.calls) == 1
-        assert out.note == "up to date"
+        assert out.note == "held off"
 
     def test_refresh_can_be_declined_outright(self, store: BarStore) -> None:
         source = FakeSource()

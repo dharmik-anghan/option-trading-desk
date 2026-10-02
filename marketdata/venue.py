@@ -14,6 +14,7 @@ away, and its Bitcoin carries funding where Binance's is spot.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
 from broker.base import MarketData
@@ -42,7 +43,12 @@ RESOLUTION: dict[Interval, str] = {
 class VenueBars:
     """Bars from a broker adapter, for storing under that venue's name."""
 
-    def __init__(self, broker: MarketData) -> None:
+    def __init__(self, broker: Callable[[], MarketData]) -> None:
+        #: How to get an adapter, rather than one adapter. The options venue's
+        #: access token expires every morning and is replaced by whoever asks for
+        #: it next, so a source that held one adapter for the life of the process
+        #: would be fetching with a dead token by the second day - and a chart
+        #: that stops updating overnight is the bug this whole path exists to fix.
         self._broker = broker
 
     def fetch(self, symbol: str, interval: Interval, days: int) -> Fetched:
@@ -55,7 +61,14 @@ class VenueBars:
         today = datetime.now(UTC).date()
         start: date = today - timedelta(days=max(1, days))
         try:
-            candles = self._broker.get_history(symbol, RESOLUTION[interval], start, today)
+            broker = self._broker()
+        except Exception as exc:  # noqa: BLE001 - an adapter that cannot be built has no bars
+            # A missing or unrefreshable credential arrives here. Reported rather
+            # than raised, like a refusal: the store still has yesterday, and a
+            # chart with a note saying why it stopped is worth more than a 500.
+            raise Unavailable(f"the {type(exc).__name__} was: {exc}") from exc
+        try:
+            candles = broker.get_history(symbol, RESOLUTION[interval], start, today)
         except BrokerRateLimited as exc:
             raise RateLimited(str(exc.message)) from exc
         except BrokerError as exc:

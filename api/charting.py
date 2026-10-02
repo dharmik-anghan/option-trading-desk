@@ -20,12 +20,33 @@ nothing on screen would ever show it.
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from pydantic import BaseModel
 
 from backtest.lines import compute, parse_wanted
 from backtest.resample import resample
-from marketdata import BarService, Interval
+from marketdata import Interval
 from marketdata.models import Bar
+from marketdata.service import BarsResult
+
+
+class Bars(Protocol):
+    """What a chart needs of a bar store: freshen a series, and read one.
+
+    A protocol rather than `BarService` itself, because those two calls are the
+    whole of the contract and saying so is what makes the split below testable -
+    the interesting behaviour here is *which* series gets freshened and which gets
+    read, and that should be checkable without a store on disk.
+    """
+
+    def bars(
+        self, symbol: str, interval: Interval, days: int, *, source: str | None = ...
+    ) -> BarsResult: ...
+
+    def stored(
+        self, source: str, symbol: str, interval: Interval, *, days: int = ...
+    ) -> BarsResult: ...
 
 
 class CandleResponse(BaseModel):
@@ -68,6 +89,34 @@ class CandlesResponse(BaseModel):
 BASES: tuple[Interval, ...] = (Interval.M1, Interval.M5, Interval.M15, Interval.H1, Interval.D1)
 
 
+#: Sizes a source is asked for directly. Every other size is combined from the
+#: largest of these below it.
+#:
+#: Fyers serves every resolution the desk names, which is the trap rather than the
+#: convenience: a fetched four-hour series and fifteen-minute bars combined into
+#: four hours can disagree about where a boundary falls, and nothing on a chart
+#: would ever show it. The backfill stores fifteen minutes and a day; this says the
+#: live refresh does the same, so what is on screen and the history behind it are
+#: the same arithmetic.
+#:
+#: A source that is not listed is asked for whatever size is wanted, which is what
+#: a venue serving its own candles at every size wants - see `marketdata/venue.py`.
+SERVED: dict[str, tuple[Interval, ...]] = {
+    "fyers": (Interval.M15, Interval.D1),
+}
+
+
+#: Bars of the fetched size to ask for when refreshing a series.
+#:
+#: The tail, not the chart's whole window. The store holds the depth a backfill put
+#: there and what a live chart is missing is the last few bars, so asking for the
+#: window would be both wasteful and, past a point, refused: Fyers serves a hundred
+#: days of intraday or a year of daily per request, and a four-hour chart's window
+#: is wider than the first of those. Sixty bars is enough slack to cover a weekend,
+#: a holiday and a desk that was switched off for a few days.
+TAIL_BARS = 60
+
+
 #: Calendar days to read per bar asked for, above and below a day.
 #:
 #: An exchange with a session prints a fraction of the bars the clock allows.
@@ -91,8 +140,26 @@ def days_for(interval: Interval, bars: int) -> int:
     return max(2, int(bars * interval.seconds / 86400 * slack) + 2)
 
 
+def fetched_size(source: str, interval: Interval) -> Interval:
+    """Which size to ask this source for, to have `interval` be current.
+
+    Usually the size itself. For a source that serves only some of them, the
+    largest it does serve below the one being looked at - because that is the
+    series the resampling reads, and a four-hour chart is only as fresh as the
+    fifteen-minute bars it is built from. Refreshing the size on screen rather
+    than the one underneath it was the whole of the bug: nothing ever asked for
+    fifteen-minute bars unless you happened to be looking at the fifteen-minute
+    chart.
+    """
+    served = SERVED.get(source)
+    if served is None or interval in served:
+        return interval
+    below = [s for s in served if s.seconds < interval.seconds]
+    return max(below, key=lambda s: s.seconds) if below else interval
+
+
 def series_for(
-    service: BarService,
+    service: Bars,
     source: str,
     symbol: str,
     interval: Interval,
@@ -102,35 +169,50 @@ def series_for(
 ) -> tuple[list[Bar], str]:
     """Bars at one size, and a note about where they came from.
 
-    Three ways, in order of preference:
+    The refresh and the read are two steps rather than one. First the source is
+    asked for the tail of whatever size it serves, which brings the store up to
+    date; then the window being drawn is read off disk, at the size asked for or
+    combined up from a smaller one. Splitting them is what lets a chart show years
+    of history whose last hour came from the venue a minute ago - a single fetch
+    can only be one window, and the two wanted here are a few days and a few years.
 
-    1. Through the source itself, when it is registered and lists this symbol.
-       That is what a venue chart wants - the instrument an order would be in -
-       and it stores what it fetches, so the history grows.
-    2. Straight off disk at that exact size, for a series a backfill writes.
-    3. Off disk at the largest smaller size held, combined up.
+    Two ways to read, in order of preference:
 
-    The third is how the options desk draws anything but a day and a week: NSE
+    1. Straight off disk at that exact size, for a series a backfill writes.
+    2. Off disk at the largest smaller size held, combined up.
+
+    The second is how the options desk draws anything but a day and a week: NSE
     bars are backfilled daily and at fifteen minutes, and every other size is
     arithmetic on those.
     """
+    note = ""
+    # The series is keyed by the source's own name for the instrument, which the
+    # refresh reports back. Taken from there rather than assumed to be `symbol`,
+    # so a source whose names differ from the desk's is read at the key it wrote.
+    key = symbol
     if refresh:
-        fetched = service.bars(symbol, interval, days, source=source)
-        if fetched.bars:
-            return fetched.bars, fetched.note
+        base = fetched_size(source, interval)
+        got = service.bars(symbol, base, days_for(base, TAIL_BARS), source=source)
+        key = got.series.symbol
+        # Only a source that could not be read. "Held off" and the rest are the
+        # cache working, and a chart that says so every two minutes is a chart
+        # whose notes nobody reads.
+        if not got.ok:
+            note = got.note
 
-    held = service.stored(source, symbol, interval, days=days)
+    held = service.stored(source, key, interval, days=days)
     if held.bars:
-        return held.bars, ""
+        return held.bars, note
 
     for base in sorted(BASES, key=lambda b: b.seconds, reverse=True):
         if base.seconds >= interval.seconds:
             continue
-        under = service.stored(source, symbol, base, days=days)
+        under = service.stored(source, key, base, days=days)
         if under.bars:
-            return resample(under.bars, interval), f"built from {base} bars"
+            built = f"built from {base} bars"
+            return resample(under.bars, interval), f"{note} {built}" if note else built
 
-    return [], f"Nothing stored for {symbol} at {interval} or under it"
+    return [], note or f"Nothing stored for {symbol} at {interval} or under it"
 
 
 def drawn(

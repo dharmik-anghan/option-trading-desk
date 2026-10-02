@@ -248,6 +248,26 @@ class BarStore:
             return None
         return _from_db(row[0]), _from_db(row[1])
 
+    def latest(self, source: str, interval: Interval) -> dict[str, datetime]:
+        """The last bar held for every symbol of one source and size, in one query."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT symbol, max(ts) FROM bar WHERE source = ? AND interval = ? "
+                "GROUP BY symbol",
+                (source, str(interval)),
+            ).fetchall()
+        return {str(r[0]): _from_db(r[1]) for r in rows}
+
+    def fetched(self, source: str, interval: Interval) -> dict[str, datetime]:
+        """When each symbol of one source and size was last fetched live, in one query."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT symbol, fetched_at FROM series_fetch "
+                "WHERE source = ? AND interval = ? AND ok",
+                (source, str(interval)),
+            ).fetchall()
+        return {str(r[0]): _from_db(r[1]) for r in rows}
+
     def count(self, series: Series) -> int:
         with self._lock:
             row = self._conn.execute(

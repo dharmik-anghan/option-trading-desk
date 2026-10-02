@@ -178,6 +178,66 @@ def list_baskets(conn: sqlite3.Connection) -> list[Basket]:
     return [b for b in baskets if b is not None]
 
 
+def add_leg(conn: sqlite3.Connection, basket_id: int, leg: NewBasketLeg) -> int:
+    """Put another leg into an existing structure - an adjustment, a hedge added.
+
+    `entry_at` is required here rather than defaulting to the structure's own
+    creation time: a leg added later was opened later, and its history says so.
+    """
+    if leg.entry_at is None:
+        raise ValueError("a leg added to a structure needs the time it was opened")
+    cursor = conn.execute(
+        "INSERT INTO basket_leg "
+        "(basket_id, symbol, option_type, strike, side, quantity, entry_price, entry_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            basket_id,
+            leg.symbol,
+            leg.option_type,
+            leg.strike,
+            leg.side,
+            leg.quantity,
+            leg.entry_price,
+            leg.entry_at.isoformat(),
+        ),
+    )
+    conn.commit()
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
+def close_quantity(
+    conn: sqlite3.Connection, leg_id: int, quantity: int, exit_price: float, exit_at: datetime
+) -> int:
+    """Close some or all of an open leg. Returns the id of the leg now closed.
+
+    A partial close splits the leg in two: the part closed becomes its own
+    closed leg, with the original entry, and the rest stays open under the
+    original id. Every leg is then either wholly open or wholly closed, which
+    is what the payoff, the alerts and the realized figures already assume.
+    """
+    row = conn.execute(
+        "SELECT basket_id, symbol, option_type, strike, side, quantity, entry_price, entry_at "
+        "FROM basket_leg WHERE id = ? AND exit_price IS NULL",
+        (leg_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"leg {leg_id} is not open")
+    held = int(row[5])
+    if quantity >= held:
+        close_leg(conn, leg_id, exit_price, exit_at)
+        return leg_id
+    conn.execute("UPDATE basket_leg SET quantity = ? WHERE id = ?", (held - quantity, leg_id))
+    cursor = conn.execute(
+        "INSERT INTO basket_leg (basket_id, symbol, option_type, strike, side, quantity, "
+        "entry_price, entry_at, exit_price, exit_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (*row[:5], quantity, row[6], row[7], exit_price, exit_at.isoformat()),
+    )
+    conn.commit()
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
 def close_leg(conn: sqlite3.Connection, leg_id: int, exit_price: float, exit_at: datetime) -> None:
     conn.execute(
         "UPDATE basket_leg SET exit_price = ?, exit_at = ? WHERE id = ?",
@@ -196,10 +256,24 @@ def delete_basket(conn: sqlite3.Connection, basket_id: int) -> bool:
     """
     if conn.execute("SELECT 1 FROM basket WHERE id = ?", (basket_id,)).fetchone() is None:
         return False
+    _detach_fills(conn, "basket_id = ?", basket_id)
     conn.execute("DELETE FROM basket_leg WHERE basket_id = ?", (basket_id,))
     conn.execute("DELETE FROM basket WHERE id = ?", (basket_id,))
     conn.commit()
     return True
+
+
+def _detach_fills(conn: sqlite3.Connection, where: str, value: int) -> None:
+    """Keep the record of what the broker executed, minus its link to what is gone."""
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'broker_fill'"
+    ).fetchone()
+    if has_table:
+        conn.execute(
+            "UPDATE broker_fill SET status = 'detached', basket_id = NULL, leg_id = NULL "
+            f"WHERE {where}",
+            (value,),
+        )
 
 
 def delete_leg(conn: sqlite3.Connection, basket_id: int, leg_id: int) -> bool:
@@ -219,6 +293,7 @@ def delete_leg(conn: sqlite3.Connection, basket_id: int, leg_id: int) -> bool:
     if cursor.rowcount == 0:
         conn.commit()
         return False
+    _detach_fills(conn, "leg_id = ?", leg_id)
     remaining = conn.execute(
         "SELECT COUNT(*) FROM basket_leg WHERE basket_id = ?", (basket_id,)
     ).fetchone()[0]

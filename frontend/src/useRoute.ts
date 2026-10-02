@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 
-export type Route = "home" | "options" | "crypto" | "backtesting" | "rotation";
+export type Route =
+  | "home"
+  | "options"
+  | "crypto"
+  | "backtesting"
+  | "option-backtesting"
+  | "preopen"
+  | "rotation";
 
 /** Paths, and what they mean. One place, so a link and a redirect cannot disagree. */
 const PATHS: Record<Route, string> = {
@@ -8,6 +15,8 @@ const PATHS: Record<Route, string> = {
   options: "/options",
   crypto: "/crypto",
   backtesting: "/backtesting",
+  "option-backtesting": "/options/backtesting",
+  preopen: "/preopen",
   rotation: "/rotation",
 };
 
@@ -29,6 +38,8 @@ const TITLE: Record<Route, string> = {
   options: "Option Desk",
   crypto: "Crypto Desk",
   backtesting: "Backtesting",
+  "option-backtesting": "Options backtesting",
+  preopen: "Pre-open",
   rotation: "Rotation",
 };
 

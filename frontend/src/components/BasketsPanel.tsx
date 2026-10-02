@@ -6,6 +6,7 @@ import { PayoffChart } from "./PayoffChart";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AdoptDialog } from "./AdoptDialog";
 import { StructureDetail } from "./StructureDetail";
+import { FillsTray } from "./FillsTray";
 
 interface Props {
   baskets: Basket[] | null;
@@ -61,6 +62,12 @@ export function BasketsPanel({
   }, [positions]);
 
   const open = (baskets ?? []).filter((b) => b.legs.some((l) => l.is_open));
+  // Finished structures stay, with how they ended - a trade's record is worth
+  // most once it is over.
+  const closed = (baskets ?? [])
+    .filter((b) => b.closed_at !== null)
+    .sort((a, z) => (z.closed_at ?? "").localeCompare(a.closed_at ?? ""));
+  const [showClosed, setShowClosed] = useState(false);
 
   const alreadyGrouped = useMemo(() => {
     const set = new Set<string>();
@@ -117,6 +124,7 @@ export function BasketsPanel({
       {error && <p className="err">{error.message}</p>}
 
       <div className="pb">
+        <FillsTray open={open} onChanged={onChanged} />
         {!baskets && loading && <p className="empty">Loading…</p>}
         {baskets && !open.length && (
           <p className="empty">
@@ -137,6 +145,10 @@ export function BasketsPanel({
                 return a + sign * (ltp - l.entry_price) * l.quantity;
               }, 0);
               const known = live.some((l) => ltpBySymbol.has(l.symbol));
+              // The whole result: what the open legs are worth plus what closed
+              // legs already banked. A structure that rolled a spread has realized
+              // P&L of its own, and leaving it out misreports the trade.
+              const whole = pnl + b.realized;
 
               return (
                 <div className="card" key={b.id}>
@@ -156,7 +168,18 @@ export function BasketsPanel({
                       {b.expiry_date ? ` · expires ${b.expiry_date}` : ""}
                       {b.days_to_expiry != null ? ` · ${b.days_to_expiry.toFixed(1)}d left` : ""}
                     </span>
-                    {known && <span className={`mtm ${dir(pnl)}`}>{signed(pnl)}</span>}
+                    {known && (
+                      <span
+                        className={`mtm ${dir(whole)}`}
+                        title={
+                          b.realized
+                            ? `${signed(pnl)} open + ${signed(b.realized)} banked from closed legs`
+                            : undefined
+                        }
+                      >
+                        {signed(whole)}
+                      </span>
+                    )}
                   </button>
 
                   <div className="met">
@@ -205,6 +228,7 @@ export function BasketsPanel({
                       onCloseLeg={(l) =>
                         setClosing({ basket: b, legId: l.id, price: l.ltp ?? l.entry_price })
                       }
+                      onChanged={onChanged}
                       onRemoveLeg={(l) =>
                         setUnlinking({
                           basket: b,
@@ -231,7 +255,12 @@ export function BasketsPanel({
                   )}
 
                   <div className="card-a">
-                    <span className="dim">{live.length} open legs</span>
+                    <span className="dim">
+                      {live.length} open legs
+                      {b.legs.length > live.length
+                        ? ` · ${b.legs.length - live.length} closed, ${signed(b.realized)} banked`
+                        : ""}
+                    </span>
                     <button
                       className="xbtn danger"
                       style={{ marginLeft: "auto" }}
@@ -246,6 +275,32 @@ export function BasketsPanel({
           </div>
         )}
       </div>
+
+      {!!closed.length && (
+        <div className="closed-list">
+          <button className="tbtn" onClick={() => setShowClosed(!showClosed)}>
+            {showClosed ? "Hide" : "Show"} closed structures ({closed.length})
+          </button>
+          {showClosed && (
+            <table>
+              <tbody>
+                {closed.map((b) => (
+                  <tr key={b.id}>
+                    <td className="l">
+                      <b>{b.name}</b> <span className="dim">{b.strategy}</span>
+                    </td>
+                    <td className="dim">
+                      {b.created_at.slice(0, 10)} → {b.closed_at?.slice(0, 10)}
+                    </td>
+                    <td className="dim">{b.legs.length} legs</td>
+                    <td className={dir(b.realized)}>{signed(b.realized)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {adopting && (
         <AdoptDialog

@@ -15,6 +15,7 @@ from broker.base import Broker
 from broker.models import (
     Candle,
     Expiry,
+    Fill,
     Funds,
     Greeks,
     OptionChain,
@@ -33,11 +34,13 @@ class FakeBroker(Broker):
         available_balance: float = 100000.0,
         positions: list[Position] | None = None,
         realized_pnl: float = 0.0,
+        fills: list[Fill] | None = None,
     ) -> None:
         self.underlying_ltp = underlying_ltp
         self.available_balance = available_balance
         self.positions = positions or []
         self.realized_pnl = realized_pnl
+        self.fills = fills or []
         self.placed_orders: list[OrderRequest] = []
         self._next_order_id = 1
 
@@ -57,6 +60,14 @@ class FakeBroker(Broker):
 
     def get_positions(self) -> list[Position]:
         return self.positions
+
+    def get_booked_pnl(self) -> float:
+        return self.realized_pnl
+
+    def get_fills(self, date_from: date, date_to: date) -> list[Fill]:
+        return sorted(
+            (f for f in self.fills if date_from <= f.at.date() <= date_to), key=lambda f: f.at
+        )
 
     def get_quote(self, symbols: list[str]) -> dict[str, Quote]:
         now = datetime.now(UTC)

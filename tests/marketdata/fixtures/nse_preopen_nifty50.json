@@ -1,0 +1,199 @@
+{
+ "declines": 27,
+ "unchanged": 8,
+ "data": [
+  {
+   "metadata": {
+    "symbol": "DRREDDY",
+    "identifier": "DRREDDYEQN",
+    "series": "EQ",
+    "purpose": null,
+    "lastPrice": 1243.2,
+    "change": 22.2,
+    "pChange": 1.82,
+    "previousClose": 1221,
+    "finalQuantity": 38477,
+    "totalTurnover": 47834606,
+    "marketCap": 755721757633.74,
+    "yearHigh": 1414.9,
+    "yearLow": 1101,
+    "iep": 1243.2
+   },
+   "detail": {
+    "preOpenMarket": {
+     "preopen": [
+      {
+       "price": 1238,
+       "buyQty": 25,
+       "sellQty": 0
+      },
+      {
+       "price": 1240,
+       "buyQty": 431,
+       "sellQty": 0
+      },
+      {
+       "price": 1241,
+       "buyQty": 4252,
+       "sellQty": 0
+      },
+      {
+       "price": 1242,
+       "buyQty": 714,
+       "sellQty": 0
+      },
+      {
+       "price": 1242.7,
+       "buyQty": 10,
+       "sellQty": 0
+      },
+      {
+       "price": 1243.2,
+       "buyQty": 0,
+       "sellQty": 1286,
+       "iep": true
+      },
+      {
+       "price": 1243.6,
+       "buyQty": 0,
+       "sellQty": 91
+      },
+      {
+       "price": 1243.9,
+       "buyQty": 0,
+       "sellQty": 1289
+      },
+      {
+       "price": 1244,
+       "buyQty": 0,
+       "sellQty": 2134
+      },
+      {
+       "price": 1244.1,
+       "buyQty": 0,
+       "sellQty": 73
+      }
+     ],
+     "ato": {
+      "totalBuyQuantity": 0,
+      "totalSellQuantity": 0
+     },
+     "IEP": 1243.2,
+     "totalTradedVolume": 38477,
+     "finalPrice": 1243.2,
+     "finalQuantity": 38477,
+     "lastUpdateTime": "29-Sep-2026 09:09:23",
+     "totalSellQuantity": 44402,
+     "totalBuyQuantity": 48495,
+     "atoBuyQty": 0,
+     "atoSellQty": 0,
+     "Change": 22.2,
+     "perChange": 1.82,
+     "prevClose": 1221
+    }
+   }
+  },
+  {
+   "metadata": {
+    "symbol": "JIOFIN",
+    "identifier": "JIOFINEQN",
+    "series": "EQ",
+    "purpose": null,
+    "lastPrice": 220.5,
+    "change": 0,
+    "pChange": 0,
+    "previousClose": 220.5,
+    "finalQuantity": 79967,
+    "totalTurnover": 17632723,
+    "marketCap": 721457500594.88,
+    "yearHigh": 316.85,
+    "yearLow": 215.36,
+    "iep": 220.5
+   },
+   "detail": {
+    "preOpenMarket": {
+     "preopen": [
+      {
+       "price": 220.3,
+       "buyQty": 51,
+       "sellQty": 0
+      },
+      {
+       "price": 220.39,
+       "buyQty": 4,
+       "sellQty": 0
+      },
+      {
+       "price": 220.4,
+       "buyQty": 4905,
+       "sellQty": 0
+      },
+      {
+       "price": 220.45,
+       "buyQty": 15,
+       "sellQty": 0
+      },
+      {
+       "price": 220.48,
+       "buyQty": 10,
+       "sellQty": 0
+      },
+      {
+       "price": 220.5,
+       "buyQty": 0,
+       "sellQty": 2745,
+       "iep": true
+      },
+      {
+       "price": 220.55,
+       "buyQty": 0,
+       "sellQty": 50
+      },
+      {
+       "price": 220.6,
+       "buyQty": 0,
+       "sellQty": 306
+      },
+      {
+       "price": 220.7,
+       "buyQty": 0,
+       "sellQty": 100
+      },
+      {
+       "price": 220.88,
+       "buyQty": 0,
+       "sellQty": 25
+      }
+     ],
+     "ato": {
+      "totalBuyQuantity": 0,
+      "totalSellQuantity": 0
+     },
+     "IEP": 220.5,
+     "totalTradedVolume": 79967,
+     "finalPrice": 220.5,
+     "finalQuantity": 79967,
+     "lastUpdateTime": "29-Sep-2026 09:09:24",
+     "totalSellQuantity": 526814,
+     "totalBuyQuantity": 277162,
+     "atoBuyQty": 0,
+     "atoSellQty": 0,
+     "Change": 0,
+     "perChange": 0,
+     "prevClose": 220.5
+    }
+   }
+  }
+ ],
+ "advances": 15,
+ "timestamp": "29-Sep-2026 09:09:23",
+ "totalTradedValue": 2503069150,
+ "totalmarketcap": 103910102572069.88,
+ "totalTradedVolume": 3096665,
+ "niftyPreopenStatus": {
+  "pChange": "-0.21",
+  "change": "-47.8",
+  "lastPrice": "22732.45",
+  "status": "CLOSED"
+ }
+}

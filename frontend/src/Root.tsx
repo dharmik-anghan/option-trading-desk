@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import App from "./App";
 import { Home } from "./components/Home";
 import { Backtesting } from "./components/Backtesting";
+import { OptionBacktesting } from "./components/OptionBacktesting";
+import { PreOpen } from "./components/PreOpen";
 import { Rrg } from "./components/Rrg";
 import { getVenues } from "./api";
 import { useRoute } from "./useRoute";
@@ -39,6 +41,12 @@ export default function Root() {
   }
   if (route === "backtesting") {
     return <Backtesting onHome={() => go("home")} />;
+  }
+  if (route === "option-backtesting") {
+    return <OptionBacktesting onHome={() => go("home")} />;
+  }
+  if (route === "preopen") {
+    return <PreOpen onHome={() => go("home")} />;
   }
   if (route === "rotation") {
     return <Rrg onHome={() => go("home")} />;

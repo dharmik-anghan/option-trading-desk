@@ -29,6 +29,7 @@ from typing import Protocol, runtime_checkable
 
 from broker.models import (
     Candle,
+    Fill,
     Funds,
     OptionChain,
     OrderRequest,
@@ -81,6 +82,24 @@ class Trading(Protocol):
 
     def place_order(self, order: OrderRequest) -> OrderResult:
         """Place a real order. Irreversible - callers must confirm before calling this."""
+        ...
+
+
+@runtime_checkable
+class BookedPnl(Protocol):
+    """Profit and loss realized today, as the venue counts it."""
+
+    def get_booked_pnl(self) -> float: ...
+
+
+@runtime_checkable
+class FillHistory(Protocol):
+    """What was executed, and when. Read-only: nothing here can place or change
+    an order, which is why it is its own capability rather than part of
+    `Trading` - code that only needs history can be handed only this."""
+
+    def get_fills(self, date_from: date, date_to: date) -> list[Fill]:
+        """Every fill between two dates (inclusive), oldest first."""
         ...
 
 

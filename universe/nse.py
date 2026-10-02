@@ -248,3 +248,31 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Membership]:
 def constituents(index_id: str, path: Path = DEFAULT_PATH) -> Membership | None:
     """Who is in this index, from what was last fetched."""
     return load(path).get(index_id.strip().upper())
+
+
+#: Series the desk needs that are in no index's constituent list.
+#:
+#: India VIX is the reason this exists. It is not an index with members and it
+#: is not a stock, but it is the one series that makes an implied volatility
+#: reading mean anything - a figure of 12 says nothing until you know the last
+#: two years ran between 9 and 28.
+EXTRAS: tuple[tuple[str, str], ...] = (("INDIAVIX", "NSE:INDIAVIX-INDEX"),)
+
+
+def daily_series(path: Path = DEFAULT_PATH) -> list[tuple[str, str]]:
+    """Every series kept as daily bars, as (label, Fyers symbol), indices first.
+
+    Indices first because they are the benchmarks: a run interrupted early
+    leaves the rotation graph able to draw sectors against Nifty even with no
+    stocks.
+    """
+    out: list[tuple[str, str]] = [(spec.id, spec.symbol) for spec in INDICES]
+    out.extend(EXTRAS)
+    seen = {symbol for _, symbol in out}
+    for membership in load(path).values():
+        for member in membership.members:
+            symbol = fyers_symbol(member)
+            if symbol not in seen:
+                seen.add(symbol)
+                out.append((member.symbol, symbol))
+    return out

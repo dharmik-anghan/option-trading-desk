@@ -133,6 +133,26 @@ class Position(BaseModel):
     product_type: str
 
 
+class Fill(BaseModel):
+    """One execution at the broker: all or part of an order, at one price.
+
+    What structures are reconciled from. A position says what is held now; only
+    fills say when a leg was opened or closed and at what price - and a leg
+    closed today is gone from the positions list tomorrow.
+    """
+
+    #: Stable across the day's tradebook and the trade history: the order and
+    #: the exchange's trade number within it.
+    fill_id: str
+    order_id: str
+    symbol: str
+    side: Side
+    quantity: float
+    price: float
+    #: When it filled, timezone-aware.
+    at: datetime
+
+
 class Tick(BaseModel):
     """One price update from a live stream.
 

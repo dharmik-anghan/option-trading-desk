@@ -28,7 +28,12 @@ class TestTheDesk:
     def test_it_describes_itself(self, client: TestClient) -> None:
         body = client.get("/api/perps").json()
         assert body["venue"] == "shark"
-        assert [i["symbol"] for i in body["instruments"]] == ["BTCUSDT", "XAUUSDT", "CLUSDT"]
+        assert [i["symbol"] for i in body["instruments"]] == [
+            "BTCUSDT",
+            "ETHUSDT",
+            "XAUUSDT",
+            "CLUSDT",
+        ]
 
     def test_prices_and_money_are_different_currencies(self, client: TestClient) -> None:
         # The asymmetry that makes this venue awkward: charts in USDT, account in
@@ -78,6 +83,15 @@ SPECS = {
         min_quantity=0.001,
         min_notional=115.0,
         price_dp=1,
+        quantity_dp=3,
+        maintenance_margin_pct=15.0,
+    ),
+    "ETHUSDT": ContractSpec(
+        symbol="ETHUSDT",
+        max_leverage=150.0,
+        min_quantity=0.001,
+        min_notional=23.0,
+        price_dp=2,
         quantity_dp=3,
         maintenance_margin_pct=15.0,
     ),

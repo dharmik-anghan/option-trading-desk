@@ -1,8 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRrg, getRrgOptions } from "../api";
 import type { Quadrant, RrgOptions, RrgSnapshot } from "../api";
-import { RrgChart } from "./rrg/RrgChart";
+import { RrgChart, quadrantOf } from "./rrg/RrgChart";
 import { BackButton } from "./BackButton";
+
+const DAY = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" });
+
+function dayOf(iso: string): string {
+  return DAY.format(new Date(`${iso.slice(0, 10)}T00:00:00`));
+}
+
+/** The last step's direction as one of eight arrows. Momentum up is north. */
+function heading(dx: number, dy: number): string {
+  if (dx === 0 && dy === 0) return "·";
+  const arrows = ["→", "↗", "↑", "↖", "←", "↙", "↓", "↘"];
+  const turn = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+  return arrows[(turn + 8) % 8];
+}
 
 interface Props {
   onHome: () => void;
@@ -45,7 +59,7 @@ export function Rrg({ onHome }: Props) {
   // another one is a graph nobody can check.
   const [benchmark, setBenchmark] = useState("NIFTY50");
   const [window_, setWindow] = useState(14);
-  const [tail, setTail] = useState(8);
+  const [tail, setTail] = useState(5);
   const [back, setBack] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -131,9 +145,10 @@ export function Rrg({ onHome }: Props) {
   }, [shown, back]);
 
   // Grouped by where each one is *now* on screen, which during a replay is
-  // where it was then — the whole point of stepping back.
+  // where it was then — the whole point of stepping back. Furthest out first.
   const grouped = useMemo(() => {
-    const out: Record<Quadrant, { label: string; symbol: string }[]> = {
+    type Row = { label: string; symbol: string; ratio: number; momentum: number; arrow: string };
+    const out: Record<Quadrant, Row[]> = {
       leading: [],
       weakening: [],
       lagging: [],
@@ -143,29 +158,33 @@ export function Rrg({ onHome }: Props) {
       const end = s.path.length - back;
       const head = s.path[end - 1];
       if (!head) continue;
-      const where: Quadrant =
-        head.ratio >= 100
-          ? head.momentum >= 100
-            ? "leading"
-            : "weakening"
-          : head.momentum >= 100
-            ? "improving"
-            : "lagging";
-      out[where].push({ label: s.label, symbol: s.symbol });
+      const prev = s.path[end - 2] ?? head;
+      out[quadrantOf(head.ratio, head.momentum)].push({
+        label: s.label,
+        symbol: s.symbol,
+        ratio: head.ratio,
+        momentum: head.momentum,
+        arrow: heading(head.ratio - prev.ratio, head.momentum - prev.momentum),
+      });
     }
+    const far = (r: Row) => Math.hypot(r.ratio - 100, r.momentum - 100);
+    for (const rows of Object.values(out)) rows.sort((x, y) => far(y) - far(x));
     return out;
   }, [shown, back]);
 
   return (
-    <main className="rrgpage">
+    <main className="rrgpage rotation">
       <header>
         <BackButton onClick={onHome} />
-        <h1>Rotation</h1>
-        <p>
-          Where each one stands against {snapshot?.benchmark_name ?? "the benchmark"}, and
-          which way it is heading. Things travel clockwise: a laggard starts improving,
-          becomes a leader, weakens, lags again.
-        </p>
+        <h1
+          title={
+            "Where each one stands against the benchmark and which way it is heading. " +
+            "Things travel clockwise: improving, leading, weakening, lagging. Both axes " +
+            "are standard deviations from each one's own recent normal, centred on 100."
+          }
+        >
+          Rotation
+        </h1>
       </header>
 
       {error && <p className="bad">{error}</p>}
@@ -245,9 +264,24 @@ export function Rrg({ onHome }: Props) {
             }}
             disabled={!furthest}
           />
-          <small>{at ?? "—"}</small>
+          <small>{at ? dayOf(at) : "—"}</small>
         </div>
+        {snapshot?.bars_to && (
+          <small
+            className="barsto"
+            title="The desk adds each session's bars after 15:45 IST"
+          >
+            Bars to {dayOf(snapshot.bars_to)}
+          </small>
+        )}
       </div>
+
+      {snapshot && !snapshot.updater_running && (
+        <p className="caveat">Daily bars are not being updated in this process.</p>
+      )}
+      {snapshot?.updater_error && (
+        <p className="caveat">Updating daily bars failed: {snapshot.updater_error}</p>
+      )}
 
       {loading && !snapshot && <p className="empty">Reading the store…</p>}
 
@@ -264,10 +298,15 @@ export function Rrg({ onHome }: Props) {
           <div className="standings">
             {QUADRANTS.map((q) => (
               <section key={q.id} className={`stand ${q.id}`}>
-                <h3>
+                <h3 title={q.says}>
                   {q.name} <span>{grouped[q.id].length}</span>
+                  {q.id === "leading" && (
+                    <span className="cols">
+                      <abbr title="Relative strength">RS</abbr>
+                      <abbr title="Momentum">Mom</abbr>
+                    </span>
+                  )}
                 </h3>
-                <p className="says">{q.says}</p>
                 <ul>
                   {grouped[q.id].map((m) => (
                     <li
@@ -276,10 +315,15 @@ export function Rrg({ onHome }: Props) {
                       onMouseEnter={() => setHovered(m.symbol)}
                       onMouseLeave={() => setHovered(null)}
                     >
-                      {m.label}
+                      <span className="nm">{m.label}</span>
+                      <span className="arr" title="Direction of the last step">
+                        {m.arrow}
+                      </span>
+                      <span className="v">{m.ratio.toFixed(1)}</span>
+                      <span className="v">{m.momentum.toFixed(1)}</span>
                     </li>
                   ))}
-                  {grouped[q.id].length === 0 && <li className="none">nothing here</li>}
+                  {grouped[q.id].length === 0 && <li className="none">None</li>}
                 </ul>
               </section>
             ))}
@@ -293,13 +337,6 @@ export function Rrg({ onHome }: Props) {
         </p>
       ))}
 
-      <p className="note">
-        Both numbers are how far something stands from its own recent normal, in standard
-        deviations, recentred on 100 — the ratio measured on relative strength, the momentum
-        on the ratio. The original formula is Julius de Kempenaer's and its constants are not
-        published, so this is the usual reconstruction: same rotation, same quadrants, not
-        the same decimals as a vendor's chart.
-      </p>
     </main>
   );
 }

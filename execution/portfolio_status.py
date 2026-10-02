@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from broker.base import FundedBroker
+from broker.base import BookedPnl, FundedBroker
 from broker.models import Position
 
 
@@ -26,9 +26,20 @@ class PortfolioStatus:
 
 
 def get_portfolio_status(broker: FundedBroker) -> PortfolioStatus:
+    """Booked comes from the venue's positions where it reports it there.
+
+    Fyers' funds figure for realized P&L stayed at 0 through a day on which a
+    spread was closed for +4,881.50 - so the desk showed nothing booked, and the
+    daily kill-switch read the day as 4,881.50 worse than it was. The positions
+    response had the right number all along. Funds remains the fallback for a
+    venue that only reports it there.
+    """
     positions = broker.get_positions()
-    funds = broker.get_funds()
     unrealized_pnl = sum(p.unrealized_pnl for p in positions)
+    if isinstance(broker, BookedPnl):
+        realized = broker.get_booked_pnl()
+    else:
+        realized = broker.get_funds().realized_pnl
     return PortfolioStatus(
-        positions=positions, realized_pnl=funds.realized_pnl, unrealized_pnl=unrealized_pnl
+        positions=positions, realized_pnl=realized, unrealized_pnl=unrealized_pnl
     )

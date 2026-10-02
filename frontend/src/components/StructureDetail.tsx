@@ -1,4 +1,6 @@
-import type { Basket, BasketLeg, BasketLevels } from "../api";
+import { useEffect, useState } from "react";
+import type { Basket, BasketLeg, BasketLevels, HistoryMoment } from "../api";
+import { addBasketLeg, getBasketHistory } from "../api";
 import { PayoffChart, PayoffLegend } from "./PayoffChart";
 import { dir, int, num, pct, rupees, signed } from "../format";
 import { ThresholdInput } from "./ThresholdInput";
@@ -11,6 +13,8 @@ interface Props {
   spot: number | null;
   onCloseLeg: (leg: BasketLeg) => void;
   onRemoveLeg: (leg: BasketLeg) => void;
+  /** The structure changed here (a leg added by hand); reload. */
+  onChanged: () => void;
 }
 
 const sign = (leg: BasketLeg) => (leg.side === "BUY" ? 1 : -1);
@@ -23,8 +27,16 @@ const sign = (leg: BasketLeg) => (leg.side === "BUY" ? 1 : -1);
  * short leg subtracts. Selling premium therefore shows positive theta and
  * negative vega and gamma, which is the shape of the trade.
  */
-export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLeg }: Props) {
+export function StructureDetail({
+  basket,
+  spot,
+  onLevels,
+  onCloseLeg,
+  onRemoveLeg,
+  onChanged,
+}: Props) {
   const open = basket.legs.filter((l) => l.is_open);
+  const shut = basket.legs.filter((l) => !l.is_open);
   const known = (field: keyof BasketLeg) => open.every((l) => l[field] !== null);
 
   const total = (field: "delta" | "gamma" | "theta" | "vega") =>
@@ -100,6 +112,11 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
     ["Exposure per 1% move", deltaRupees === null ? "—" : signed(deltaRupees)],
     ["Curvature on a 1% move", gammaRupees === null ? "—" : signed(gammaRupees)],
     ["Took in", rupees(credit)],
+    ["Banked from closed legs", shut.length ? signed(basket.realized) : "—"],
+    [
+      "Whole result so far",
+      mtm === null ? "—" : `${signed(mtm + basket.realized)}  (open ${signed(mtm)})`,
+    ],
     ["Cost to close now", closeNow === null ? "—" : rupees(-closeNow)],
     ["Best case", rupees(basket.max_profit)],
     ["Worst case", rupees(basket.max_loss)],
@@ -369,12 +386,225 @@ export function StructureDetail({ basket, spot, onLevels, onCloseLeg, onRemoveLe
         </tbody>
       </table>
 
+      {!!shut.length && (
+        <>
+          <div className="sec">
+            Closed legs<span className="dim">kept on the structure, with what each banked</span>
+          </div>
+          <table className="shut">
+            <thead>
+              <tr>
+                <th className="l">Leg</th>
+                <th>Qty</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Closed</th>
+                <th>Banked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shut.map((l) => {
+                const banked = sign(l) * ((l.exit_price ?? 0) - l.entry_price) * l.quantity;
+                return (
+                  <tr key={l.id}>
+                    <td className="l">
+                      {l.side === "SELL" ? "Short" : "Long"} {int(l.strike)} {l.option_type}
+                    </td>
+                    <td>{int(l.quantity)}</td>
+                    <td className="dim">{num(l.entry_price)}</td>
+                    <td>{l.exit_price === null ? "—" : num(l.exit_price)}</td>
+                    <td className="dim">{when(l.exit_at)}</td>
+                    <td className={dir(banked)}>{signed(banked)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <History basketId={basket.id} stamp={basket.legs.length + shut.length} />
+
+      <AddLeg basketId={basket.id} onAdded={onChanged} />
+
       {!known("delta") && (
         <p className="dim" style={{ margin: 0, padding: "6px 9px", lineHeight: 1.4 }}>
           Some greeks are missing — the broker quotes none for at least one of these strikes, so the
           totals above cover only the legs it priced.
         </p>
       )}
+    </div>
+  );
+}
+
+/** "2026-09-29T05:06:49+00:00" -> "29 Sep 10:36", in the desk's own zone. */
+function when(at: string | null): string {
+  if (!at) return "—";
+  const d = new Date(at);
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+const KIND: Record<HistoryMoment["kind"], string> = {
+  opened: "Opened",
+  adjusted: "Adjusted",
+  added: "Legs added",
+  reduced: "Legs closed",
+  closed: "Closed",
+};
+
+/**
+ * The structure's story: opened, each adjustment, closed - with what each step
+ * banked and took in. Read from the legs, so it covers structures recorded long
+ * before fills were synced.
+ */
+function History({ basketId, stamp }: { basketId: number; stamp: number }) {
+  const [moments, setMoments] = useState<HistoryMoment[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    void getBasketHistory(basketId)
+      .then((m) => live && setMoments(m))
+      .catch(() => live && setMoments([]));
+    return () => {
+      live = false;
+    };
+    // `stamp` changes when a leg is added or closed, which is when the story does.
+  }, [basketId, stamp]);
+
+  if (!moments || !moments.length) return null;
+  return (
+    <>
+      <div className="sec">
+        History<span className="dim">every change to this structure, oldest first</span>
+      </div>
+      <ol className="story">
+        {moments.map((m) => (
+          <li key={m.at} className={m.kind}>
+            <div className="story-h">
+              <b>{KIND[m.kind]}</b>
+              <span className="dim">{when(m.at)}</span>
+              {m.realized !== 0 && (
+                <span className={dir(m.realized)}>{signed(m.realized)} banked</span>
+              )}
+              {m.premium !== 0 && (
+                <span className="dim">
+                  {m.premium > 0 ? "took in" : "paid"} {rupees(Math.abs(m.premium))}
+                </span>
+              )}
+            </div>
+            <ul>
+              {m.events.map((e, i) => (
+                <li key={i}>
+                  {e.action === "open"
+                    ? e.side === "SELL"
+                      ? "Sold"
+                      : "Bought"
+                    : e.side === "SELL"
+                      ? "Bought back"
+                      : "Sold out"}{" "}
+                  {int(e.quantity)} × {e.symbol.replace("NSE:", "")} at {num(e.price)}
+                  {e.realized !== null && (
+                    <span className={dir(e.realized)}> {signed(e.realized)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+/**
+ * A leg entered by hand - a position taken where the sync cannot see it, or a
+ * correction. Writes to the desk's records only; nothing is sent to the broker.
+ */
+function AddLeg({ basketId, onAdded }: { basketId: number; onAdded: () => void }) {
+  const [openForm, setOpenForm] = useState(false);
+  const [symbol, setSymbol] = useState("NSE:NIFTY");
+  const [side, setSide] = useState<"BUY" | "SELL">("SELL");
+  const [quantity, setQuantity] = useState(65);
+  const [price, setPrice] = useState(0);
+  const [at, setAt] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  if (!openForm) {
+    return (
+      <div className="addleg">
+        <button className="xbtn" onClick={() => setOpenForm(true)}>
+          + Add a leg by hand
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="addleg open">
+      <input
+        className="sym"
+        value={symbol}
+        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+        placeholder="NSE:NIFTY26OCT23100CE"
+      />
+      <select value={side} onChange={(e) => setSide(e.target.value as "BUY" | "SELL")}>
+        <option value="SELL">Sold</option>
+        <option value="BUY">Bought</option>
+      </select>
+      <input
+        type="number"
+        min={1}
+        value={quantity}
+        onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+        title="Quantity, in units"
+      />
+      <input
+        type="number"
+        min={0}
+        step={0.05}
+        value={price}
+        onChange={(e) => setPrice(Math.max(0, Number(e.target.value)))}
+        title="Entry price"
+      />
+      <input
+        type="datetime-local"
+        value={at}
+        onChange={(e) => setAt(e.target.value)}
+        title="When it was opened (IST). Blank is now."
+      />
+      <button
+        className="tbtn go"
+        onClick={() => {
+          setError(null);
+          void addBasketLeg(basketId, {
+            symbol,
+            side,
+            quantity,
+            entry_price: price,
+            ...(at ? { entry_at: at } : {}),
+          })
+            .then(() => {
+              setOpenForm(false);
+              onAdded();
+            })
+            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+        }}
+      >
+        Add leg
+      </button>
+      <button className="xbtn" onClick={() => setOpenForm(false)}>
+        Cancel
+      </button>
+      {error && <p className="err">{error}</p>}
+      <p className="dim note">
+        Records the leg on this structure only. It sends nothing to Fyers — use it for a
+        position the sync cannot see, or to correct one.
+      </p>
     </div>
   );
 }

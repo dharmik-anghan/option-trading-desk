@@ -168,20 +168,26 @@ export function Toolbar({
           the two parts, one divider before the sum. */}
       {!perps && (
       <div className="tbgroup">
-        <div className="tbk">
-          <small>Booked</small>
+        <div className="tbk" title="Realized today, from Fyers positions">
+          <small>Booked today</small>
           <b className={portfolio ? dir(portfolio.realized_pnl) : undefined}>
             {portfolio ? signed(portfolio.realized_pnl) : "—"}
           </b>
         </div>
-        <div className="tbk">
-          <small>MTM</small>
+        <div
+          className="tbk"
+          title="Open positions against their entry price - for a position carried from an earlier day, since it was opened, not since today's open"
+        >
+          <small>Open MTM</small>
           <b className={portfolio ? dir(portfolio.unrealized_pnl) : undefined}>
             {portfolio ? signed(portfolio.unrealized_pnl) : "—"}
           </b>
         </div>
-        <div className="tbk hero">
-          <small>Net today</small>
+        <div
+          className="tbk hero"
+          title="Booked today plus open MTM - the same total Fyers shows as P&L"
+        >
+          <small>Net</small>
           <b className={net !== null ? dir(net) : undefined}>{net !== null ? signed(net) : "—"}</b>
         </div>
       </div>

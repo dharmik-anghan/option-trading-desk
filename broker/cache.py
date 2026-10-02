@@ -28,7 +28,16 @@ from typing import Any, TypeVar
 
 from broker.base import OptionsBroker
 from broker.errors import RateLimited
-from broker.models import Candle, Funds, OptionChain, OrderRequest, OrderResult, Position, Quote
+from broker.models import (
+    Candle,
+    Fill,
+    Funds,
+    OptionChain,
+    OrderRequest,
+    OrderResult,
+    Position,
+    Quote,
+)
 
 T = TypeVar("T")
 
@@ -141,12 +150,20 @@ class CachedBroker(OptionsBroker):
     def get_positions(self) -> list[Position]:
         return self._cached(("get_positions", None), POSITIONS_TTL, self._inner.get_positions)
 
+    def get_booked_pnl(self) -> float:
+        load = self._inner.get_booked_pnl  # type: ignore[attr-defined]
+        return float(self._cached(("get_booked_pnl", None), POSITIONS_TTL, load))
+
+    def get_fills(self, date_from: date, date_to: date) -> list[Fill]:
+        """Not cached: a reconcile that saw a stale tradebook would miss a fill."""
+        return self._inner.get_fills(date_from, date_to)  # type: ignore[attr-defined, no-any-return]
+
     # ---- writes and streams: never cached ----
 
     def place_order(self, order: OrderRequest) -> OrderResult:
         result = self._inner.place_order(order)
         # What the account holds and has banked both just changed.
-        self._drop("get_positions", "get_funds")
+        self._drop("get_positions", "get_funds", "get_booked_pnl")
         return result
 
     def subscribe_ticks(self, symbols: list[str], on_tick: Callable[[Quote], None]) -> None:

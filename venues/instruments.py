@@ -62,9 +62,11 @@ def option_underlyings() -> tuple[str, ...]:
     return tuple(symbol for symbol, _ in OPTION_UNDERLYINGS)
 
 
-#: The three the desk starts with. Their names come from the venue's own
+#: What the desk trades here. Their names come from the venue's own
 #: exchangeInfo: XAU is "Gold Derivatives", CL is "Crude Oil Futures" - the
 #: WTI contract, which is what "USOIL" means elsewhere.
+#:
+#: Order is display order: the two crypto perpetuals, then the two commodities.
 SHARK_INSTRUMENTS: tuple[Instrument, ...] = (
     Instrument(
         symbol="BTCUSDT",
@@ -73,6 +75,18 @@ SHARK_INSTRUMENTS: tuple[Instrument, ...] = (
         session=Session.ALWAYS,
         quote_asset="USDT",
         price_dp=1,
+        quantity_dp=3,
+    ),
+    Instrument(
+        symbol="ETHUSDT",
+        name="Ethereum",
+        venue_id="shark",
+        session=Session.ALWAYS,
+        quote_asset="USDT",
+        # Two decimals where Bitcoin takes one: at four thousand a tenth of a
+        # dollar is a finer step than at a hundred thousand, and the venue prices
+        # it accordingly. Read from its exchangeInfo, not inferred from BTC.
+        price_dp=2,
         quantity_dp=3,
     ),
     Instrument(

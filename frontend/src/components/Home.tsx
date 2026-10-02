@@ -25,9 +25,9 @@ export function Home({ onGo, cryptoReady }: Props) {
       <header>
         <h1>Desk</h1>
         <p>
-          Four places to work. Two watch live positions, one asks what a rule would have
-          done with the bars they left behind, and one shows which way the market's parts
-          are turning.
+          Six places to work. Two watch live positions, two ask what a rule would have
+          done with the history they left behind, one shows which way the market's parts
+          are turning, and one keeps each morning's opening auction.
         </p>
       </header>
 
@@ -72,6 +72,26 @@ export function Home({ onGo, cryptoReady }: Props) {
             can only cover history that actually exists.
           </p>
           <span className="go">Open backtesting</span>
+        </button>
+
+        <button className="card" onClick={() => onGo("option-backtesting")}>
+          <StraddleMark />
+          <h2>Options backtesting</h2>
+          <p>
+            A NIFTY option strategy replayed minute by minute over years of real
+            contracts — strikes as they were quoted, every charge, settled at expiry.
+          </p>
+          <span className="go">Open options backtesting</span>
+        </button>
+
+        <button className="card" onClick={() => onGo("preopen")}>
+          <AuctionMark />
+          <h2>Pre-open</h2>
+          <p>
+            Where every F&amp;O stock and NIFTY were set to open, from NSE's 09:00 auction —
+            recorded each morning, because NSE only shows the latest one.
+          </p>
+          <span className="go">Open the pre-open record</span>
         </button>
       </div>
     </main>
@@ -135,6 +155,45 @@ function EquityMark() {
         d="M2 44 L16 38 L28 41 L42 30 L56 33 L70 20 L84 26 L98 14 L118 10"
         className="markline mkt"
       />
+    </svg>
+  );
+}
+
+/** An auction book: buyers and sellers stacked either side of the price they meet at. */
+function AuctionMark() {
+  const levels: [number, number, number][] = [
+    // y, buy width, sell width
+    [8, 0, 30],
+    [18, 0, 18],
+    [28, 22, 26],
+    [38, 34, 0],
+    [48, 16, 0],
+  ];
+  return (
+    <svg viewBox="0 0 120 56" className="mark" aria-hidden="true">
+      <line x1="60" y1="2" x2="60" y2="54" className="markgrid" />
+      {levels.map(([y, buy, sell]) => (
+        <g key={y}>
+          {buy > 0 && <rect x={58 - buy} y={y - 3} width={buy} height="6" className="markbody qty" />}
+          {sell > 0 && <rect x={62} y={y - 3} width={sell} height="6" className="markbody qty" />}
+        </g>
+      ))}
+      <line x1="10" y1="28" x2="110" y2="28" className="markline mkt" />
+    </svg>
+  );
+}
+
+/** A short straddle's tent, and the minute line it is replayed on. */
+function StraddleMark() {
+  return (
+    <svg viewBox="0 0 120 56" className="mark" aria-hidden="true">
+      <line x1="0" y1="36" x2="120" y2="36" className="markgrid" />
+      <path d="M2 54 L60 10 L118 54" className="markline you" />
+      <path
+        d="M2 30 L14 33 L24 29 L34 31 L46 26 L58 28 L70 24 L82 27 L94 22 L106 25 L118 21"
+        className="markline mkt"
+      />
+      <circle cx="60" cy="10" r="2.5" className="markdot" />
     </svg>
   );
 }
