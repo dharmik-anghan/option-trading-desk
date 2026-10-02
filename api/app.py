@@ -57,23 +57,22 @@ from api.routers import (
     volatility,
 )
 from api.store import open_db
-from broker.base import OptionsBroker
+from broker.base import AsyncStreaming, OptionsBroker
 from broker.errors import BrokerError
-from broker.factory import broker_for
-from broker.shark.stream import SharkStream
+from broker.factory import broker_for, codec_for, is_configured, stream_for
+from broker.factory import options_broker as default_options_broker
 from marketdata import BarService, nse_preopen
 from marketdata.daily_updater import DailyBarUpdater
 from marketdata.holder import BarStoreHolder
 from marketdata.models import Bar
-from marketdata.venue import VenueBars
+from marketdata.venue import VenueBars, to_bar
 from notify import Telegram, TelegramConfig
 from settings import load_settings
 from storage.preopen_recorder import PreOpenRecorder
 from storage.vol_recorder import VolRecorder
 from streaming import TickHub
 from universe.nse import daily_series
-from venues import Capability, for_venue, option_underlyings
-from venues import get as get_venue
+from venues import AssetClass, Capability, listed, listed_on, option_underlyings, serving
 from venues.calendar import in_session
 
 log = logging.getLogger(__name__)
@@ -107,8 +106,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     def options_broker() -> OptionsBroker:
         """The options broker as a request would get it, overrides included, so a
         test's fake reaches the background jobs too rather than a live account."""
-        provider = application.dependency_overrides.get(get_broker, get_broker)
-        return cast(OptionsBroker, provider())
+        override = application.dependency_overrides.get(get_broker)
+        return cast(OptionsBroker, override()) if override else default_options_broker()
 
     db_path = get_db_path()
     # Make sure the schema is current before the watcher's first pass, which runs
@@ -143,25 +142,20 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # file for a few seconds - and a desk that tried once at boot answered "the
     # bar store is not open" for the rest of its life, with the file unlocked the
     # whole time. See `marketdata/holder.py`.
-    # What each venue may be asked for, in its own spelling. A symbol a source does
-    # not list draws nothing rather than something else, which is why these are
-    # written out: the options desk charts the five index underlyings and nothing
-    # else. Its constituents are in the store too - the rotation graph reads them -
-    # but nothing charts one, so nothing needs them kept current.
-    charted: dict[str, tuple[str, ...]] = {
-        "fyers": option_underlyings(),
-        "shark": tuple(i.symbol for i in for_venue("shark")),
-    }
-
+    # What each venue may be asked for is what its desk lists. A symbol a source
+    # does not list draws nothing rather than something else: the options desk
+    # charts the five index underlyings and nothing else. Its constituents are in
+    # the store too - the rotation graph reads them - but nothing charts one, so
+    # nothing needs them kept current.
     def _register(service: BarService) -> None:
-        for venue_id, symbols in charted.items():
-            spec = get_venue(venue_id)
+        for spec in listed():
+            symbols = listed_on(spec.id)
             if not spec.can(Capability.HISTORY) or not symbols:
                 continue
-            if venue_id == "shark" and not settings.has_shark:
+            if not is_configured(spec, settings):
                 continue
             service.register(
-                venue_id,
+                spec.id,
                 # A way to get an adapter rather than an adapter: the options
                 # venue's token expires every morning. See `VenueBars`.
                 VenueBars(partial(broker_for, spec)),
@@ -172,22 +166,26 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     bars = BarStoreHolder(paths.bars_path(), on_open=_register)
     application.state.bars = bars
 
+    perps_venue = serving(AssetClass.PERPETUALS)
+
     def perps_broker() -> object | None:
         """The perpetuals adapter, or None when that venue is not configured.
 
         Built per pass rather than held, so a rotated key is picked up, and
         returning None keeps the watcher working on an options-only setup.
         """
-        if not settings.has_shark:
+        if not is_configured(perps_venue, settings):
             return None
         try:
-            return broker_for(get_venue("shark"))
+            return broker_for(perps_venue)
         except Exception:  # noqa: BLE001 - a venue that cannot be built is not watched
             log.warning("could not build the perpetuals adapter for the alert pass")
             return None
 
     watcher = Watcher(
-        gather=lambda: gather(db_path, options_broker(), feeds_cache, hub, perps_broker()),
+        gather=lambda: gather(
+            db_path, options_broker(), feeds_cache, hub, perps_broker(), codec=codec_for()
+        ),
         open_conn=lambda: open_db(db_path),
         notifier=notifier,
     )
@@ -228,11 +226,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # backfill script wrote them, and it needs the desk stopped, so they sat at
     # whatever day it was last run. The desk holds the store, so it keeps them.
     def _daily(symbol: str, start: date, end: date) -> list[Bar]:
-        return [
-            Bar(ts=c.timestamp, open=c.open, high=c.high, low=c.low, close=c.close,
-                volume=c.volume)
-            for c in options_broker().get_history(symbol, "D", start, end)
-        ]
+        return [to_bar(c) for c in options_broker().get_history(symbol, "D", start, end)]
 
     daily = DailyBarUpdater(
         symbols=lambda: [symbol for _, symbol in daily_series()],
@@ -243,23 +237,24 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.daily_updater = daily
     daily_task = asyncio.create_task(daily.run_forever(), name="daily-bars")
 
-    # The perpetuals venue pushes prices rather than being polled for them, which
-    # is not a nicety: its budget is 60 requests a minute against Fyers' ~200, and
-    # three instruments across several panels would spend it on nothing. The hub
-    # holds the latest so everything else reads from memory.
-    stream: SharkStream | None = None
+    # A venue that pushes prices is streamed rather than polled, which is not a
+    # nicety: the perpetuals venue's budget is 60 requests a minute against Fyers'
+    # ~200, and three instruments across several panels would spend it on nothing.
+    # The hub holds the latest so everything else reads from memory.
+    streams: dict[str, AsyncStreaming] = {}
     application.state.tick_hub = hub
-    application.state.tick_stream = None
-    if settings.has_shark:
-        stream = SharkStream()
+    application.state.tick_streams = streams
+    for spec in listed():
+        stream = stream_for(spec)
+        if stream is None or not is_configured(spec, settings):
+            continue
         try:
-            await stream.start([i.symbol for i in for_venue("shark")], hub.publish)
-            application.state.tick_stream = stream
-            log.info("shark tick stream connected")
+            await stream.start(list(listed_on(spec.id)), hub.publish)
+            streams[spec.id] = stream
+            log.info("%s tick stream connected", spec.id)
         except Exception:  # noqa: BLE001 - a desk that will not start is worse
-            log.warning("shark tick stream could not connect", exc_info=True)
+            log.warning("%s tick stream could not connect", spec.id, exc_info=True)
             await stream.stop()
-            stream = None
 
     try:
         yield
@@ -280,7 +275,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # So the pre-open page does not report a recorder that has stopped.
         application.state.preopen_recorder = None
         application.state.daily_updater = None
-        if stream is not None:
+        for stream in streams.values():
             await stream.stop()
         bars.close()
         log.info("alert watcher stopped")

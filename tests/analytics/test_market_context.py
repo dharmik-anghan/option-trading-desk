@@ -10,13 +10,13 @@ from analytics.market_context import (
     atm_straddle,
     atm_strike,
     by_strike,
-    futures_symbol,
     historical_vol,
     max_pain,
     oi_wall,
     put_call_ratio,
     skew,
 )
+from broker.fyers.symbols import futures_symbol
 from broker.models import Greeks, OptionChain, OptionChainRow
 
 

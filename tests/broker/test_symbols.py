@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from broker.contracts import common_expiry
+from broker.fyers import SYMBOLS
+from broker.fyers.symbols import expiry_for_symbol, expiry_infix, series_prefix
 from broker.models import Expiry
-from broker.symbols import common_expiry, expiry_for_symbol, expiry_infix, series_prefix
 
 # the three real expiries this desk was checked against
 SEP = Expiry(date="29-09-2026", token="1790676600", weekly=False)
@@ -78,21 +80,21 @@ def test_common_expiry_when_every_leg_agrees() -> None:
         "NSE:NIFTY26OCT23800CE",
         "NSE:NIFTY26OCT24200CE",
     ]
-    assert common_expiry(legs, ALL) == OCT_M
+    assert common_expiry(SYMBOLS, legs, ALL) == OCT_M
 
 
 def test_a_calendar_spread_has_no_single_expiry() -> None:
     legs = ["NSE:NIFTY26SEP23100CE", "NSE:NIFTY26OCT23100CE"]
-    assert common_expiry(legs, ALL) is None
+    assert common_expiry(SYMBOLS, legs, ALL) is None
 
 
 def test_one_unknown_leg_makes_the_whole_basket_unknown() -> None:
     legs = ["NSE:NIFTY26OCT23100CE", "NSE:SOMETHINGELSE"]
-    assert common_expiry(legs, ALL) is None
+    assert common_expiry(SYMBOLS, legs, ALL) is None
 
 
 def test_no_legs_has_no_expiry() -> None:
-    assert common_expiry([], ALL) is None
+    assert common_expiry(SYMBOLS, [], ALL) is None
 
 
 class TestSeriesPrefix:

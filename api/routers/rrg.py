@@ -36,12 +36,10 @@ from universe.nse import (
     sectors,
 )
 from venues.calendar import IST
+from venues.instruments import NSE_BARS as SOURCE
 
 router = APIRouter(tags=["rrg"], prefix="/api/rrg")
 
-#: Where Indian daily bars are stored. One source, because mixing two would put
-#: two different closes for the same day on one graph.
-SOURCE = "fyers"
 
 #: How much of each path to return. Enough for a long tail and a long replay,
 #: short enough that two hundred securities is not megabytes.

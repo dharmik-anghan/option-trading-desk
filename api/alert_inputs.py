@@ -21,6 +21,7 @@ from alerting.watcher import Inputs
 from api.pricing import basket_live_curve
 from api.store import open_db
 from broker.base import OptionsBroker, PerpetualsData
+from broker.contracts import ContractCodec
 from broker.models import OptionChain
 from execution.basket_status import get_basket_payoff
 from execution.portfolio_status import get_portfolio_status
@@ -58,6 +59,8 @@ def gather(
     feeds: Feeds,
     hub: TickHub | None = None,
     perps: object | None = None,
+    *,
+    codec: ContractCodec,
 ) -> Inputs:
     """One pass's worth of data, with partial failure preferred over none.
 
@@ -122,12 +125,12 @@ def gather(
     for basket in baskets:
         payoff = get_basket_payoff(basket)
         try:
-            valued = basket_live_curve(basket, payoff, broker, chains)
+            valued = basket_live_curve(basket, payoff, broker, codec, chains)
         except Exception:  # noqa: BLE001 - an unpriced basket is still worth judging
             valued = ([], None, None)
         views.append(
             _basket_to_response(
-                basket,
+                basket, codec,
                 valued,
                 _rows_for_basket(basket, chains),
                 _spot_for(basket, chains),

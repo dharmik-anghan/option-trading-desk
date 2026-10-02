@@ -33,17 +33,17 @@ sys.path.insert(0, str(REPO_ROOT))
 import duckdb  # noqa: E402
 
 import paths  # noqa: E402
+from broker.base import MarketData  # noqa: E402
 from broker.errors import BrokerError  # noqa: E402
-from broker.fyers import FyersBroker  # noqa: E402
-from broker.token_store import get_access_token  # noqa: E402
+from broker.factory import options_broker  # noqa: E402
 from marketdata.models import Bar, Interval, Series  # noqa: E402
 from marketdata.store import BarStore  # noqa: E402
-from settings import load_settings  # noqa: E402
+from marketdata.venue import to_bar  # noqa: E402
 from universe.nse import daily_series  # noqa: E402
 from venues import OPTION_UNDERLYINGS  # noqa: E402
+from venues.instruments import NSE_BARS as SOURCE  # noqa: E402
 
 DEFAULT_STORE = paths.bars_path()
-SOURCE = "fyers"
 
 #: Days per request. Fyers serves a year of daily bars at a time; asking for
 #: more returns an error rather than a truncated answer.
@@ -55,7 +55,7 @@ WINDOW_DAYS = 360
 BETWEEN = 0.2
 
 
-def fetch_symbol(broker: FyersBroker, symbol: str, years: int) -> list[Bar]:
+def fetch_symbol(broker: MarketData, symbol: str, years: int) -> list[Bar]:
     """A symbol's daily bars, a year of window at a time, oldest first."""
     end = date.today()
     start = end - timedelta(days=365 * years)
@@ -68,11 +68,7 @@ def fetch_symbol(broker: FyersBroker, symbol: str, years: int) -> list[Bar]:
         except BrokerError:
             # One window missing costs that window, not the symbol.
             rows = []
-        bars.extend(
-            Bar(ts=r.timestamp, open=r.open, high=r.high, low=r.low, close=r.close,
-                volume=r.volume)
-            for r in rows
-        )
+        bars.extend(to_bar(r) for r in rows)
         at = until + timedelta(days=1)
         time.sleep(BETWEEN)
     return bars
@@ -112,10 +108,7 @@ def _intraday(store_path: Path, years: int, *, dry_run: bool) -> int:
         print(f"{store_path.name} is open in another process - stop the desk first.")
         return 1
 
-    settings = load_settings()
-    broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
-    )
+    broker = options_broker()
     written = 0
     try:
         for n, (symbol, name) in enumerate(OPTION_UNDERLYINGS, start=1):
@@ -128,11 +121,7 @@ def _intraday(store_path: Path, years: int, *, dry_run: bool) -> int:
                     rows = broker.get_history(symbol, "15", start, end)
                 except BrokerError:
                     rows = []
-                bars.extend(
-                    Bar(ts=r.timestamp, open=r.open, high=r.high, low=r.low, close=r.close,
-                        volume=r.volume)
-                    for r in rows
-                )
+                bars.extend(to_bar(r) for r in rows)
                 end = start - timedelta(days=1)
                 time.sleep(BETWEEN)
             if bars:
@@ -181,10 +170,7 @@ def main() -> int:
         print(f"{args.store.name} is open in another process - stop the desk first.")
         return 1
 
-    settings = load_settings()
-    broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
-    )
+    broker = options_broker()
     written = 0
     empty: list[str] = []
     try:

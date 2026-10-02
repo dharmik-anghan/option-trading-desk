@@ -30,7 +30,7 @@ from pathlib import Path
 from dotenv import set_key
 
 import paths
-from broker.fyers_auth import AutoLoginError, auto_login
+from broker.fyers.auth import AutoLoginError, auto_login
 from settings import Settings, load_settings
 
 ENV_PATH = paths.ENV_FILE

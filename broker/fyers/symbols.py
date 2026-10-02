@@ -1,4 +1,4 @@
-"""Reading the exchange's contract-symbol convention.
+"""Reading Fyers' contract symbols, which follow the exchange's convention.
 
 A basket records the contracts it holds, not which expiry they belong to -
 and the expiry is what a live (pre-expiry) valuation needs, to know how much
@@ -137,18 +137,33 @@ def expiry_for_symbol(symbol: str, expiries: list[Expiry]) -> Expiry | None:
     return None
 
 
-def common_expiry(symbols: list[str], expiries: list[Expiry]) -> Expiry | None:
-    """The single expiry every symbol shares, or None.
+def futures_symbol(option_symbol: str, strike: float) -> str | None:
+    """The futures contract matching an option's underlying and expiry.
 
-    None when the symbols straddle expiries - a calendar spread has no one
-    time-to-expiry, so a single pre-expiry curve would be a fiction.
+    Built from the option's own symbol - "NSE:NIFTY26OCT23100PE" becomes
+    "NSE:NIFTY26OCTFUT" - rather than assembled from an index name, because
+    the index and its derivatives are not named alike: NIFTYBANK-INDEX trades
+    options as BANKNIFTY. Taking the prefix the exchange already used avoids
+    having to know that.
     """
-    if not symbols:
-        return None
-    matched = [expiry_for_symbol(s, expiries) for s in symbols]
-    if any(m is None for m in matched):
-        return None
-    tokens = {m.token for m in matched if m is not None}
-    if len(tokens) != 1:
-        return None
-    return matched[0]
+    prefix = series_prefix(option_symbol, strike)
+    return None if prefix is None else prefix + "FUT"
+
+
+class FyersSymbols:
+    """This module as a `broker.contracts.ContractCodec`."""
+
+    def parse_contract(self, symbol: str) -> tuple[str, float, OptionType] | None:
+        return parse_contract(symbol)
+
+    def series_prefix(self, symbol: str, strike: float) -> str | None:
+        return series_prefix(symbol, strike)
+
+    def expiry_for_symbol(self, symbol: str, expiries: list[Expiry]) -> Expiry | None:
+        return expiry_for_symbol(symbol, expiries)
+
+    def futures_symbol(self, option_symbol: str, strike: float) -> str | None:
+        return futures_symbol(option_symbol, strike)
+
+
+SYMBOLS = FyersSymbols()

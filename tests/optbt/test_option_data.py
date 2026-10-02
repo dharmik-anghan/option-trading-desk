@@ -8,9 +8,10 @@ from typing import Any
 
 import pytest
 
+from broker.fyers.expired import MIN_INTERVAL, FyersExpired, parse_strike
 from optbt.data.backfill import backfill, fetch_contract, in_band
 from optbt.data.models import Candle, Contract, Expiries, Kind
-from optbt.data.source import MIN_INTERVAL, FyersExpired, SourceError, parse_strike
+from optbt.data.source import SourceError
 from optbt.data.store import OptionStore
 
 FETCHED = datetime(2026, 9, 28, 20, 0)

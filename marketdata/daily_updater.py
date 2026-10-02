@@ -25,10 +25,10 @@ from broker.errors import RateLimited
 from marketdata.models import Bar, Interval, Series
 from marketdata.store import BarStore
 from venues.calendar import IST
+from venues.instruments import NSE_BARS as SOURCE
 
 log = logging.getLogger(__name__)
 
-SOURCE = "fyers"
 
 #: When a session's daily bar is final. The market closes at 15:30; the margin
 #: is for the closing auction and for Fyers finishing its candle.

@@ -20,11 +20,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import paths  # noqa: E402
-from broker.fyers import FyersBroker  # noqa: E402
-from broker.token_store import get_access_token  # noqa: E402
+from broker.factory import options_broker  # noqa: E402
 from execution.portfolio_status import get_portfolio_status  # noqa: E402
 from risk.limits import check_daily_kill_switch  # noqa: E402
-from settings import load_settings  # noqa: E402
 from storage.db import connect, init_schema  # noqa: E402
 from storage.portfolio_repo import save_portfolio_snapshot  # noqa: E402
 
@@ -35,10 +33,7 @@ DEFAULT_DAILY_LOSS_LIMIT = 5000.0
 def main() -> int:
     daily_loss_limit = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DAILY_LOSS_LIMIT
 
-    settings = load_settings()
-    broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
-    )
+    broker = options_broker()
 
     status = get_portfolio_status(broker)
 

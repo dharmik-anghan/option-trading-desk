@@ -25,8 +25,8 @@ from api.schemas import (
     PayoffPoint,
 )
 from broker.base import OptionsBroker
+from broker.contracts import ContractCodec, common_expiry
 from broker.models import Expiry, OptionChain
-from broker.symbols import common_expiry
 from storage.basket_repo import Basket
 
 _SECONDS_PER_YEAR = 365.0 * 24 * 3600
@@ -126,13 +126,14 @@ def basket_live_curve(
     basket: Basket,
     result: PayoffResult,
     broker: OptionsBroker,
+    codec: ContractCodec,
     chains: dict[tuple[str, str], OptionChain],
 ) -> tuple[list[PayoffPoint], float | None, str | None]:
     """A mark-to-market curve for a basket, if one can be priced honestly.
 
     A basket records its contracts but not its expiry, so the expiry is
     recovered from the leg symbols against the expiries the broker lists
-    (see `broker.symbols`). Returns empties when that is not possible: no
+    (see `broker/contracts.py`). Returns empties when that is not possible: no
     open legs, legs spanning different expiries (a calendar spread has no
     single time-to-expiry), or a feed with no implied vol for those strikes.
 
@@ -147,7 +148,7 @@ def basket_live_curve(
         return [], None, None
 
     listed = listed_expiries(basket.underlying_symbol, broker, chains)
-    expiry = common_expiry(symbols, listed)
+    expiry = common_expiry(codec, symbols, listed)
     if expiry is None:
         return [], None, None
 

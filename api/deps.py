@@ -13,20 +13,47 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
 import paths
 from broker.base import OptionsBroker
-from broker.factory import options_broker
+from broker.contracts import ContractCodec
+from broker.factory import codec_for, options_broker
 from feeds.fetch import Feeds
 from feeds.holidays import Holidays
 from marketdata import BarService, BarStore
 from marketdata.holder import BarStoreHolder
+from venues import AssetClass, VenueSpec, serving
+from venues import get as get_venue
+from venues.registry import UnknownVenueError
 
 
-def get_broker() -> OptionsBroker:
-    """The options desk's broker. See `broker/factory.py`."""
-    return options_broker()
+def options_venue(venue: str = "") -> VenueSpec:
+    """Which options venue a request is for: `?venue=` if given, else the default.
+
+    Every options endpoint takes it, so a second options broker is served by the
+    same routes, panels and analytics as the first - only the adapter differs.
+    """
+    try:
+        spec = get_venue(venue) if venue else serving(AssetClass.INDEX_OPTIONS)
+    except UnknownVenueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    if spec.asset_class is not AssetClass.INDEX_OPTIONS:
+        raise HTTPException(status_code=400, detail=f"{spec.id} does not list options")
+    return spec
+
+
+OptionsVenueDep = Annotated[VenueSpec, Depends(options_venue)]
+
+
+def get_broker(venue: OptionsVenueDep) -> OptionsBroker:
+    """The options broker for this request's venue. See `broker/factory.py`."""
+    return options_broker(venue)
+
+
+def get_codec(venue: OptionsVenueDep) -> ContractCodec:
+    """How this request's venue spells its contracts. See `broker/contracts.py`."""
+    return codec_for(venue)
 
 
 def get_db_path() -> Path:
@@ -53,6 +80,7 @@ def get_holidays() -> Holidays:
 
 
 BrokerDep = Annotated[OptionsBroker, Depends(get_broker)]
+CodecDep = Annotated[ContractCodec, Depends(get_codec)]
 FeedsDep = Annotated[Feeds, Depends(get_feeds)]
 HolidaysDep = Annotated[Holidays, Depends(get_holidays)]
 DbPathDep = Annotated[Path, Depends(get_db_path)]

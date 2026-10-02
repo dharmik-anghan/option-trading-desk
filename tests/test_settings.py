@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
+from broker.errors import AuthFailed
+from broker.factory import _build_fyers
 from settings import MissingSettingsError, Settings, load_settings
 
 
@@ -38,13 +39,25 @@ def test_has_auto_login_credentials_requires_all_three(monkeypatch: pytest.Monke
     assert settings.has_auto_login_credentials is True
 
 
-def test_settings_missing_required_field_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FYERS_CLIENT_ID", raising=False)
-    monkeypatch.delenv("FYERS_SECRET_KEY", raising=False)
-    monkeypatch.delenv("FYERS_REDIRECT_URI", raising=False)
+def test_a_venue_left_blank_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A setup with one broker must not need another's keys to start.
+    for key in ("FYERS_CLIENT_ID", "FYERS_SECRET_KEY", "FYERS_REDIRECT_URI"):
+        monkeypatch.delenv(key, raising=False)
 
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.has_fyers is False
+
+
+def test_an_unconfigured_venue_says_so_when_asked_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for key in ("FYERS_CLIENT_ID", "FYERS_SECRET_KEY", "FYERS_REDIRECT_URI"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(tmp_path)  # avoid picking up a real project .env
+
+    with pytest.raises(AuthFailed, match="not configured"):
+        _build_fyers()
 
 
 def test_load_settings_exits_cleanly_with_helpful_message(
@@ -52,14 +65,12 @@ def test_load_settings_exits_cleanly_with_helpful_message(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("FYERS_CLIENT_ID", raising=False)
-    monkeypatch.delenv("FYERS_SECRET_KEY", raising=False)
-    monkeypatch.delenv("FYERS_REDIRECT_URI", raising=False)
+    monkeypatch.setenv("SHARK_MAX_NOTIONAL", "a lot")
     monkeypatch.chdir(tmp_path)  # avoid picking up a real project .env
 
     with pytest.raises(MissingSettingsError):
         load_settings()
 
     err = capsys.readouterr().err
-    assert "fyers_client_id" in err
+    assert "shark_max_notional" in err
     assert "docs/SETUP.md" in err

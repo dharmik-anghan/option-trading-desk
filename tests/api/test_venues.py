@@ -38,6 +38,22 @@ def test_every_listed_venue_can_actually_be_built() -> None:
     )
 
 
+def test_every_options_venue_can_read_its_own_contract_symbols() -> None:
+    # Basket sync, live pricing and the market strip read contract symbols
+    # through the venue's codec. An options venue without one serves a chain
+    # and then fails on the first basket.
+    for spec in VENUES.values():
+        if spec.can(Capability.OPTION_CHAIN):
+            assert FACTORIES[spec.id].codec is not None, spec.id
+
+
+def test_an_options_endpoint_serves_the_venue_it_is_asked_for(client: TestClient) -> None:
+    assert client.get("/api/baskets", params={"venue": "fyers"}).status_code == 200
+    assert client.get("/api/baskets", params={"venue": "nowhere"}).status_code == 404
+    # A perpetuals venue lists no options, so it cannot answer for one.
+    assert client.get("/api/baskets", params={"venue": "shark"}).status_code == 400
+
+
 def test_the_routers_are_all_registered(client: TestClient) -> None:
     # A router that is written but never included is invisible until someone
     # notices a 404, and the include list is easy to forget when adding one.

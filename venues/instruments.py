@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from venues.calendar import Session
+from venues.models import AssetClass
+from venues.registry import VENUES, serving
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,26 @@ OPTION_UNDERLYINGS: tuple[tuple[str, str], ...] = (
     ("NSE:MIDCPNIFTY-INDEX", "MIDCAP NIFTY"),
     ("BSE:SENSEX-INDEX", "SENSEX"),
 )
+
+
+#: The short name each index's options are listed under, and the index itself.
+#: Contracts are named by the short one ("NSE:NIFTY26OCT23100CE"); history and
+#: the expired-contract endpoints are asked by the index.
+OPTION_SERIES: dict[str, str] = {
+    "NIFTY": "NSE:NIFTY50-INDEX",
+    "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+    "FINNIFTY": "NSE:FINNIFTY-INDEX",
+    "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
+    "SENSEX": "BSE:SENSEX-INDEX",
+}
+
+#: The NSE's volatility index, beside the underlyings it measures.
+INDIA_VIX = "NSE:INDIAVIX-INDEX"
+
+#: The bar store source Indian series are kept under: the options venue's own
+#: name, since that is who fetched them. One source, because mixing two would
+#: put two different closes for the same day on one chart.
+NSE_BARS = serving(AssetClass.INDEX_OPTIONS).id
 
 
 def option_underlyings() -> tuple[str, ...]:
@@ -121,3 +143,17 @@ def instrument(symbol: str) -> Instrument | None:
 
 def for_venue(venue_id: str) -> list[Instrument]:
     return [i for i in SHARK_INSTRUMENTS if i.venue_id == venue_id]
+
+
+def listed_on(venue_id: str) -> dict[str, str]:
+    """What a venue's desk lists, symbol to display name; empty for a bare source.
+
+    An options venue lists the index underlyings, whichever broker it is; any
+    other venue lists its own instruments.
+    """
+    spec = VENUES.get(venue_id)
+    if spec is None:
+        return {}
+    if spec.asset_class is AssetClass.INDEX_OPTIONS:
+        return dict(OPTION_UNDERLYINGS)
+    return {i.symbol: i.name for i in for_venue(venue_id)}

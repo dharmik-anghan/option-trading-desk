@@ -17,8 +17,8 @@ import bisect
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
-from optbt.data.source import VIX_SYMBOL
 from optbt.market import SESSION_LAST_BAR, SESSION_OPEN, History
+from venues.instruments import INDIA_VIX
 
 #: Where the open sits against the day's pivots. Ordered low to high.
 ZONES = ("below S2", "S2-S1", "S1-P", "P-R1", "R1-R2", "above R2")
@@ -102,7 +102,7 @@ class Context:
                 FROM index_bar WHERE symbol = ? AND resolution = '1' AND {session}
                 GROUP BY d
                 """,
-                [VIX_SYMBOL, SESSION_OPEN, SESSION_LAST_BAR],
+                [INDIA_VIX, SESSION_OPEN, SESSION_LAST_BAR],
             ).fetchall()
         )
         self._days: dict[date, Day] = {}
@@ -130,7 +130,7 @@ class Context:
         row = self._history._conn.execute(
             "SELECT close FROM index_bar WHERE symbol = ? AND resolution = '1' "
             "AND ts <= ? AND ts >= ? ORDER BY ts DESC LIMIT 1",
-            [VIX_SYMBOL, ts, datetime.combine(ts.date(), time(0))],
+            [INDIA_VIX, ts, datetime.combine(ts.date(), time(0))],
         ).fetchone()
         return float(row[0]) if row else None
 

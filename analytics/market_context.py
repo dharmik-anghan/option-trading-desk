@@ -263,38 +263,3 @@ def historical_vol(closes: list[float], sessions: int = 20) -> float | None:
     figures for one number on one screen is worse than either being wrong.
     """
     return close_to_close(closes, sessions)
-
-
-def futures_symbol(option_symbol: str, strike: float) -> str | None:
-    """The futures contract matching an option's underlying and expiry.
-
-    Built from the option's own symbol - "NSE:NIFTY26OCT23100PE" becomes
-    "NSE:NIFTY26OCTFUT" - rather than assembled from an index name, because
-    the index and its derivatives are not named alike: NIFTYBANK-INDEX trades
-    options as BANKNIFTY. Taking the prefix the exchange already used avoids
-    having to know that.
-
-    The strike is passed in rather than guessed at. Stripping trailing digits
-    works for a monthly ("...26OCT23100PE") but eats the day out of a weekly
-    ("...26O0623100PE" became "...26O"), because the expiry ends in digits
-    too. We already know the strike, so remove exactly that.
-    """
-    for suffix in ("CE", "PE"):
-        if not option_symbol.endswith(suffix):
-            continue
-        head = option_symbol[: -len(suffix)]
-        for text in _strike_spellings(strike):
-            if head.endswith(text) and len(head) > len(text):
-                return head[: -len(text)] + "FUT"
-    return None
-
-
-def _strike_spellings(strike: float) -> list[str]:
-    """How a strike might appear in a symbol, most likely first."""
-    out = []
-    if strike == int(strike):
-        out.append(str(int(strike)))
-    text = f"{strike:g}"
-    if text not in out:
-        out.append(text)
-    return out

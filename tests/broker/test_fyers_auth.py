@@ -19,7 +19,7 @@ from typing import Any
 import pyotp
 import pytest
 
-from broker.fyers_auth import AutoLoginError, auto_login, compute_totp
+from broker.fyers.auth import AutoLoginError, auto_login, compute_totp
 
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # well-known RFC 6238 example secret
 

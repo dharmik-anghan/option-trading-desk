@@ -38,8 +38,8 @@ from datetime import date, datetime, timedelta
 from typing import Protocol
 
 from broker.base import FillHistory
+from broker.contracts import ContractCodec
 from broker.models import Fill, Position
-from broker.symbols import parse_contract
 from storage import fill_repo
 from storage.basket_repo import (
     Basket,
@@ -128,6 +128,7 @@ def sync(
     conn: sqlite3.Connection,
     source: FillSource,
     *,
+    codec: ContractCodec,
     since: date,
     until: date,
     now: datetime,
@@ -170,7 +171,7 @@ def sync(
         closed=closed,
         covered=covered,
         outside=outside,
-        pending=pending_with_suggestions(conn, baskets),
+        pending=pending_with_suggestions(conn, baskets, codec),
         unexplained=_unexplained(baskets, positions),
     )
 
@@ -253,20 +254,24 @@ def _unexplained(baskets: list[Basket], positions: dict[str, float]) -> list[Une
     return out
 
 
-def suggest(fill: fill_repo.StoredFill, baskets: list[Basket]) -> Suggestion | None:
+def suggest(
+    fill: fill_repo.StoredFill, baskets: list[Basket], codec: ContractCodec
+) -> Suggestion | None:
     """Which structure a new position most likely belongs to.
 
     Same expiry first, then the one that had a leg closed nearest in time -
     buying back one spread and selling another a minute later is an adjustment,
     and the structure it adjusts is the one that lost the leg.
     """
-    parsed = parse_contract(fill.symbol)
+    parsed = codec.parse_contract(fill.symbol)
     if parsed is None:
         return None
     series = parsed[0]
     best: tuple[timedelta, Basket] | None = None
     for basket in baskets:
-        legs = [leg for leg in basket.legs if (p := parse_contract(leg.symbol)) and p[0] == series]
+        legs = [
+            leg for leg in basket.legs if (p := codec.parse_contract(leg.symbol)) and p[0] == series
+        ]
         if not legs or not any(leg.is_open for leg in basket.legs):
             continue
         gaps = [
@@ -286,9 +291,11 @@ def suggest(fill: fill_repo.StoredFill, baskets: list[Basket]) -> Suggestion | N
     return Suggestion(basket.id, basket.name, why)
 
 
-def pending_with_suggestions(conn: sqlite3.Connection, baskets: list[Basket]) -> list[Pending]:
+def pending_with_suggestions(
+    conn: sqlite3.Connection, baskets: list[Basket], codec: ContractCodec
+) -> list[Pending]:
     return [
-        Pending(f.fill_id, f.symbol, f.side, f.quantity, f.price, f.at, suggest(f, baskets))
+        Pending(f.fill_id, f.symbol, f.side, f.quantity, f.price, f.at, suggest(f, baskets, codec))
         for f in fill_repo.with_status(conn, "pending")
     ]
 
@@ -296,8 +303,8 @@ def pending_with_suggestions(conn: sqlite3.Connection, baskets: list[Basket]) ->
 # ------------------------------------------------------------ settling pending
 
 
-def _leg_from(fill: fill_repo.StoredFill) -> NewBasketLeg:
-    parsed = parse_contract(fill.symbol)
+def _leg_from(fill: fill_repo.StoredFill, codec: ContractCodec) -> NewBasketLeg:
+    parsed = codec.parse_contract(fill.symbol)
     if parsed is None:
         raise ValueError(f"{fill.symbol} is not an option contract")
     _, strike, kind = parsed
@@ -316,6 +323,7 @@ def assign(
     conn: sqlite3.Connection,
     fill_ids: list[str],
     *,
+    codec: ContractCodec,
     basket_id: int | None = None,
     new_name: str | None = None,
     new_strategy: str = "Custom",
@@ -330,7 +338,7 @@ def assign(
     fills = [f for f in fill_repo.get(conn, fill_ids) if f.status == "pending"]
     if len(fills) != len(set(fill_ids)):
         raise ValueError("only pending fills can be assigned")
-    legs = [_leg_from(f) for f in fills]
+    legs = [_leg_from(f, codec) for f in fills]
     if basket_id is None:
         if not new_name:
             raise ValueError("name the new structure, or pick an existing one")

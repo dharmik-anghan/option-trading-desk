@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from broker.fyers import (
+from broker.fyers.adapter import (
     FyersApiError,
     parse_candles,
     parse_funds,
@@ -164,7 +164,7 @@ _HISTORY = {
 def test_a_tradebook_row_becomes_a_fill_in_utc() -> None:
     from datetime import UTC, datetime
 
-    from broker.fyers import parse_fills
+    from broker.fyers.adapter import parse_fills
 
     (fill,) = parse_fills(_TRADEBOOK, history=False)
     assert (fill.symbol, fill.side, fill.quantity, fill.price) == (
@@ -176,7 +176,7 @@ def test_a_tradebook_row_becomes_a_fill_in_utc() -> None:
 
 
 def test_a_trade_history_row_reads_its_own_field_names() -> None:
-    from broker.fyers import parse_fills
+    from broker.fyers.adapter import parse_fills
 
     (fill,) = parse_fills(_HISTORY, history=True)
     assert (fill.side, fill.quantity, fill.price) == ("SELL", 65, 225.35)
@@ -186,7 +186,7 @@ def test_a_trade_history_row_reads_its_own_field_names() -> None:
 def test_booked_is_read_from_positions_not_funds() -> None:
     # 29 Sep 2026 at 13:15: funds said 0 realized; positions carried the
     # +4,881.50 of the call spread closed at 10:36.
-    from broker.fyers import parse_booked
+    from broker.fyers.adapter import parse_booked
 
     raw = {
         "s": "ok", "code": 200,

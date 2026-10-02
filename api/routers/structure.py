@@ -22,7 +22,7 @@ from api.charting import days_for, series_for
 from api.deps import bar_service
 from marketdata import Interval
 from marketdata.models import Bar
-from venues import OPTION_UNDERLYINGS, for_venue
+from venues import listed_on
 
 router = APIRouter(tags=["structure"], prefix="/api/structure")
 
@@ -196,10 +196,7 @@ def _name_of(source: str, symbol: str) -> str | None:
     The same guard the chart endpoint applies, and for the same reason: a
     reading of a symbol nobody listed is a reading of a stranger's price.
     """
-    if source == "fyers":
-        return dict(OPTION_UNDERLYINGS).get(symbol)
-    listed = {i.symbol: i.name for i in for_venue(source)}
-    return listed.get(symbol)
+    return listed_on(source).get(symbol)
 
 
 def _covers(window: list[Bar]) -> str:

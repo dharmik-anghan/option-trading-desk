@@ -20,6 +20,7 @@ from datetime import UTC, date, datetime, timedelta
 from broker.base import MarketData
 from broker.errors import BrokerError
 from broker.errors import RateLimited as BrokerRateLimited
+from broker.models import Candle
 from marketdata.errors import RateLimited, Unavailable
 from marketdata.models import Bar, Fetched, Interval
 
@@ -39,6 +40,23 @@ RESOLUTION: dict[Interval, str] = {
     Interval.W1: "W",
 }
 
+
+
+def to_bar(candle: Candle) -> Bar:
+    """A broker's candle as a stored bar. A naive timestamp is read as UTC.
+
+    The one place the two shapes meet, so every path from a broker into the
+    store - the chart's refresh, the daily updater, the backfill - agrees.
+    """
+    ts = candle.timestamp if candle.timestamp.tzinfo else candle.timestamp.replace(tzinfo=UTC)
+    return Bar(
+        ts=ts,
+        open=candle.open,
+        high=candle.high,
+        low=candle.low,
+        close=candle.close,
+        volume=candle.volume,
+    )
 
 class VenueBars:
     """Bars from a broker adapter, for storing under that venue's name."""
@@ -74,16 +92,6 @@ class VenueBars:
         except BrokerError as exc:
             raise Unavailable(str(exc.message)) from exc
 
-        bars = [
-            Bar(
-                ts=c.timestamp if c.timestamp.tzinfo else c.timestamp.replace(tzinfo=UTC),
-                open=c.open,
-                high=c.high,
-                low=c.low,
-                close=c.close,
-                volume=c.volume,
-            )
-            for c in candles
-        ]
+        bars = [to_bar(c) for c in candles]
         bars.sort(key=lambda b: b.ts)
         return Fetched(bars=bars, name=symbol, currency="")

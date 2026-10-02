@@ -16,6 +16,7 @@ from venues.instruments import (
     Instrument,
     for_venue,
     instrument,
+    listed_on,
     option_underlyings,
 )
 from venues.models import AssetClass, Capability, VenueSpec
@@ -35,6 +36,7 @@ __all__ = [
     "for_venue",
     "option_underlyings",
     "instrument",
+    "listed_on",
     "is_open",
     "listed",
     "serving",

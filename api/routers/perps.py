@@ -154,7 +154,7 @@ def desk(request: Request) -> DeskResponse:
     """Everything the perpetuals desk needs to draw itself once."""
     spec = get_venue(VENUE_ID)
     hub = _hub(request)
-    stream = getattr(request.app.state, "tick_stream", None)
+    stream = getattr(request.app.state, "tick_streams", {}).get(spec.id)
     now = datetime.now(UTC)
 
     # The venue's published limits, if it will tell us. Without them the ticket

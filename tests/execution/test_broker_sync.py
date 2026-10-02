@@ -13,8 +13,9 @@ from datetime import UTC, date, datetime, timedelta, timezone
 import pytest
 
 from broker.fake import FakeBroker
+from broker.fyers import SYMBOLS
+from broker.fyers.symbols import parse_contract
 from broker.models import Fill, OrderRequest, OrderResult, Position
-from broker.symbols import parse_contract
 from execution.basket_history import closed_at, history, realized
 from execution.broker_sync import assign, ignore, sync
 from storage import fill_repo
@@ -78,7 +79,9 @@ HELD_NOW = [pos("22900PE", -65), pos("22500PE", 65), pos("23100CE", -65), pos("2
 
 def _run(conn: sqlite3.Connection, fills: list[Fill], held: list[Position]):  # type: ignore[no-untyped-def]
     broker = NoOrders(fills=fills, positions=held)
-    return sync(conn, broker, since=date(2026, 9, 22), until=date(2026, 9, 29), now=NOW)
+    return sync(
+        conn, broker, codec=SYMBOLS, since=date(2026, 9, 22), until=date(2026, 9, 29), now=NOW
+    )
 
 
 def test_the_call_spread_closed_at_the_broker_closes_on_the_desk(conn: sqlite3.Connection) -> None:
@@ -117,7 +120,7 @@ def test_nothing_is_put_into_a_structure_without_being_asked(conn: sqlite3.Conne
 def test_assigning_the_new_spread_makes_it_legs_of_the_condor(conn: sqlite3.Connection) -> None:
     bid = _condor(conn)
     report = _run(conn, TODAY, HELD_NOW)
-    assign(conn, [p.fill_id for p in report.pending], basket_id=bid, now=NOW)
+    assign(conn, [p.fill_id for p in report.pending], codec=SYMBOLS, basket_id=bid, now=NOW)
 
     basket = get_basket(conn, bid)
     assert basket is not None
@@ -131,7 +134,7 @@ def test_assigning_the_new_spread_makes_it_legs_of_the_condor(conn: sqlite3.Conn
 def test_the_history_reads_opened_then_adjusted(conn: sqlite3.Connection) -> None:
     bid = _condor(conn)
     report = _run(conn, TODAY, HELD_NOW)
-    assign(conn, [p.fill_id for p in report.pending], basket_id=bid, now=NOW)
+    assign(conn, [p.fill_id for p in report.pending], codec=SYMBOLS, basket_id=bid, now=NOW)
     basket = get_basket(conn, bid)
     assert basket is not None
 
@@ -163,7 +166,9 @@ def test_the_trades_that_built_an_adopted_leg_are_recognised_not_repeated(
     old = [fill("E:1", "22900PE", "SELL", 225.35, ist(15, 15, 12, 34)),
            fill("F:1", "22500PE", "BUY", 137.10, ist(15, 15, 12, 40))]
     broker = NoOrders(fills=old, positions=HELD_NOW)
-    report = sync(conn, broker, since=date(2026, 9, 1), until=date(2026, 9, 29), now=NOW)
+    report = sync(
+        conn, broker, codec=SYMBOLS, since=date(2026, 9, 1), until=date(2026, 9, 29), now=NOW
+    )
     assert report.covered == 2 and report.pending == [] and report.closed == []
 
 
@@ -223,7 +228,7 @@ def test_pending_fills_can_start_a_new_structure_or_be_ignored(conn: sqlite3.Con
     _condor(conn)
     report = _run(conn, TODAY, HELD_NOW)
     first, second = (p.fill_id for p in report.pending)
-    new_id = assign(conn, [first], new_name="Call spread", now=NOW)
+    new_id = assign(conn, [first], codec=SYMBOLS, new_name="Call spread", now=NOW)
     ignore(conn, [second])
     fresh = get_basket(conn, new_id)
     assert fresh is not None and [leg.symbol[-7:] for leg in fresh.legs] == ["23100CE"]
@@ -233,7 +238,7 @@ def test_pending_fills_can_start_a_new_structure_or_be_ignored(conn: sqlite3.Con
 def test_the_sync_never_places_an_order(conn: sqlite3.Connection) -> None:
     _condor(conn)
     broker = NoOrders(fills=TODAY, positions=HELD_NOW)
-    sync(conn, broker, since=date(2026, 9, 22), until=date(2026, 9, 29), now=NOW)
+    sync(conn, broker, codec=SYMBOLS, since=date(2026, 9, 22), until=date(2026, 9, 29), now=NOW)
     assert broker.placed_orders == []
 
 

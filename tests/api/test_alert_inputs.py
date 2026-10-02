@@ -18,6 +18,7 @@ from alerting.models import Direction, WatchKind
 from api.alert_inputs import gather
 from api.store import open_db
 from broker.fake import FakeBroker
+from broker.fyers import SYMBOLS
 from broker.models import Quote, Tick
 from feeds.fetch import Feeds
 from storage.alert_repo import add_watch
@@ -73,7 +74,7 @@ class TestQuoteRouting:
     def test_a_streamed_symbol_comes_from_the_hub(self, db: Path) -> None:
         _watch(db, "BTCUSDT")
         broker = Exploding()
-        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0))
+        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0), codec=SYMBOLS)
         assert inputs.quotes == {"BTCUSDT": 84000.0}
         assert broker.asked == [], "the options broker should not be asked for a perp"
 
@@ -83,7 +84,7 @@ class TestQuoteRouting:
         _watch(db, "BTCUSDT")
         _watch(db, "NSE:NIFTY50-INDEX")
         broker = Exploding()
-        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0))
+        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0), codec=SYMBOLS)
         assert inputs.quotes["BTCUSDT"] == 84000.0
         assert "NSE:NIFTY50-INDEX" in inputs.quotes
         assert broker.asked == [["NSE:NIFTY50-INDEX"]]
@@ -91,17 +92,17 @@ class TestQuoteRouting:
     def test_a_streamed_symbol_the_stream_has_not_carried_is_absent(self, db: Path) -> None:
         # Absent, not zero: zero would fire every "below" watch on startup.
         _watch(db, "XAUUSDT")
-        inputs = gather(db, Exploding(), Feeds(), _hub())
+        inputs = gather(db, Exploding(), Feeds(), _hub(), codec=SYMBOLS)
         assert "XAUUSDT" not in inputs.quotes
 
     def test_no_hub_is_survivable(self, db: Path) -> None:
         # The stream may have failed to connect; the pass still has to run.
         _watch(db, "BTCUSDT")
-        inputs = gather(db, Exploding(), Feeds(), None)
+        inputs = gather(db, Exploding(), Feeds(), None, codec=SYMBOLS)
         assert inputs.quotes == {}
 
     def test_watching_nothing_asks_nobody(self, db: Path) -> None:
         broker = Exploding()
-        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0))
+        inputs = gather(db, broker, Feeds(), _hub(BTCUSDT=84000.0), codec=SYMBOLS)
         assert inputs.quotes == {}
         assert broker.asked == []

@@ -14,9 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import paths  # noqa: E402
-from broker.fyers import FyersBroker  # noqa: E402
-from broker.token_store import get_access_token  # noqa: E402
-from settings import load_settings  # noqa: E402
+from broker.factory import options_broker  # noqa: E402
 from storage.db import connect, init_schema  # noqa: E402
 from storage.option_chain_repo import save_snapshot, snapshots_for_symbol  # noqa: E402
 
@@ -26,10 +24,7 @@ DB_PATH = paths.db_path()
 def main() -> int:
     symbol = sys.argv[1] if len(sys.argv) > 1 else "NSE:NIFTY50-INDEX"
 
-    settings = load_settings()
-    broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
-    )
+    broker = options_broker()
 
     print(f"Fetching option chain for {symbol}...")
     chain = broker.get_option_chain(symbol, strike_count=10)

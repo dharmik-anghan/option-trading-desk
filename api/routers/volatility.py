@@ -38,12 +38,11 @@ from marketdata import Interval
 from marketdata.models import Bar
 from storage.vol_repo import vol_history
 from venues import OPTION_UNDERLYINGS
+from venues.instruments import INDIA_VIX
+from venues.instruments import NSE_BARS as SOURCE
 
 router = APIRouter(tags=["volatility"], prefix="/api/volatility")
 
-#: Where daily bars for the Indian series live.
-SOURCE = "fyers"
-VIX_SYMBOL = "NSE:INDIAVIX-INDEX"
 
 #: Windows for realised volatility. Ten is a fortnight of sessions, twenty a
 #: month, sixty a quarter - and the three together say whether the market has
@@ -160,7 +159,7 @@ def volatility(
     spread = now.atm_iv - twenty if now.atm_iv is not None and twenty is not None else None
     ratio = iv_hv_ratio(now.atm_iv, twenty)
 
-    vix_bars = _bars(request, VIX_SYMBOL, 800)
+    vix_bars = _bars(request, INDIA_VIX, 800)
     vix_rank = (
         rank_of(now.india_vix, [b.close for b in vix_bars])
         if now.india_vix is not None and vix_bars

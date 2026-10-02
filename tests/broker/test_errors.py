@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from broker.errors import AuthFailed, BrokerError, BrokerUnreachable, RateLimited, classify_status
-from broker.fyers import FyersApiError, _check_ok
+from broker.fyers.adapter import FyersApiError, _check_ok
 
 
 def test_an_ok_response_raises_nothing() -> None:

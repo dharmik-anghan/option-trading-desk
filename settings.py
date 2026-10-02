@@ -9,21 +9,23 @@ from risk.perps import PerpLimits
 
 
 class Settings(BaseSettings):
-    """Required configuration for talking to Fyers.
+    """Configuration for every venue the desk can talk to.
 
     Values are read from a `.env` file (see `.env.example`) or real
-    environment variables. Missing required fields raise a validation error
-    at startup rather than failing later with a confusing broker error.
+    environment variables. Each venue's credentials are optional: a venue left
+    blank is simply not configured, and asking for its adapter says so - see
+    `broker/factory.py`. A setup with one broker does not need another's keys.
     """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    fyers_client_id: str
-    fyers_secret_key: str
-    fyers_redirect_uri: str
+    # Fyers, for the index options desk.
+    fyers_client_id: str = ""
+    fyers_secret_key: str = ""
+    fyers_redirect_uri: str = ""
     fyers_access_token: str = ""
 
-    # Optional: enables TOTP auto-login (broker/fyers_auth.py) so the daily
+    # Optional: enables TOTP auto-login (broker/fyers/auth.py) so the daily
     # token refresh doesn't need a manual browser step. All three or none -
     # partial credentials fall back to the manual flow. These are more
     # sensitive than the API key/secret above (your TOTP secret alone gives
@@ -64,6 +66,10 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
 
     @property
+    def has_fyers(self) -> bool:
+        return bool(self.fyers_client_id and self.fyers_secret_key and self.fyers_redirect_uri)
+
+    @property
     def has_auto_login_credentials(self) -> bool:
         return bool(self.fyers_username and self.fyers_totp_key and self.fyers_pin)
 
@@ -90,11 +96,11 @@ class MissingSettingsError(SystemExit):
 
 def load_settings() -> Settings:
     try:
-        return Settings()  # type: ignore[call-arg]
+        return Settings()
     except ValidationError as exc:
         missing = ", ".join(str(error["loc"][0]) for error in exc.errors() if error["loc"])
         print(
-            f"Missing required settings: {missing}.\n"
+            f"Missing or invalid settings: {missing}.\n"
             "Copy .env.example to .env and fill it in — see docs/SETUP.md.",
             file=sys.stderr,
         )

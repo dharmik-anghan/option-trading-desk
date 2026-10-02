@@ -17,6 +17,7 @@ construction and a test that needs a broker has to say so.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 
 import pytest
 
@@ -48,7 +49,7 @@ def _no_live_venues(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     for venue_id, real in list(factory.FACTORIES.items()):
         monkeypatch.setitem(
-            factory.FACTORIES, venue_id, factory.Factory(refuse(venue_id), cached=real.cached)
+            factory.FACTORIES, venue_id, replace(real, build=refuse(venue_id), stream=None)
         )
     yield
 

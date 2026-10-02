@@ -16,9 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from analytics.payoff import analyze  # noqa: E402
-from broker.fyers import FyersBroker  # noqa: E402
-from broker.token_store import get_access_token  # noqa: E402
-from settings import load_settings  # noqa: E402
+from broker.factory import options_broker  # noqa: E402
 from strategies.base import Strategy  # noqa: E402
 from strategies.credit_spread import CreditSpread  # noqa: E402
 from strategies.iron_condor import IronCondor  # noqa: E402
@@ -41,10 +39,7 @@ def main() -> int:
         print(f"Unknown strategy '{strategy_name}'. Choose from: {list(STRATEGIES)}")
         return 1
 
-    settings = load_settings()
-    broker = FyersBroker(
-        client_id=settings.fyers_client_id, access_token=get_access_token(settings)
-    )
+    broker = options_broker()
 
     chain = broker.get_option_chain(symbol, strike_count=15)
     legs = strategy.build_legs(chain)

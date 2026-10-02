@@ -14,7 +14,7 @@ from pydantic import BaseModel, model_validator
 from analytics.payoff import (
     payoff_curve_points,
 )
-from api.deps import BrokerDep, DbPathDep
+from api.deps import BrokerDep, CodecDep, DbPathDep
 from api.pricing import (
     basket_live_curve,
 )
@@ -27,8 +27,8 @@ from api.schemas import (
 )
 from api.store import open_db
 from broker.base import FillHistory
+from broker.contracts import ContractCodec
 from broker.models import OptionChain, OptionChainRow
-from broker.symbols import parse_contract, series_prefix
 from execution.basket_history import closed_at as basket_closed_at
 from execution.basket_history import history as basket_history
 from execution.basket_history import realized as basket_realized
@@ -55,7 +55,7 @@ from venues.calendar import IST
 router = APIRouter()
 
 
-def _spans_expiries(basket: Basket) -> bool:
+def _spans_expiries(basket: Basket, codec: ContractCodec) -> bool:
     """Whether the open legs sit in more than one expiry.
 
     Read from the symbols rather than asked of the broker, so it holds even
@@ -67,7 +67,7 @@ def _spans_expiries(basket: Basket) -> bool:
         prefix
         for leg in basket.legs
         if leg.is_open
-        for prefix in [series_prefix(leg.symbol, leg.strike)]
+        for prefix in [codec.series_prefix(leg.symbol, leg.strike)]
         if prefix is not None
     }
     return len(prefixes) > 1
@@ -160,6 +160,7 @@ def _structure_totals(
 
 def _basket_to_response(
     basket: Basket,
+    codec: ContractCodec,
     live: tuple[list[PayoffPoint], float | None, str | None] = ([], None, None),
     rows: dict[str, OptionChainRow] | None = None,
     spot: float | None = None,
@@ -167,7 +168,7 @@ def _basket_to_response(
     payoff = get_basket_payoff(basket)
     today, days, expiry_date = live
     rows = rows or {}
-    spans_expiries = _spans_expiries(basket)
+    spans_expiries = _spans_expiries(basket, codec)
     if spans_expiries:
         # Everything below is derived from intrinsic value at a single expiry.
         # For a calendar that is not merely imprecise, it is wrong: the far leg
@@ -213,7 +214,9 @@ def _basket_to_response(
     )
 
 @router.post("/api/baskets", response_model=BasketResponse)
-def create_basket_endpoint(request: CreateBasketRequest, db_path: DbPathDep) -> BasketResponse:
+def create_basket_endpoint(
+    request: CreateBasketRequest, db_path: DbPathDep, codec: CodecDep
+) -> BasketResponse:
     conn = open_db(db_path)
     basket_id = create_basket(
         conn,
@@ -237,11 +240,11 @@ def create_basket_endpoint(request: CreateBasketRequest, db_path: DbPathDep) -> 
     basket = get_basket(conn, basket_id)
     conn.close()
     assert basket is not None
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 @router.get("/api/baskets", response_model=list[BasketResponse])
 def list_baskets_endpoint(
-    db_path: DbPathDep, broker: BrokerDep, live: bool = False
+    db_path: DbPathDep, codec: CodecDep, broker: BrokerDep, live: bool = False
 ) -> list[BasketResponse]:
     """`live=true` also prices each basket where it stands now, not just at
     expiry. That costs broker calls - one chain per distinct expiry held - so
@@ -250,19 +253,18 @@ def list_baskets_endpoint(
     baskets = repo_list_baskets(conn)
     conn.close()
     if not live:
-        return [_basket_to_response(b) for b in baskets]
+        return [_basket_to_response(b, codec) for b in baskets]
     # shared across baskets, so two structures on one expiry cost one request
     chains: dict[tuple[str, str], OptionChain] = {}
     out: list[BasketResponse] = []
     for basket in baskets:
         payoff = get_basket_payoff(basket)
         try:
-            valued = basket_live_curve(basket, payoff, broker, chains)
+            valued = basket_live_curve(basket, payoff, broker, codec, chains)
         except Exception:  # noqa: BLE001 - a live extra must never 500 the list
             valued = ([], None, None)
         out.append(
-            _basket_to_response(
-                basket,
+            _basket_to_response(basket, codec,
                 valued,
                 _rows_for_basket(basket, chains),
                 _spot_for(basket, chains),
@@ -294,17 +296,17 @@ def _rows_for_basket(
     return rows
 
 @router.get("/api/baskets/{basket_id}", response_model=BasketResponse)
-def get_basket_endpoint(basket_id: int, db_path: DbPathDep) -> BasketResponse:
+def get_basket_endpoint(basket_id: int, db_path: DbPathDep, codec: CodecDep) -> BasketResponse:
     conn = open_db(db_path)
     basket = get_basket(conn, basket_id)
     conn.close()
     if basket is None:
         raise HTTPException(status_code=404, detail=f"Basket {basket_id} not found")
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 @router.post("/api/baskets/{basket_id}/legs/{leg_id}/close", response_model=BasketResponse)
 def close_leg_endpoint(
-    basket_id: int, leg_id: int, request: CloseLegRequest, db_path: DbPathDep
+    basket_id: int, leg_id: int, request: CloseLegRequest, db_path: DbPathDep, codec: CodecDep
 ) -> BasketResponse:
     conn = open_db(db_path)
     repo_close_leg(conn, leg_id, exit_price=request.exit_price, exit_at=datetime.now(UTC))
@@ -312,7 +314,7 @@ def close_leg_endpoint(
     conn.close()
     if basket is None:
         raise HTTPException(status_code=404, detail=f"Basket {basket_id} not found")
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 @router.delete("/api/baskets/{basket_id}", status_code=204)
 def delete_basket_endpoint(basket_id: int, db_path: DbPathDep) -> None:
@@ -370,7 +372,9 @@ class LevelsRequest(BaseModel):
 
 
 @router.put("/api/baskets/{basket_id}/levels", response_model=BasketResponse)
-def put_levels(basket_id: int, body: LevelsRequest, db_path: DbPathDep) -> BasketResponse:
+def put_levels(
+    basket_id: int, body: LevelsRequest, db_path: DbPathDep, codec: CodecDep
+) -> BasketResponse:
     """Set this structure's own alert levels.
 
     Returns the structure rather than the levels, so the panel that just edited
@@ -396,7 +400,7 @@ def put_levels(basket_id: int, body: LevelsRequest, db_path: DbPathDep) -> Baske
     finally:
         conn.close()
     assert basket is not None
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 
 # --------------------------------------------------- following the broker
@@ -468,7 +472,9 @@ def _pending_out(p: object) -> PendingFillOut:
 
 
 @router.post("/api/baskets/sync", response_model=SyncResponse)
-def sync_with_broker(db_path: DbPathDep, broker: BrokerDep, days: int = 7) -> SyncResponse:
+def sync_with_broker(
+    db_path: DbPathDep, codec: CodecDep, broker: BrokerDep, days: int = 7
+) -> SyncResponse:
     """Read the broker's fills and apply them to structures.
 
     Closes are applied; new positions come back as pending, with a suggested
@@ -483,6 +489,7 @@ def sync_with_broker(db_path: DbPathDep, broker: BrokerDep, days: int = 7) -> Sy
         report = sync_fills(
             conn,
             broker,
+            codec=codec,
             since=today - timedelta(days=max(0, min(days, 60))),
             until=today,
             now=datetime.now(UTC),
@@ -512,10 +519,10 @@ def sync_with_broker(db_path: DbPathDep, broker: BrokerDep, days: int = 7) -> Sy
 
 
 @router.get("/api/baskets/fills/pending", response_model=list[PendingFillOut])
-def pending_fills(db_path: DbPathDep) -> list[PendingFillOut]:
+def pending_fills(db_path: DbPathDep, codec: CodecDep) -> list[PendingFillOut]:
     conn = open_db(db_path)
     try:
-        pending = pending_with_suggestions(conn, repo_list_baskets(conn))
+        pending = pending_with_suggestions(conn, repo_list_baskets(conn), codec)
     finally:
         conn.close()
     return [_pending_out(p) for p in pending]
@@ -530,13 +537,13 @@ class AssignRequest(BaseModel):
 
 
 @router.post("/api/baskets/fills/assign", response_model=BasketResponse)
-def assign_pending(body: AssignRequest, db_path: DbPathDep) -> BasketResponse:
+def assign_pending(body: AssignRequest, db_path: DbPathDep, codec: CodecDep) -> BasketResponse:
     """Put pending fills into a structure as new legs. Desk database only."""
     conn = open_db(db_path)
     try:
         try:
             basket_id = assign_fills(
-                conn, body.fill_ids, basket_id=body.basket_id, new_name=body.name,
+                conn, body.fill_ids, codec=codec, basket_id=body.basket_id, new_name=body.name,
                 new_strategy=body.strategy, now=datetime.now(UTC),
             )
         except ValueError as exc:
@@ -545,7 +552,7 @@ def assign_pending(body: AssignRequest, db_path: DbPathDep) -> BasketResponse:
     finally:
         conn.close()
     assert basket is not None
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 
 class FillIdsRequest(BaseModel):
@@ -573,8 +580,10 @@ class AddLegRequest(BaseModel):
 
 
 @router.post("/api/baskets/{basket_id}/legs", response_model=BasketResponse)
-def add_leg_endpoint(basket_id: int, body: AddLegRequest, db_path: DbPathDep) -> BasketResponse:
-    parsed = parse_contract(body.symbol)
+def add_leg_endpoint(
+    basket_id: int, body: AddLegRequest, db_path: DbPathDep, codec: CodecDep
+) -> BasketResponse:
+    parsed = codec.parse_contract(body.symbol)
     if parsed is None:
         raise HTTPException(status_code=422, detail=f"{body.symbol} is not an option contract")
     if body.quantity <= 0 or body.entry_price < 0:
@@ -595,7 +604,7 @@ def add_leg_endpoint(basket_id: int, body: AddLegRequest, db_path: DbPathDep) ->
     finally:
         conn.close()
     assert basket is not None
-    return _basket_to_response(basket)
+    return _basket_to_response(basket, codec)
 
 
 class HistoryEventOut(BaseModel):

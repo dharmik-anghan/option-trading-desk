@@ -31,7 +31,6 @@ from pydantic import BaseModel, ConfigDict, Field
 import paths
 from optbt.costs import CostModel
 from optbt.data.models import Kind
-from optbt.data.source import INDEX_SYMBOL
 from optbt.engine import Engine, Leg, Level, Result, Side, Trade
 from optbt.market import History, OptionKey
 from optbt.results import summarise
@@ -44,6 +43,7 @@ from optbt.strategies.legs import (
     LegStrategy,
     StrikeRule,
 )
+from venues.instruments import OPTION_SERIES
 
 router = APIRouter(tags=["optbt"], prefix="/api/optbt")
 
@@ -63,7 +63,7 @@ STRICT = ConfigDict(extra="forbid")
 
 @contextmanager
 def _history(underlying: str = "NIFTY") -> Iterator[History]:
-    if underlying not in INDEX_SYMBOL:
+    if underlying not in OPTION_SERIES:
         raise HTTPException(422, f"No such underlying: {underlying}")
     path = _store_path()
     if not path.exists():
@@ -163,7 +163,7 @@ def underlyings() -> list[Coverage]:
         ]
     out = []
     for name in names:
-        if name in INDEX_SYMBOL:
+        if name in OPTION_SERIES:
             with _history(name) as h:
                 out.append(_coverage(h))
     return out

@@ -31,14 +31,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from optbt.data.models import Candle, Contract, Kind
-from optbt.data.source import (
-    INDEX_SYMBOL,
-    MAX_SPAN_DAYS,
-    VIX_SYMBOL,
-    ExpiredSource,
-    SourceError,
-)
+from optbt.data.source import MAX_SPAN_DAYS, ExpiredSource, SourceError
 from optbt.data.store import OptionStore
+from venues.instruments import INDIA_VIX, OPTION_SERIES
 
 log = logging.getLogger(__name__)
 
@@ -170,8 +165,8 @@ def backfill(
 
     # Even on a dry run: a few dozen requests, and without it the band cannot be
     # drawn and the estimate would count every strike.
-    index = INDEX_SYMBOL[underlying]
-    for symbol in (index, VIX_SYMBOL):
+    index = OPTION_SERIES[underlying]
+    for symbol in (index, INDIA_VIX):
         written = refresh_index(store, source, symbol, since, until)
         log.info("%s: %d one-minute bars written", symbol, written)
     ranges = store.daily_ranges(index)

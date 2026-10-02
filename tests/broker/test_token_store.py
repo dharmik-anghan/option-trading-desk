@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from broker import token_store
-from broker.token_store import (
+from broker.fyers import token_store
+from broker.fyers.token_store import (
     TokenRefreshError,
     get_access_token,
     jwt_subject,

@@ -30,8 +30,8 @@ from typing import Any
 import duckdb
 
 from optbt.data.models import Kind
-from optbt.data.source import INDEX_SYMBOL
 from venues.calendar import NSE_OPEN
+from venues.instruments import OPTION_SERIES
 
 SESSION_OPEN = NSE_OPEN
 SESSION_LAST_BAR = time(15, 29)
@@ -103,7 +103,7 @@ class History:
     def __init__(self, conn: duckdb.DuckDBPyConnection, underlying: str = "NIFTY") -> None:
         self._conn = conn
         self.underlying = underlying
-        self.index_symbol = INDEX_SYMBOL[underlying]
+        self.index_symbol = OPTION_SERIES[underlying]
         self._index: dict[date, list[Bar]] = {}
         self._contract: dict[tuple[OptionKey, date], dict[datetime, Bar]] = {}
         self._lots: dict[tuple[date, date], int] = {}

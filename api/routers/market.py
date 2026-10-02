@@ -15,7 +15,7 @@ from analytics.payoff import (
     PLAUSIBLE_RATE,
 )
 from analytics.volatility import iv_hv_ratio
-from api.deps import BrokerDep
+from api.deps import BrokerDep, CodecDep
 from api.pricing import (
     years_to_expiry,
 )
@@ -39,7 +39,9 @@ def option_chain(
     return broker.get_option_chain(symbol, strike_count=strike_count, expiry_token=expiry)
 
 @router.get("/api/market/{symbol:path}", response_model=MarketContextResponse)
-def market_context(symbol: str, broker: BrokerDep, hv_sessions: int = 20) -> MarketContextResponse:
+def market_context(
+    symbol: str, broker: BrokerDep, codec: CodecDep, hv_sessions: int = 20
+) -> MarketContextResponse:
     """The chain's own read on an underlying: walls, max pain, straddle, IV vs HV.
 
     Computed here rather than in the browser because historical volatility
@@ -63,7 +65,7 @@ def market_context(symbol: str, broker: BrokerDep, hv_sessions: int = 20) -> Mar
 
     futures_sym: str | None = None
     if chain.rows:
-        futures_sym = mc.futures_symbol(chain.rows[0].symbol, chain.rows[0].strike)
+        futures_sym = codec.futures_symbol(chain.rows[0].symbol, chain.rows[0].strike)
     futures = _futures_price(futures_sym, broker)
 
     premium = None if futures is None else futures - spot
