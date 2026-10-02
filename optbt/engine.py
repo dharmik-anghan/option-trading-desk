@@ -36,14 +36,6 @@ from optbt.source import MarketSource
 #: Bars an opening order may wait for a price before it is abandoned.
 OPEN_ORDER_PATIENCE = 5
 
-#: Minutes into a session during which a decision values a leg only at a price
-#: from today. On 3 Feb 2026 the market opened 700 points up and a condor's long
-#: put did not trade until 09:25: valued at the previous close it showed +22,226,
-#: the 50%-of-credit target fired, and the closes realised a loss. After this
-#: long, a leg still untraded is marked at its last close again - a wing that
-#: does not trade all day must not keep its stop unchecked all day.
-FRESH_MARK_MINUTES = 30
-
 
 class Side(IntEnum):
     BUY = 1
@@ -203,25 +195,19 @@ class Context:
     def set_stop(self, leg: Leg, price: float | None) -> None:
         leg.stop = price
 
-    def mark(self, leg: Leg, *, fresh: bool = False) -> float | None:
-        """The leg's last closed price; with `fresh`, early in a session, today's only."""
-        today_only = fresh and self.view.minutes_open <= FRESH_MARK_MINUTES
-        return self.view.price(leg.key, today_only=today_only)
+    def mark(self, leg: Leg) -> float | None:
+        """What the leg is worth now - see `View.mark`."""
+        return self.view.mark(leg.key)
 
-    def pnl(self, *, fresh: bool = False) -> float | None:
-        """The open trade's gross P&L, closed legs realised and open ones marked.
-
-        `fresh` is for a decision: None, rather than a figure built on another
-        day's price, until every open leg has traded today - or until the
-        session is FRESH_MARK_MINUTES old.
-        """
+    def pnl(self) -> float | None:
+        """The open trade's gross P&L, closed legs realised and open ones marked."""
         trade = self._engine.trade
         if trade is None:
             return 0.0
         total = 0.0
         for leg in trade.legs:
             if leg.is_open:
-                mark = self.mark(leg, fresh=fresh)
+                mark = self.mark(leg)
                 if mark is None:
                     return None
                 total += leg.pnl(mark)
@@ -462,7 +448,7 @@ class Engine:
         trade = self.trade
         if trade is None or not trade.legs:
             return
-        pnl = ctx.pnl(fresh=True)
+        pnl = ctx.pnl()
         if pnl is not None:
             trade.worst = min(trade.worst, pnl)
             trade.best = max(trade.best, pnl)

@@ -849,39 +849,64 @@ def test_nothing_happens_while_spot_stays_between_the_wings() -> None:
     assert len(trade.legs) == 4
 
 
-def test_an_exit_is_not_decided_on_another_days_price_after_a_gap() -> None:
-    """3 Feb 2026 in miniature. A short call and a long put, flat overnight: both
-    end day 1 marked high (200 and 150), so the position stands at nothing. Day 2
-    the call is back at 100 from the open, but the put does not trade until 09:25
-    - and then at 50, where it started. Valued at yesterday's 150 the put showed
-    a profit of 100 x 65 and took the 50%-of-credit target at 09:16; at today's
-    prices there is no profit at all, and nothing should close."""
-    from optbt.strategies.legs import ExpiryChoice, LegsConfig, LegSpec, LegStrategy
-
+def _short_straddle_into_a_fall(*, put_last_trades: time | None) -> Market:
+    """Day 1 at 23,450: the ATM call and put both at 100, sold at 09:20. Day 2 the
+    index stands at 22,750 - from the open, or from 10:00 - and the call trades at
+    5 from then on. The put, now 700 in the money, last traded at `put_last_trades`
+    on day 2 (None: not at all) at its old 100, and next at 10:30, at 720."""
     day1, day2, expiry = date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 29)
+    falls = time(9, 15) if put_last_trades is None else time(10, 0)
     m = Market()
     m.index(day1)
-    m.index(day2)
-    for strike in (23400.0, 23450.0, 23500.0):
-        close = strike == 23450
-        m.option(day1, strike, Kind.CALL, 100.0, expiry=expiry,
-                 changes={time(15, 29): (200.0, 200.0, 200.0, 200.0)} if close else None)
-        m.option(day1, strike, Kind.PUT, 50.0, expiry=expiry,
-                 changes={time(15, 29): (150.0, 150.0, 150.0, 150.0)} if close else None)
-        m.option(day2, strike, Kind.CALL, 100.0, expiry=expiry)
+    minutes = _minutes(day2)
     rows = [
-        f"('NIFTY', DATE '{expiry}', 'PE', 23450.0, TIMESTAMP '{ts}', 50, 50, 50, 50, "
-        f"{LOT}, {LOT * 1000})"
-        for ts in _minutes(day2)
-        if ts.time() >= time(9, 25)
+        f"('{INDEX}', '1', TIMESTAMP '{ts}', {p}, {p}, {p}, {p}, 0)"
+        for ts in minutes
+        for p in [22750.0 if ts.time() >= falls else 23450.0]
     ]
-    m.conn.execute(f"INSERT INTO option_bar VALUES {','.join(rows)}")
+    m.conn.execute(f"INSERT INTO index_bar VALUES {','.join(rows)}")
+    for strike in (23400.0, 23450.0, 23500.0):
+        m.option(day1, strike, Kind.CALL, 100.0, expiry=expiry)
+        m.option(day1, strike, Kind.PUT, 100.0, expiry=expiry)
+    call = [
+        f"('NIFTY', DATE '{expiry}', 'CE', 23450.0, TIMESTAMP '{ts}', {p}, {p}, {p}, {p}, "
+        f"{LOT}, {LOT * 1000})"
+        for ts in minutes
+        for p in [5.0 if ts.time() >= falls else 100.0]
+    ]
+    put = [
+        f"('NIFTY', DATE '{expiry}', 'PE', 23450.0, TIMESTAMP '{ts}', {p}, {p}, {p}, {p}, "
+        f"{LOT}, {LOT * 1000})"
+        for ts in minutes
+        if (put_last_trades is not None and ts.time() <= put_last_trades)
+        or ts.time() >= time(10, 30)
+        for p in [100.0 if ts.time() < time(10, 30) else 720.0]
+    ]
+    m.conn.execute(f"INSERT INTO option_bar VALUES {','.join(call + put)}")
+    return m
 
+
+@pytest.mark.parametrize(
+    "put_last_trades",
+    [None, time(9, 59)],
+    ids=["gap: the put has not traded today", "crash: the put last traded before it"],
+)
+def test_a_leg_that_has_not_traded_since_the_market_moved_is_not_valued_at_its_old_price(
+    put_last_trades: time | None,
+) -> None:
+    """3 Feb and 13 Mar 2026. At its old 100 the put leaves the call's 95 points
+    of profit standing - 6,175, past the 40%-of-credit target of 5,200 - and the
+    target fires. Carried to an index 700 points lower it is worth over 700: the
+    position is deep in loss and the target must not fire before the put trades."""
+    from optbt.strategies.legs import LegsConfig, LegSpec, LegStrategy
+
+    m = _short_straddle_into_a_fall(put_last_trades=put_last_trades)
     config = LegsConfig(
-        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.BUY, Kind.PUT)),
-        expiry=ExpiryChoice(),
+        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.SELL, Kind.PUT)),
         hold="expiry",
-        target_credit=0.5,
+        target_credit=0.4,
     )
-    (trade,) = Engine(m.history(), LegStrategy(config), FREE).run(day1, day2).trades
-    assert all(leg.is_open for leg in trade.legs), trade.events
+    (trade,) = Engine(m.history(), LegStrategy(config), FREE).run(
+        date(2026, 9, 21), date(2026, 9, 22)
+    ).trades
+    assert all(leg.exit_reason != "mtm target" for leg in trade.legs), trade.events

@@ -31,6 +31,7 @@ from broker.models import OptionType
 from optbt.data.models import Kind
 from optbt.engine import Context, Leg, Level, Side
 from optbt.market import OptionKey, Quote, View
+from optbt.marks import implied_vol
 from venues.calendar import NSE_CLOSE
 
 
@@ -326,28 +327,10 @@ def strike_deltas(
     option_type: OptionType = "CE" if kind is Kind.CALL else "PE"
     out: dict[float, float] = {}
     for strike, premium in (calls if kind is Kind.CALL else puts).items():
-        sigma = _implied_vol(premium, forward, strike, years, option_type)
+        sigma = implied_vol(premium, forward, strike, years, option_type)
         if sigma is not None:
             out[strike] = bs.greeks(forward, strike, 0.0, sigma, years, option_type).delta
     return out
-
-
-def _implied_vol(
-    premium: float, forward: float, strike: float, years: float, option_type: OptionType
-) -> float | None:
-    intrinsic = max(0.0, forward - strike) if option_type == "CE" else max(0.0, strike - forward)
-    if premium <= intrinsic + 0.01:
-        return None
-    lo, hi = 0.001, 5.0
-    if bs.price(forward, strike, 0.0, hi, years, option_type) < premium:
-        return None
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        if bs.price(forward, strike, 0.0, mid, years, option_type) > premium:
-            hi = mid
-        else:
-            lo = mid
-    return (lo + hi) / 2
 
 
 def pick_strike(
@@ -555,7 +538,7 @@ class LegStrategy:
                     target = by_credit if target is None else min(target, by_credit)
         # Not while its closes are waiting to fill: the decision is already made.
         if (stop is not None or target is not None) and not ctx.pending:
-            pnl = ctx.pnl(fresh=True)
+            pnl = ctx.pnl()
             if pnl is not None:
                 if stop is not None and pnl <= -stop:
                     ctx.note(f"position P&L {pnl:+,.0f} reached the {stop:,.0f} stop")

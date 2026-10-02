@@ -68,7 +68,7 @@ class History:
         self._index: dict[date, list[Bar]] = {}
         self._contract: dict[tuple[OptionKey, date], dict[datetime, Bar]] = {}
         self._lots: dict[tuple[date, date], int] = {}
-        self._prev: dict[tuple[OptionKey, date], float | None] = {}
+        self._prev: dict[tuple[OptionKey, date], tuple[datetime, float] | None] = {}
         self._expiries: list[date] | None = None
         self._monthlies: list[date] | None = None
 
@@ -236,17 +236,17 @@ class History:
             self._contract[cache_key] = {row[0]: Bar(*row) for row in rows}
         return self._contract[cache_key]
 
-    def prev_close(self, key: OptionKey, day: date) -> float | None:
-        """The contract's last close before `day`'s session, or None if it had
-        never traded. Cached: asked every minute of a day the contract is quiet."""
+    def prev_bar(self, key: OptionKey, day: date) -> tuple[datetime, float] | None:
+        """When the contract last traded before `day`'s session, and at what close;
+        None if it never had. Cached: asked every minute of a day it is quiet."""
         cache_key = (key, day)
         if cache_key not in self._prev:
             row = self._conn.execute(
-                "SELECT close FROM option_bar WHERE underlying = ? AND expiry = ? "
+                "SELECT ts, close FROM option_bar WHERE underlying = ? AND expiry = ? "
                 "AND strike = ? AND kind = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
                 [self.underlying, key.expiry, key.strike, str(key.kind), day],
             ).fetchone()
-            self._prev[cache_key] = float(row[0]) if row else None
+            self._prev[cache_key] = (row[0], float(row[1])) if row else None
         return self._prev[cache_key]
 
     def chain_at(self, expiry: date, ts: datetime) -> list[Quote]:

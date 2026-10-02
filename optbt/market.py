@@ -27,7 +27,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING
 
+from broker.models import OptionType
 from optbt.data.models import Kind
+from optbt.marks import reprice, years_to
 from venues.calendar import NSE_OPEN
 
 if TYPE_CHECKING:
@@ -160,34 +162,66 @@ class View:
     def chain(self, expiry: date) -> list[Quote]:
         return self._history.chain_at(expiry, self.now)
 
-    @property
-    def minutes_open(self) -> int:
-        """Bars closed so far today."""
-        return self._i + 1
+    def last_trade(self, key: OptionKey) -> tuple[datetime, float] | None:
+        """When one contract last traded, as of the last closed bar, and at what.
 
-    def price(self, key: OptionKey, *, today_only: bool = False) -> float | None:
-        """Last traded price of one contract as of the last closed bar.
-
-        Today's latest bar if it has traded today; otherwise its last close from
-        an earlier session. Only valuing it on days it traded left a condor with
-        an illiquid wing unvalued - and its stop and target unchecked - for whole
-        days: the 19400 CE of Jan 2024 did not trade on 4 of its 34 sessions.
-        This is a mark, not a fill: an order still waits for the contract to
-        actually trade.
-
-        `today_only` refuses that earlier session's close: after a gap it can be
-        nowhere near what the contract is worth now.
+        Today's latest bar if it has traded today; otherwise its last bar from an
+        earlier session. None if it never has.
         """
         bars = self._history.contract_day(key, self.day)
         bar = bars.get(self.now)
         if bar is not None:
-            return bar.close
+            return self.now, bar.close
         earlier = [ts for ts in bars if ts < self.now]
         if earlier:
-            return bars[max(earlier)].close
-        if today_only:
+            at = max(earlier)
+            return at, bars[at].close
+        return self._history.prev_bar(key, self.day)
+
+    def price(self, key: OptionKey) -> float | None:
+        """Last traded price of one contract as of the last closed bar.
+
+        This is a print, not a fill: an order still waits for the contract to
+        actually trade. For what a position is worth, see `mark`.
+        """
+        last = self.last_trade(key)
+        return None if last is None else last[1]
+
+    def mark(self, key: OptionKey) -> float | None:
+        """What one contract is worth now: its price on this bar if it traded on it,
+        and otherwise its last price carried to the index level and time now.
+
+        Carried however recent: the 13 Mar put last traded a minute before a
+        700-point fall. With the index where it was, carrying changes nothing.
+
+        An illiquid wing still has a value on a day it does not trade - the 19400
+        CE of Jan 2024 did not trade on 4 of its 34 sessions - but not the value
+        it had before a gap or a crash. See `optbt/marks.py`.
+        """
+        last = self.last_trade(key)
+        if last is None:
             return None
-        return self._history.prev_close(key, self.day)
+        at, price = last
+        if at == self.now:
+            return price
+        spot_then = self._spot_at(at)
+        if spot_then is None:
+            return price
+        option_type: OptionType = "CE" if key.kind is Kind.CALL else "PE"
+        return reprice(
+            price,
+            key.strike,
+            option_type,
+            spot_then=spot_then,
+            years_then=years_to(key.expiry, at),
+            spot_now=self.spot(),
+            years_now=years_to(key.expiry, self.now),
+        )
+
+    def _spot_at(self, ts: datetime) -> float | None:
+        if ts.date() == self.day:
+            return next((b.close for b in self._bars if b.ts == ts), None)
+        return self._history.close_at(self._history.index_symbol, ts)
 
     def lot_size(self, expiry: date) -> int:
         return self._history.lot_size(self.day, expiry)

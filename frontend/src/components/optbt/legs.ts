@@ -93,10 +93,10 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "45 DTE condor",
-    say: "Monthly, entered at 40-50 days to expiry: sell 0.30 delta, buy 0.17 delta, wings made equal. Positional; out at 50% of the credit, a loss equal to it, or 15 days to expiry. Moves the untested spread in at a wing.",
+    say: "Monthly, entered at about 41 days to expiry (40-42): sell 0.30 delta, buy 0.17 delta, wings made equal. Positional; out at 50% of the credit, a loss equal to it, or 15 days to expiry. Moves the untested spread in at a wing.",
     hold: "expiry",
     expiry: { series: "days", nth: 1, min_left: 0, days: 45 },
-    dte: [40, 50],
+    dte: [40, 42],
     targetCredit: 50,
     stopCredit: 100,
     adjust: true,

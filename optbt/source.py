@@ -62,8 +62,8 @@ class MarketSource(Protocol):
         """A contract's session bars for a day, by minute."""
         ...
 
-    def prev_close(self, key: OptionKey, day: date) -> float | None:
-        """The contract's last close before `day`'s session, or None."""
+    def prev_bar(self, key: OptionKey, day: date) -> tuple[datetime, float] | None:
+        """When the contract last traded before `day`'s session, and its close; or None."""
         ...
 
     def lot_size(self, day: date, expiry: date) -> int:
