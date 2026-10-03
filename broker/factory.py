@@ -21,6 +21,7 @@ from broker.contracts import ContractCodec
 from broker.errors import AuthFailed
 from broker.fyers import SYMBOLS as FYERS_SYMBOLS
 from broker.fyers import FyersBroker
+from broker.fyers.account_stream import FyersAccountStream
 from broker.fyers.stream import FyersStream
 from broker.fyers.token_store import get_access_token
 from broker.shark import SharkBroker
@@ -57,6 +58,9 @@ class Factory:
     configured: Callable[[Settings], bool] = lambda _: True
     #: The venue's pushed prices, for a venue that pushes them.
     stream: Callable[[], AsyncStreaming] | None = None
+    #: Word that the account changed - orders, fills, positions - for a venue
+    #: that pushes it.
+    account: Callable[[], FyersAccountStream] | None = None
 
 
 #: How to build an adapter for each venue in the catalogue. A venue in the
@@ -69,6 +73,7 @@ FACTORIES: dict[str, Factory] = {
         codec=FYERS_SYMBOLS,
         configured=lambda s: s.has_fyers,
         stream=FyersStream,
+        account=FyersAccountStream,
     ),
     "shark": Factory(_build_shark, configured=lambda s: s.has_shark, stream=SharkStream),
 }
@@ -144,3 +149,9 @@ def invalidate_account(venue: VenueSpec) -> None:
     cache = _caches.get(venue.id)
     if cache is not None:
         cache.invalidate_account()
+
+
+def account_stream_for(venue: VenueSpec) -> FyersAccountStream | None:
+    """A new account-event stream for the venue, or None if it pushes none."""
+    open_stream = _factory(venue).account
+    return open_stream() if open_stream else None

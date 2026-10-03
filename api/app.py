@@ -52,9 +52,16 @@ from api.routers import (
 from api.store import open_db
 from broker.base import AsyncStreaming, OptionsBroker
 from broker.errors import BrokerError
-from broker.factory import broker_for, codec_for, invalidate_account, is_configured, stream_for
+from broker.factory import (
+    account_stream_for,
+    broker_for,
+    codec_for,
+    invalidate_account,
+    is_configured,
+    stream_for,
+)
 from broker.factory import options_broker as default_options_broker
-from broker.fyers.account_stream import AccountEvent, FyersAccountStream
+from broker.fyers.account_stream import AccountEvent
 from jobs.alert_watcher import Watcher
 from jobs.daily_bars import DailyBarUpdater
 from jobs.preopen_recorder import PreOpenRecorder
@@ -259,15 +266,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # goes to the broker.
     account_hub = AccountHub()
     application.state.account_hub = account_hub
-    account_stream: FyersAccountStream | None = None
     options_venue = serving(AssetClass.INDEX_OPTIONS)
-    if options_venue.id == "fyers" and is_configured(options_venue, settings):
+    account_stream = (
+        account_stream_for(options_venue) if is_configured(options_venue, settings) else None
+    )
+    if account_stream is not None:
 
         def on_account(event: AccountEvent) -> None:
             invalidate_account(options_venue)
             account_hub.publish(event)
 
-        account_stream = FyersAccountStream()
         try:
             await account_stream.start(on_account)
             log.info("fyers account stream connected")
