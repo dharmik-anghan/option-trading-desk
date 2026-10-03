@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
   WATCHLIST,
@@ -16,6 +16,7 @@ import {
 } from "./api";
 import type { Theme } from "./hooks/useTheme";
 import { useLive, useNow } from "./hooks/useLive";
+import { useAccountEvents } from "./hooks/useAccountEvents";
 import { useTickStream } from "./hooks/useTickStream";
 import { liveBaskets, liveChain, livePortfolio, watchedSymbols } from "./live";
 import { Toolbar } from "./components/Toolbar";
@@ -54,6 +55,8 @@ type View = "trading" | "oi" | "greeks";
 // 15-20, which returned `429 request limit reached`. Reads are also cached
 // server-side (broker/cache.py), so these are an upper bound, not a floor.
 const PORTFOLIO_MS = 8000;
+/** The portfolio poll while the account socket is up: a backstop, not the source. */
+const ACCOUNT_BACKUP_MS = 60000;
 const QUOTES_MS = 8000;
 const CHAIN_MS = 12000;
 const CONTEXT_MS = 60000;
@@ -120,7 +123,19 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // said, so a first load is not held back.
   const nseOpen = health.data?.nse?.open ?? true;
   const every = (ms: number) => (nseOpen ? ms : 0);
-  const polledPortfolio = useLive(getPortfolio, every(PORTFOLIO_MS), [], paused, 150);
+  // The account, pushed: while the broker's account socket is up, positions are
+  // read when it says they changed, and polled only as a slow backstop.
+  // Refetched in place rather than by changing a dependency, which would blank
+  // the panels while the new figures load. Filled in once the polls exist.
+  const refreshAccount = useRef<() => void>(() => {});
+  const account = useAccountEvents(!onPerps && !paused, () => refreshAccount.current());
+  const polledPortfolio = useLive(
+    getPortfolio,
+    account.live ? every(ACCOUNT_BACKUP_MS) : every(PORTFOLIO_MS),
+    [],
+    paused,
+    150,
+  );
   // The options polls stop while the perpetuals desk is open, and vice versa.
   // Two desks' worth of requests for one desk on screen is how a rate limit gets
   // spent on panels nobody is looking at.
@@ -227,6 +242,17 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
     1500,
   );
 
+  const refreshPortfolioNow = polledPortfolio.refresh;
+  const refreshBaskets = polledBaskets.refresh;
+  const refreshHistory = history.refresh;
+  useEffect(() => {
+    refreshAccount.current = () => {
+      refreshPortfolioNow();
+      refreshBaskets();
+      refreshHistory();
+    };
+  }, [refreshPortfolioNow, refreshBaskets, refreshHistory]);
+
   // With the market shut the portfolio is read once, but an order can still be
   // placed after hours - so coming back to the page reads it again.
   const refreshPortfolio = portfolio.refresh;
@@ -240,9 +266,16 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   }, [nseOpen, refreshPortfolio]);
 
   const now = useNow(!paused);
+  // The newest figure on screen, polled or pushed: with the streams up the polls
+  // are slow by design, and a tick is as fresh as a figure gets.
   const lastAt = useMemo(
-    () => Math.max(portfolio.at ?? 0, quotes.at ?? 0),
-    [portfolio.at, quotes.at],
+    () =>
+      Math.max(
+        portfolio.at ?? 0,
+        quotes.at ?? 0,
+        ...Object.values(indexTicks.prices).map((t) => t.at),
+      ),
+    [portfolio.at, quotes.at, indexTicks.prices],
   );
   const agoSeconds = lastAt ? Math.max(0, Math.round((now - lastAt) / 1000)) : null;
 

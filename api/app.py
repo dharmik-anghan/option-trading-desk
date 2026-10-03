@@ -52,8 +52,9 @@ from api.routers import (
 from api.store import open_db
 from broker.base import AsyncStreaming, OptionsBroker
 from broker.errors import BrokerError
-from broker.factory import broker_for, codec_for, is_configured, stream_for
+from broker.factory import broker_for, codec_for, invalidate_account, is_configured, stream_for
 from broker.factory import options_broker as default_options_broker
+from broker.fyers.account_stream import AccountEvent, FyersAccountStream
 from jobs.alert_watcher import Watcher
 from jobs.daily_bars import DailyBarUpdater
 from jobs.preopen_recorder import PreOpenRecorder
@@ -65,6 +66,7 @@ from marketdata.venue import VenueBars, to_bar
 from notify import Telegram, TelegramConfig
 from settings import load_settings
 from streaming import TickHub
+from streaming.account import AccountHub
 from universe.nse import daily_series
 from venues import AssetClass, Capability, listed, listed_on, option_underlyings, serving
 from venues.calendar import in_session
@@ -251,6 +253,30 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             log.warning("%s tick stream could not connect", spec.id, exc_info=True)
             await stream.stop()
 
+    # The account, pushed: an order, a fill or a position change says "read it
+    # again", so the portfolio is fetched when it changed rather than every few
+    # seconds in case it did. The cached reads are dropped first, so that read
+    # goes to the broker.
+    account_hub = AccountHub()
+    application.state.account_hub = account_hub
+    account_stream: FyersAccountStream | None = None
+    options_venue = serving(AssetClass.INDEX_OPTIONS)
+    if options_venue.id == "fyers" and is_configured(options_venue, settings):
+
+        def on_account(event: AccountEvent) -> None:
+            invalidate_account(options_venue)
+            account_hub.publish(event)
+
+        account_stream = FyersAccountStream()
+        try:
+            await account_stream.start(on_account)
+            log.info("fyers account stream connected")
+        except Exception:  # noqa: BLE001 - polling still works without it
+            log.warning("fyers account stream could not connect", exc_info=True)
+            await account_stream.stop()
+            account_stream = None
+    application.state.account_stream = account_stream
+
     try:
         yield
     finally:
@@ -272,6 +298,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.daily_updater = None
         for stream in streams.values():
             await stream.stop()
+        if account_stream is not None:
+            await account_stream.stop()
         bars.close()
         log.info("alert watcher stopped")
 

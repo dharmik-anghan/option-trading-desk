@@ -137,3 +137,10 @@ def stream_for(venue: VenueSpec) -> AsyncStreaming | None:
     """A new tick stream for the venue, or None if it does not push prices."""
     open_stream = _factory(venue).stream
     return open_stream() if open_stream else None
+
+
+def invalidate_account(venue: VenueSpec) -> None:
+    """Drop a cached venue's account reads, so the next one goes to the broker."""
+    cache = _caches.get(venue.id)
+    if cache is not None:
+        cache.invalidate_account()

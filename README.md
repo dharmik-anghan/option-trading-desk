@@ -285,8 +285,10 @@ one situation reading as two is worse than a wrong figure.
   (`broker/fyers/stream.py`) through `/api/quotes/stream`: the indices always,
   and the contracts a page shows - position legs, basket legs, the chain's
   strikes - while it shows them. OI is not on the socket (the SDK strips it), so
-  it comes with the chain fetch. While the NSE is closed the desk loads once and
-  stops polling.
+  it comes with the chain fetch. Fyers' order socket says when an order, fill or
+  position changed, and the portfolio is read then - its poll is a once-a-minute
+  backstop while that socket is up. While the NSE is closed the desk loads once
+  and stops polling.
 - **`python-engineio` is pinned below 4.11.** `fyers-apiv3` pins `aiohttp==3.9.3`
   exactly, and from 4.11 engineio calls an aiohttp API that version lacks, so a
   newer one installs cleanly and fails at connect time.

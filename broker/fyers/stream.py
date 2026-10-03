@@ -1,51 +1,28 @@
 """Fyers' live tick stream.
 
-Fyers' own data socket (`fyers_apiv3.FyersWebsocket.data_ws`), wrapped as the
-async start/stop pair the app runs every venue's stream through.
-
-What makes this one different from the perpetuals stream:
-
-- **It runs on its own thread.** The library drives a `websocket-client`
-  connection on a thread and calls back from it. The hub is not thread-safe and
-  belongs to the event loop, so every tick is handed across with
-  `call_soon_threadsafe` rather than published from the callback.
-- **Its login expires every morning.** A Fyers token dies at 06:00 IST. The REST
-  adapter is rebuilt per request and picks up a refreshed token for free; a socket
-  opened yesterday is still holding the old one. A watchdog checks the token and
-  the connection every half minute and reopens the socket when either has gone.
-- **Setting it up blocks.** Connecting sleeps and subscribing calls a REST
-  endpoint to turn symbols into tokens, so both run off the loop.
+Fyers' data socket (`fyers_apiv3.FyersWebsocket.data_ws`), wrapped as the async
+start/stop pair the app runs every venue's stream through. Keeping the socket
+open - its thread, its daily token, reopening it - is `broker/fyers/socket.py`;
+this is what the data socket carries: the indices always, and the contracts a
+page asks for while it reads them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-import certifi
-
-from broker.fyers.token_store import get_access_token
+from broker.fyers.socket import CHECK_EVERY, Supervised, alive, prepare_sdk
 from broker.models import Tick
 from paths import LOGS_DIR
-from settings import load_settings
 from venues.instruments import INDIA_VIX
 
 log = logging.getLogger(__name__)
-
-#: How often the watchdog looks at the token and the connection.
-CHECK_EVERY = 30.0
-
-#: Longest the watchdog waits between attempts to reopen a socket that keeps
-#: failing. Each attempt costs Fyers REST calls, so a socket that cannot connect
-#: must not spend the rate limit the rest of the desk polls with.
-MAX_BACKOFF = 900.0
 
 #: Symbols streamed whatever the desk lists: the VIX sits beside the indices on
 #: the watchlist but is not an underlying anything is traded on.
@@ -78,11 +55,7 @@ def _fyers_socket(
 ) -> DataSocket:
     from fyers_apiv3.FyersWebsocket import data_ws
 
-    # websocket-client verifies against the platform's store unless told
-    # otherwise, and on a python.org build of Python that store is empty: every
-    # connect fails the certificate check and the library retries every few
-    # seconds. The same bundle the perpetuals stream uses.
-    os.environ.setdefault("WEBSOCKET_CLIENT_CA_BUNDLE", certifi.where())
+    prepare_sdk()
     LOGS_DIR.mkdir(exist_ok=True)
     socket: DataSocket = data_ws.FyersDataSocket(
         access_token=login,
@@ -136,8 +109,10 @@ def parse_tick(message: Any) -> Tick | None:
     return Tick(symbol=str(symbol), price=price, at=at, change_pct=change_pct)
 
 
-class FyersStream:
-    """Index prices pushed by Fyers, delivered on the event loop."""
+class FyersStream(Supervised):
+    """Index and contract prices pushed by Fyers, delivered on the event loop."""
+
+    name = "fyers stream"
 
     def __init__(
         self,
@@ -145,15 +120,10 @@ class FyersStream:
         token: Callable[[], tuple[str, str]] | None = None,
         check_every: float = CHECK_EVERY,
     ) -> None:
+        super().__init__(token, check_every)
         self._make = socket_factory
-        self._token = token or _login
-        self._check_every = check_every
         self._symbols: list[str] = []
         self._on_tick: Callable[[Tick], None] | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._socket: DataSocket | None = None
-        self._login: str | None = None
-        self._watch: asyncio.Task[None] | None = None
         #: Contracts a page has asked for on top of the indices, counted per
         #: page: two tabs watching one leg must not have the first to close
         #: take it off the socket under the second.
@@ -161,25 +131,18 @@ class FyersStream:
         #: Counted rather than logged per frame: several ticks a second per
         #: index would bury everything else in the log.
         self.ticks_received = 0
-        self.connected = False
-        self.reconnects = 0
 
     async def start(self, symbols: list[str], on_tick: Callable[[Tick], None]) -> None:
         """Connect and subscribe. Returns once the socket is open."""
-        self._loop = asyncio.get_running_loop()
         self._symbols = list(dict.fromkeys([*symbols, *ALSO_STREAMED]))
         self._on_tick = on_tick
-        await self._open()
-        self._watch = asyncio.create_task(self._watchdog(), name="fyers-stream-watchdog")
+        await self._begin()
 
-    async def stop(self) -> None:
-        """Disconnect. Safe to call when not connected."""
-        if self._watch is not None:
-            self._watch.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._watch
-            self._watch = None
-        await self._close()
+    def _data_socket(self) -> DataSocket | None:
+        socket = self._socket
+        if socket is None or not self.connected or not alive(socket):
+            return None
+        return socket  # type: ignore[return-value]
 
     # ------------------------------------------------------------- watching
 
@@ -193,8 +156,8 @@ class FyersStream:
         wanted = list(dict.fromkeys(symbols))
         new = [s for s in wanted if s not in self._watched and s not in self._symbols]
         self._watched.update(wanted)
-        socket = self._socket
-        if new and socket is not None and self.connected and _alive(socket):
+        socket = self._data_socket()
+        if new and socket is not None:
             # Subscribing calls a REST endpoint to turn symbols into tokens.
             await asyncio.to_thread(socket.subscribe, symbols=new, data_type="SymbolUpdate")
 
@@ -207,8 +170,8 @@ class FyersStream:
                     gone.append(symbol)
             else:
                 self._watched[symbol] -= 1
-        socket = self._socket
-        if gone and socket is not None and self.connected and _alive(socket):
+        socket = self._data_socket()
+        if gone and socket is not None:
             with suppress(Exception):
                 await asyncio.to_thread(socket.unsubscribe, symbols=gone, data_type="SymbolUpdate")
 
@@ -222,96 +185,28 @@ class FyersStream:
         finally:
             await self.unwatch(wanted)
 
-    # ------------------------------------------------------------ connection
-
-    async def _open(self) -> None:
-        login = await asyncio.to_thread(self._token)
-        joined = f"{login[0]}:{login[1]}"
-        socket = self._make(joined, self._opened, self._message, self._error, self._closed)
-        self._socket = socket
-        self._login = joined
-        await asyncio.to_thread(socket.connect)
-
-    async def _close(self) -> None:
-        socket, self._socket = self._socket, None
-        self.connected = False
-        if socket is not None:
-            with suppress(Exception):
-                await asyncio.to_thread(socket.close_connection)
-
-    async def _watchdog(self) -> None:
-        """Reopen the socket when the token has changed or the connection has gone.
-
-        Two misses in a row before reopening a dropped connection: the library
-        reconnects by itself, and a check that lands mid-reconnect should not
-        tear down a socket that was about to recover. A reopen that does not
-        take doubles the wait before the next, up to `MAX_BACKOFF`.
-        """
-        missed = 0
-        failures = 0
-        not_before = 0.0
-        while True:
-            await asyncio.sleep(self._check_every)
-            try:
-                login = await asyncio.to_thread(self._token)
-            except Exception:  # noqa: BLE001 - try again next round
-                log.warning("fyers stream could not read a token", exc_info=True)
-                continue
-            fresh = f"{login[0]}:{login[1]}" != self._login
-            socket = self._socket
-            alive = socket is not None and _alive(socket)
-            if alive:
-                missed = failures = 0
-                if not fresh:
-                    continue
-            else:
-                missed += 1
-                if not fresh and (missed < 2 or time.monotonic() < not_before):
-                    continue
-            log.info("fyers stream reopening (%s)", "new token" if fresh else "connection lost")
-            await self._close()
-            try:
-                await self._open()
-                self.reconnects += 1
-            except Exception:  # noqa: BLE001 - the next round tries again
-                log.warning("fyers stream could not reopen", exc_info=True)
-            missed = 0
-            if not fresh:
-                failures += 1
-                wait = min(MAX_BACKOFF, self._check_every * 2**failures)
-                not_before = time.monotonic() + wait
-
     # ------------------------------------------------- callbacks, on its thread
+
+    def _build(self, login: str) -> DataSocket:
+        return self._make(login, self._opened, self._message, self._error, self._closed)
 
     def _opened(self) -> None:
         """Subscribe on every open, which is when a fresh socket has nothing.
 
-        The library calls this after every connect attempt, including one that
-        failed. Subscribing calls a Fyers REST endpoint, so it is only done for
-        a socket that actually opened.
+        Subscribing calls a Fyers REST endpoint, so it is only done for a socket
+        that actually opened.
         """
-        socket = self._socket
-        if socket is None or not _alive(socket):
-            log.warning("fyers stream did not open")
+        socket = self._really_open()
+        if socket is None:
             return
-        self.connected = True
         symbols = self.subscribed
-        socket.subscribe(symbols=symbols, data_type="SymbolUpdate")
+        socket.subscribe(symbols=symbols, data_type="SymbolUpdate")  # type: ignore[attr-defined]
         log.info("fyers stream subscribed to %d symbols", len(symbols))
 
     def _message(self, message: Any) -> None:
         tick = parse_tick(message)
-        loop = self._loop
-        if tick is None or loop is None or loop.is_closed():
-            return
-        loop.call_soon_threadsafe(self._deliver, tick)
-
-    def _error(self, message: Any) -> None:
-        log.warning("fyers stream error: %s", message)
-
-    def _closed(self, message: Any) -> None:
-        self.connected = False
-        log.warning("fyers stream closed: %s", message)
+        if tick is not None:
+            self._on_loop(self._deliver, tick)
 
     def _deliver(self, tick: Tick) -> None:
         """On the loop, where the hub lives."""
@@ -319,16 +214,3 @@ class FyersStream:
         self.connected = True
         if self._on_tick is not None:
             self._on_tick(tick)
-
-
-def _alive(socket: DataSocket) -> bool:
-    try:
-        return bool(socket.is_connected())
-    except Exception:  # noqa: BLE001 - a socket that cannot say is not alive
-        return False
-
-
-def _login() -> tuple[str, str]:
-    """(client id, access token), refreshing the token if it has expired."""
-    settings = load_settings()
-    return settings.fyers_client_id, get_access_token(settings)

@@ -111,6 +111,10 @@ class CachedBroker(OptionsBroker):
                 return None
             return self._now() - self._rate_limited_at
 
+    def invalidate_account(self) -> None:
+        """Forget positions, funds and fills: the venue says they changed."""
+        self._drop("get_positions", "get_funds", "get_booked_pnl", "get_fills")
+
     def _drop(self, *methods: str) -> None:
         with self._lock:
             for key in [k for k in self._entries if k[0] in methods]:
