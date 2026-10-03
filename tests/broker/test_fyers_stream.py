@@ -62,6 +62,7 @@ class FakeSocket:
         self.on_open = on_open
         self.on_message = on_message
         self.subscribed: list[str] = []
+        self.history: list[tuple[str, list[str]]] = []
         self.closed = False
         self.alive = True
 
@@ -70,6 +71,10 @@ class FakeSocket:
 
     def subscribe(self, symbols: list[str], data_type: str = "SymbolUpdate") -> None:
         self.subscribed = list(symbols)
+        self.history.append(("sub", list(symbols)))
+
+    def unsubscribe(self, symbols: list[str], data_type: str = "SymbolUpdate") -> None:
+        self.history.append(("unsub", list(symbols)))
 
     def close_connection(self) -> None:
         self.closed = True
@@ -228,3 +233,63 @@ def test_a_socket_that_keeps_failing_is_retried_less_and_less() -> None:
     # Without backoff a reopen every two checks is ~30 sockets in 0.6s; with it,
     # waits of 0.02, 0.04, 0.08, 0.16, 0.32 allow only a handful.
     assert 2 <= len(sockets) <= 8, len(sockets)
+
+
+LEG = "NSE:NIFTY26OCT23000CE"
+OTHER = "NSE:NIFTY26OCT22000PE"
+
+
+def test_a_watched_contract_is_subscribed_once_and_dropped_by_the_last_reader() -> None:
+    h = Harness()
+
+    async def run() -> None:
+        stream = FyersStream(socket_factory=h.factory, token=h.login, check_every=60)
+        await stream.start([NIFTY], lambda _: None)
+        socket = h.sockets[0]
+        socket.history.clear()
+
+        await stream.watch([LEG])
+        await stream.watch([LEG, OTHER])  # a second tab: only OTHER is new
+        assert socket.history == [("sub", [LEG]), ("sub", [OTHER])]
+
+        await stream.unwatch([LEG, OTHER])  # the second tab leaves
+        assert socket.history[-1] == ("unsub", [OTHER])
+        await stream.unwatch([LEG])  # the first one
+        assert socket.history[-1] == ("unsub", [LEG])
+        await stream.stop()
+
+    asyncio.run(run())
+
+
+def test_the_listed_indices_are_never_unsubscribed_by_a_reader() -> None:
+    h = Harness()
+
+    async def run() -> None:
+        stream = FyersStream(socket_factory=h.factory, token=h.login, check_every=60)
+        await stream.start([NIFTY], lambda _: None)
+        socket = h.sockets[0]
+        socket.history.clear()
+        async with stream.watching([NIFTY, LEG]):
+            pass
+        assert socket.history == [("sub", [LEG]), ("unsub", [LEG])]
+        await stream.stop()
+
+    asyncio.run(run())
+
+
+def test_a_reopened_socket_carries_the_watched_contracts_too() -> None:
+    h = Harness()
+
+    async def run() -> None:
+        stream = FyersStream(socket_factory=h.factory, token=h.login, check_every=0.01)
+        await stream.start([NIFTY], lambda _: None)
+        await stream.watch([LEG])
+        h.token = "t2"
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if len(h.sockets) > 1:
+                break
+        await stream.stop()
+
+    asyncio.run(run())
+    assert h.sockets[1].subscribed == [NIFTY, INDIA_VIX, LEG]

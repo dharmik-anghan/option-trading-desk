@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
+from collections.abc import AsyncIterator
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
@@ -154,18 +156,44 @@ def _index_quote(symbol: str, broker: OptionsBroker) -> Quote | None:
         return None
 
 
-@router.get("/api/quotes/stream")
-async def quote_stream(request: Request) -> StreamingResponse:
-    """The options venue's prices as they arrive: the indices and the VIX.
+#: Contracts one page may ask the stream for. A position book, its baskets and
+#: a chain's visible strikes come to well under this.
+MAX_WATCHED = 300
 
-    The watchlist, the header's spot and the chart's live price read this; the
-    polled `/api/quotes` stays for a page's first paint and for when the venue's
-    socket is down.
+_SYMBOL = re.compile(r"^(NSE|BSE):[A-Z0-9-]+$")
+
+
+@router.get("/api/quotes/stream")
+async def quote_stream(request: Request, symbols: str = "") -> StreamingResponse:
+    """The options venue's prices as they arrive.
+
+    Always the indices and the VIX. `symbols` adds contracts - the legs of open
+    positions and baskets, the strikes the chain is showing - which the venue's
+    socket carries for as long as this page is reading them. OI is not among
+    what arrives: Fyers' SDK strips it from socket updates, so it stays with the
+    chain fetch.
     """
     closing: asyncio.Event | None = getattr(request.app.state, "shutting_down", None)
     hub = getattr(request.app.state, "tick_hub", None)
-    symbols = [*listed_on(serving(AssetClass.INDEX_OPTIONS).id), *ALSO_STREAMED]
-    return sse(tick_events(request, hub if isinstance(hub, TickHub) else None, closing, symbols))
+    spec = serving(AssetClass.INDEX_OPTIONS)
+    stream = getattr(request.app.state, "tick_streams", {}).get(spec.id)
+    extra = [s for s in dict.fromkeys(x.strip() for x in symbols.split(",")) if _SYMBOL.match(s)]
+    if len(extra) > MAX_WATCHED:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_WATCHED} symbols")
+    wanted = [*listed_on(spec.id), *ALSO_STREAMED, *extra]
+
+    async def events() -> AsyncIterator[str]:
+        ticks = tick_events(request, hub if isinstance(hub, TickHub) else None, closing, wanted)
+        watching = getattr(stream, "watching", None)
+        if watching is None or not extra:
+            async for frame in ticks:
+                yield frame
+            return
+        async with watching(extra):
+            async for frame in ticks:
+                yield frame
+
+    return sse(events())
 
 
 @router.get("/api/quotes", response_model=dict[str, Quote])

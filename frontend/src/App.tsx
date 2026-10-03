@@ -17,6 +17,7 @@ import {
 import type { Theme } from "./hooks/useTheme";
 import { useLive, useNow } from "./hooks/useLive";
 import { useTickStream } from "./hooks/useTickStream";
+import { liveBaskets, liveChain, livePortfolio, watchedSymbols } from "./live";
 import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
@@ -119,12 +120,53 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // said, so a first load is not held back.
   const nseOpen = health.data?.nse?.open ?? true;
   const every = (ms: number) => (nseOpen ? ms : 0);
-  const portfolio = useLive(getPortfolio, every(PORTFOLIO_MS), [], paused, 150);
+  const polledPortfolio = useLive(getPortfolio, every(PORTFOLIO_MS), [], paused, 150);
   // The options polls stop while the perpetuals desk is open, and vice versa.
   // Two desks' worth of requests for one desk on screen is how a rate limit gets
   // spent on panels nobody is looking at.
-  // The indices, pushed by the options venue's socket.
-  const indexTicks = useTickStream("/api/quotes/stream", !onPerps && !paused);
+
+  // Positions, contract limits and stream health, on a slow poll. Prices do not
+  // come from here any more - they are pushed, below - so this no longer needs to
+  // run every couple of seconds.
+  const perps = useLive(getPerpsDesk, PERPS_MS, [basketNonce], paused || !onPerps, 100);
+  // Prices, pushed. The socket to the exchange was always there; this is the half
+  // that was missing, and why /api/perps was being called every two seconds.
+  const streamed = useTickStream("/api/perps/stream", onPerps && !paused);
+  // no request at all while the chain is hidden
+  const polledChain = useLive(
+    () => getOptionChain(symbol, depth, expiry),
+    every(CHAIN_MS),
+    [symbol, expiry, depth, chainOpen],
+    paused || !chainOpen,
+    1050,
+  );
+  const polledBaskets = useLive(
+    () => getBaskets(true),
+    every(BASKETS_MS),
+    [basketNonce],
+    paused || onPerps,
+    300,
+  );
+  const context = useLive(
+    () => getMarketContext(symbol),
+    every(CONTEXT_MS),
+    [symbol],
+    paused || onPerps,
+    850,
+  );
+  // Prices pushed by the options venue's socket: the indices always, and every
+  // contract the desk is showing - position legs, basket legs, the chain's
+  // strikes. Their figures below are the polled ones moved to the streamed
+  // price; OI and greeks stay as polled.
+  const watched = watchedSymbols(
+    polledPortfolio.data,
+    polledBaskets.data,
+    chainOpen ? polledChain.data : null,
+  ).join(",");
+  const indexTicks = useTickStream(
+    `/api/quotes/stream${watched ? `?symbols=${encodeURIComponent(watched)}` : ""}`,
+    !onPerps && !paused,
+  );
   const indexLive = indexTicks.connected && Object.keys(indexTicks.prices).length > 0;
   // While the stream delivers, the quotes are read once - for the previous
   // close the day's change is measured from - and not polled at all.
@@ -148,35 +190,17 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
     }
     return { ...polledQuotes, data: merged };
   }, [polledQuotes, indexTicks.prices]);
-
-  // Positions, contract limits and stream health, on a slow poll. Prices do not
-  // come from here any more - they are pushed, below - so this no longer needs to
-  // run every couple of seconds.
-  const perps = useLive(getPerpsDesk, PERPS_MS, [basketNonce], paused || !onPerps, 100);
-  // Prices, pushed. The socket to the exchange was always there; this is the half
-  // that was missing, and why /api/perps was being called every two seconds.
-  const streamed = useTickStream("/api/perps/stream", onPerps && !paused);
-  // no request at all while the chain is hidden
-  const chain = useLive(
-    () => getOptionChain(symbol, depth, expiry),
-    every(CHAIN_MS),
-    [symbol, expiry, depth, chainOpen],
-    paused || !chainOpen,
-    1050,
+  const portfolio = useMemo(
+    () => ({ ...polledPortfolio, data: livePortfolio(polledPortfolio.data, indexTicks.prices) }),
+    [polledPortfolio, indexTicks.prices],
   );
-  const baskets = useLive(
-    () => getBaskets(true),
-    every(BASKETS_MS),
-    [basketNonce],
-    paused || onPerps,
-    300,
+  const baskets = useMemo(
+    () => ({ ...polledBaskets, data: liveBaskets(polledBaskets.data, indexTicks.prices) }),
+    [polledBaskets, indexTicks.prices],
   );
-  const context = useLive(
-    () => getMarketContext(symbol),
-    every(CONTEXT_MS),
-    [symbol],
-    paused || onPerps,
-    850,
+  const chain = useMemo(
+    () => ({ ...polledChain, data: liveChain(polledChain.data, indexTicks.prices) }),
+    [polledChain, indexTicks.prices],
   );
   const news = useLive(
     () => getNews(40, shownTopics),

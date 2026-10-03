@@ -23,8 +23,9 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable
-from contextlib import suppress
+from collections import Counter
+from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -56,6 +57,7 @@ class DataSocket(Protocol):
 
     def connect(self) -> None: ...
     def subscribe(self, symbols: list[str], data_type: str = ...) -> None: ...
+    def unsubscribe(self, symbols: list[str], data_type: str = ...) -> None: ...
     def close_connection(self) -> None: ...
     def is_connected(self) -> bool: ...
 
@@ -152,6 +154,10 @@ class FyersStream:
         self._socket: DataSocket | None = None
         self._login: str | None = None
         self._watch: asyncio.Task[None] | None = None
+        #: Contracts a page has asked for on top of the indices, counted per
+        #: page: two tabs watching one leg must not have the first to close
+        #: take it off the socket under the second.
+        self._watched: Counter[str] = Counter()
         #: Counted rather than logged per frame: several ticks a second per
         #: index would bury everything else in the log.
         self.ticks_received = 0
@@ -174,6 +180,47 @@ class FyersStream:
                 await self._watch
             self._watch = None
         await self._close()
+
+    # ------------------------------------------------------------- watching
+
+    @property
+    def subscribed(self) -> list[str]:
+        """Everything the socket should carry: the listed symbols, then the watched."""
+        return list(dict.fromkeys([*self._symbols, *self._watched]))
+
+    async def watch(self, symbols: Iterable[str]) -> None:
+        """Stream these too, until as many `unwatch` calls have taken them off."""
+        wanted = list(dict.fromkeys(symbols))
+        new = [s for s in wanted if s not in self._watched and s not in self._symbols]
+        self._watched.update(wanted)
+        socket = self._socket
+        if new and socket is not None and self.connected and _alive(socket):
+            # Subscribing calls a REST endpoint to turn symbols into tokens.
+            await asyncio.to_thread(socket.subscribe, symbols=new, data_type="SymbolUpdate")
+
+    async def unwatch(self, symbols: Iterable[str]) -> None:
+        gone: list[str] = []
+        for symbol in dict.fromkeys(symbols):
+            if self._watched[symbol] <= 1:
+                self._watched.pop(symbol, None)
+                if symbol not in self._symbols:
+                    gone.append(symbol)
+            else:
+                self._watched[symbol] -= 1
+        socket = self._socket
+        if gone and socket is not None and self.connected and _alive(socket):
+            with suppress(Exception):
+                await asyncio.to_thread(socket.unsubscribe, symbols=gone, data_type="SymbolUpdate")
+
+    @asynccontextmanager
+    async def watching(self, symbols: Iterable[str]) -> AsyncIterator[None]:
+        """`watch` for the life of a block - a browser's stream, say."""
+        wanted = list(symbols)
+        await self.watch(wanted)
+        try:
+            yield
+        finally:
+            await self.unwatch(wanted)
 
     # ------------------------------------------------------------ connection
 
@@ -248,8 +295,9 @@ class FyersStream:
             log.warning("fyers stream did not open")
             return
         self.connected = True
-        socket.subscribe(symbols=self._symbols, data_type="SymbolUpdate")
-        log.info("fyers stream subscribed to %s", ", ".join(self._symbols))
+        symbols = self.subscribed
+        socket.subscribe(symbols=symbols, data_type="SymbolUpdate")
+        log.info("fyers stream subscribed to %d symbols", len(symbols))
 
     def _message(self, message: Any) -> None:
         tick = parse_tick(message)

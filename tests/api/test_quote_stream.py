@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -16,8 +17,8 @@ from streaming import TickHub
 
 
 class FakeRequest:
-    def __init__(self, hub: TickHub | None) -> None:
-        self.app = SimpleNamespace(state=SimpleNamespace(tick_hub=hub))
+    def __init__(self, hub: TickHub | None, streams: dict[str, object] | None = None) -> None:
+        self.app = SimpleNamespace(state=SimpleNamespace(tick_hub=hub, tick_streams=streams or {}))
 
     async def is_disconnected(self) -> bool:
         return False
@@ -58,3 +59,41 @@ def test_a_later_index_tick_is_pushed_and_a_perp_tick_is_not() -> None:
 
     frame = asyncio.run(run())
     assert "NIFTYBANK" in frame
+
+
+class WatchRecorder:
+    """Stands in for the venue's stream: records what a reader watched."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str]]] = []
+
+    @asynccontextmanager
+    async def watching(self, symbols: list[str]) -> AsyncIterator[None]:
+        self.calls.append(("watch", list(symbols)))
+        try:
+            yield
+        finally:
+            self.calls.append(("unwatch", list(symbols)))
+
+
+def test_asked_for_contracts_are_watched_while_read_and_released_after() -> None:
+    hub = TickHub()
+    recorder = WatchRecorder()
+    leg = "NSE:NIFTY26OCT23000CE"
+
+    async def run() -> str:
+        request = FakeRequest(hub, {"fyers": recorder})
+        response = await market.quote_stream(
+            cast(Request, request), symbols=f"{leg},not a symbol,{leg}"
+        )
+        events = cast(AsyncGenerator[str, None], response.body_iterator)
+        task: asyncio.Task[str] = asyncio.create_task(anext(events))
+        await asyncio.sleep(0)
+        hub.publish(Tick(symbol=leg, price=120.5, at=datetime.now(UTC)))
+        frame = await asyncio.wait_for(task, timeout=2)
+        await events.aclose()
+        return frame
+
+    frame = asyncio.run(run())
+    assert leg in frame
+    assert recorder.calls == [("watch", [leg]), ("unwatch", [leg])]
