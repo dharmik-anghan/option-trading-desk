@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getBacktestCandles } from "../../api";
 import type { BacktestTrade, Candle, IndicatorLine, StrategySpec } from "../../api";
 import { CandleChart } from "../CandleChart";
-import { Oscillator } from "../Oscillator";
 import type { Overlay } from "../CandleChart";
 
 interface Props {
@@ -44,11 +43,6 @@ const SECONDS: Record<string, number> = {
 export function TradeChart({ trade, source, symbol, interval, spec, onClose }: Props) {
   const [candles, setCandles] = useState<Candle[] | null>(null);
   const [lines, setLines] = useState<IndicatorLine[]>([]);
-  const [view, setView] = useState<{
-    start: number;
-    end: number;
-    hovered: number | null;
-  }>({ start: 0, end: 0, hovered: null });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,7 +80,10 @@ export function TradeChart({ trade, source, symbol, interval, spec, onClose }: P
     // Bitcoin and flatten every candle above it.
     lines: lines.filter((l) => l.on_price).map((l) => ({ label: l.label, values: l.values })),
   };
-  const oscillators = lines.filter((l) => !l.on_price);
+  const oscillators = useMemo(
+    () => lines.flatMap((line, n) => (line.on_price ? [] : [{ line, colour: n }])),
+    [lines],
+  );
 
   return (
     <section className="tradechart">
@@ -131,22 +128,9 @@ export function TradeChart({ trade, source, symbol, interval, spec, onClose }: P
           dp={1}
           height={300}
           overlay={overlay}
-          onView={setView}
+          oscillators={oscillators}
         />
       )}
-
-      {candles !== null &&
-        candles.length > 0 &&
-        oscillators.map((line) => (
-          <Oscillator
-            key={line.label}
-            line={line}
-            colour={lines.indexOf(line)}
-            start={view.start}
-            end={view.end}
-            hovered={view.hovered}
-          />
-        ))}
     </section>
   );
 }

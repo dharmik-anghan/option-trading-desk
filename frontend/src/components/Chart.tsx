@@ -8,7 +8,6 @@ import { useLive } from "../hooks/useLive";
 import { CandleChart } from "./CandleChart";
 import { IndicatorButton, IndicatorMenu, asQuery, remembered } from "./IndicatorPicker";
 import type { Pick } from "./IndicatorPicker";
-import { Oscillator } from "./Oscillator";
 
 //: How often the structure reading is refetched. It changes when a bar closes,
 //: and the smallest size any desk offers is five minutes.
@@ -22,14 +21,15 @@ const DEFAULT_LOOKBACK = 180;
     waiting longer for any of them to be confirmed. */
 const DEFAULT_K = 2;
 
-/** How each reading should feel. Up and down borrow the P&L pair; the two
-    mixed states get the market hue, because neither side is winning. */
-const TONE: Record<string, string> = {
-  uptrend: "up",
-  downtrend: "dn",
-  broadening: "mixed",
-  contracting: "mixed",
-  unclear: "none",
+/** How each reading looks on its tab: a colour class and a mark. Up and down
+    take the candles' colours; the two mixed states get the market hue, because
+    neither side is winning. */
+const TONE: Record<string, [string, string]> = {
+  uptrend: ["rise", "▲"],
+  downtrend: ["fall", "▼"],
+  broadening: ["mixed", "◆"],
+  contracting: ["mixed", "◆"],
+  unclear: ["none", "–"],
 };
 
 const STRUCTURE_KEY = "optiondesk-chart-structure";
@@ -86,14 +86,10 @@ function breakOf(frame: StructureFrame | undefined): NonNullable<Overlay["segmen
       label: i === all.length - 1
         ? `${br.continuation ? "BOS" : "CHoCH"} ${num(br.level, 0)}`
         : br.continuation ? "BOS" : "CHoCH",
-      // Coloured by which way price went, not by whether the break continued
-      // the structure. Green for a close above the level and red for below,
-      // because on this desk those two hues mean direction and nothing else — a
-      // downward break drawn green because it agreed with a downtrend was the
-      // first version, and it read as good news. Whether it was continuation or
-      // a change of character is in the label, which is where a judgement
-      // belongs rather than in a colour that already means something.
-      kind: br.price > br.level ? ("target" as const) : ("stop" as const),
+      // Coloured by which way price went, in the candles' own colours. Whether
+      // it continued the structure or changed it is in the label, which is
+      // where a judgement belongs rather than in a colour.
+      kind: br.price > br.level ? ("rise" as const) : ("fall" as const),
   }));
 }
 
@@ -121,6 +117,20 @@ function Reading({
       )}
       {provisional > 0 && <> A turn is forming that the next bar can still take away.</>}
     </p>
+  );
+}
+
+/** How many sizes point each way, at the end of the timeframe row. */
+function Tally({ frames }: { frames: readonly StructureFrame[] }) {
+  const read = frames.filter((f) => f.bars > 0);
+  const up = read.filter((f) => f.trend === "uptrend").length;
+  const down = read.filter((f) => f.trend === "downtrend").length;
+  const other = read.length - up - down;
+  return (
+    <span className="tally">
+      <span className="rise">{up} up</span> · <span className="fall">{down} down</span>
+      {other > 0 && <> · {other} mixed</>}
+    </span>
   );
 }
 
@@ -221,13 +231,6 @@ export function Chart({
   useEffect(() => setStructureOn(rememberedStructure(scope)), [scope]);
   useEffect(() => rememberStructure(scope, structureOn), [scope, structureOn]);
 
-  // What the candle chart is showing and where the cursor is, so the panes
-  // underneath draw the same bars and the same moment.
-  const [view, setView] = useState<{ start: number; end: number; hovered: number | null }>({
-    start: 0,
-    end: 0,
-    hovered: null,
-  });
   const indicators = useMemo(() => asQuery(picks), [picks]);
 
   // Only timeframes above this chart's, because a line cannot be read on a
@@ -270,9 +273,12 @@ export function Chart({
   }, [reading]);
 
   const rows = candles.data?.candles ?? [];
-  const lines = candles.data?.lines ?? [];
+  const lines = useMemo(() => candles.data?.lines ?? [], [candles.data]);
   const onPrice = lines.filter((l) => l.on_price);
-  const oscillators = lines.filter((l) => !l.on_price);
+  const oscillators = useMemo(
+    () => lines.flatMap((line, n) => (line.on_price ? [] : [{ line, colour: n }])),
+    [lines],
+  );
 
   // The indicator lines and whatever the desk draws on top, in one overlay.
   // Merged here rather than by the caller, so no desk has to know that the
@@ -331,48 +337,33 @@ export function Chart({
       </div>
 
       <div className="pb chartpb">
-        <div
-          className={structureOn ? "frames tiles" : "frames"}
-          role="tablist"
-          aria-label="Timeframe"
-        >
+        <div className="frames" role="tablist" aria-label="Timeframe">
           {frames.map((f) => {
-            const said = byInterval.get(f.interval);
+            const said = structureOn ? byInterval.get(f.interval) : undefined;
             const on = f.interval === frame.interval;
+            const [tone, mark] = TONE[said && said.bars ? said.trend : "unclear"] ?? TONE.unclear;
             return (
               <button
                 key={f.interval}
                 role="tab"
                 aria-selected={on}
                 disabled={f.disabled}
-                className={
-                  structureOn
-                    ? `frame ${TONE[said?.trend ?? "unclear"]}${on ? " on" : ""}`
-                    : on
-                      ? "xbtn on"
-                      : "xbtn"
-                }
+                className={on ? "xbtn on" : "xbtn"}
                 onClick={() => onFrame(f)}
                 onMouseEnter={() => setHoveredFrame(f.interval)}
                 onMouseLeave={() => setHoveredFrame(null)}
                 title={
                   said
-                    ? `${said.bars.toLocaleString()} bars — ${said.covers} · ${said.says}`
+                    ? `${said.trend} · ${said.says} · ${said.bars.toLocaleString()} bars, ${said.covers}`
                     : f.title
                 }
               >
-                {structureOn ? (
-                  <>
-                    <b>{f.label}</b>
-                    <span>{said && said.bars ? said.trend : "—"}</span>
-                    <em>{said && said.bars ? said.says : "no bars"}</em>
-                  </>
-                ) : (
-                  f.label
-                )}
+                {f.label}
+                {structureOn && <i className={`trend ${tone}`}>{mark}</i>}
               </button>
             );
           })}
+          {structureOn && reading && <Tally frames={reading.frames} />}
         </div>
 
         {/* Over the chart rather than under the button: the header scrolls
@@ -407,20 +398,9 @@ export function Chart({
             last={last}
             dp={dp}
             overlay={drawn}
-            onView={setView}
+            oscillators={oscillators}
           />
         )}
-        {rows.length > 0 &&
-          oscillators.map((line) => (
-            <Oscillator
-              key={line.label}
-              line={line}
-              colour={lines.indexOf(line)}
-              start={view.start}
-              end={view.end}
-              hovered={view.hovered}
-            />
-          ))}
         {structureOn && (
           <Reading frame={byInterval.get(hoveredFrame ?? frame.interval)} lookback={reading?.lookback} />
         )}

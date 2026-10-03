@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getOptionChain } from "../api";
+import type { MarketContext, OptionChain } from "../api";
+import type { OiRow } from "../charts/oiProfile";
+import { useLive } from "../hooks/useLive";
+import type { Overlay } from "./CandleChart";
 import { Chart } from "./Chart";
 import type { Frame } from "./Chart";
 
@@ -9,11 +14,55 @@ interface Props {
   name: string;
   /** Spot, drawn as the current level so the chart agrees with the header. */
   last: number | null;
+  /** The desk's reading of the nearest expiry: where its walls and max pain are. */
+  walls: MarketContext | null;
 }
 
 //: A closed bar is the only thing that moves this chart, and the smallest size
 //: here is fifteen minutes.
 const CANDLES_MS = 120000;
+
+//: OI moves through the session but not by the second; once a minute is
+//: plenty, and the chain is the heaviest call the desk makes.
+const OI_MS = 60000;
+
+/** Strikes either side of the money for the profile. */
+const OI_STRIKES = 20;
+
+const OI_KEY = "optiondesk-chart-oi";
+
+function rememberedOi(symbol: string): boolean {
+  try {
+    return localStorage.getItem(`${OI_KEY}:${symbol}`) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function rememberOi(symbol: string, on: boolean): void {
+  try {
+    localStorage.setItem(`${OI_KEY}:${symbol}`, on ? "on" : "off");
+  } catch {
+    // forgetting whether OI was on is not worth failing over
+  }
+}
+
+/** The chain folded into one row per strike, calls and puts side by side. */
+function profileOf(chain: OptionChain | null): OiRow[] {
+  const byStrike = new Map<number, OiRow>();
+  for (const r of chain?.rows ?? []) {
+    const row = byStrike.get(r.strike) ?? { strike: r.strike, call: 0, callPrev: 0, put: 0, putPrev: 0 };
+    if (r.option_type === "CE") {
+      row.call = r.oi;
+      row.callPrev = r.prev_oi;
+    } else {
+      row.put = r.oi;
+      row.putPrev = r.prev_oi;
+    }
+    byStrike.set(r.strike, row);
+  }
+  return [...byStrike.values()].sort((a, b) => a.strike - b.strike);
+}
 
 /** Bars at every size, which is also the window a structure reading covers. */
 const BARS = 180;
@@ -47,8 +96,43 @@ const FRAMES: Frame[] = [
  * appeared to have no chart at all, and that the feature could not exist
  * anywhere else. It now does: the perpetuals chart has the same switch.
  */
-export function IndexChart({ symbol, name, last }: Props) {
+export function IndexChart({ symbol, name, last, walls }: Props) {
   const [frame, setFrame] = useState<Frame>(FRAMES[1]);
+
+  // Open interest over the price: the walls as lines, and every strike as a
+  // profile against the axis. Remembered per underlying, like structure.
+  const [oiOn, setOiOn] = useState(() => rememberedOi(symbol));
+  useEffect(() => setOiOn(rememberedOi(symbol)), [symbol]);
+  useEffect(() => rememberOi(symbol, oiOn), [symbol, oiOn]);
+  const chain = useLive(
+    () => getOptionChain(symbol, OI_STRIKES),
+    OI_MS,
+    [symbol],
+    !oiOn,
+    400,
+  );
+
+  // Taken out as numbers, so a context refresh that moved no wall does not
+  // rebuild the chart.
+  const resistance = walls?.resistance ?? null;
+  const support = walls?.support ?? null;
+  const maxPain = walls?.max_pain ?? null;
+  // Short titles: the line's price is on the axis, and a long one would sit
+  // across the profile.
+  const overlay = useMemo((): Overlay | undefined => {
+    if (!oiOn) return undefined;
+    const levels: NonNullable<Overlay["levels"]> = [];
+    if (resistance !== null) {
+      levels.push({ price: resistance, label: "R", kind: "wall" });
+    }
+    if (support !== null) {
+      levels.push({ price: support, label: "S", kind: "wall" });
+    }
+    if (maxPain !== null) {
+      levels.push({ price: maxPain, label: "MP", kind: "wall" });
+    }
+    return { levels, profile: profileOf(chain.data) };
+  }, [oiOn, resistance, support, maxPain, chain.data]);
 
   return (
     <Chart
@@ -65,6 +149,17 @@ export function IndexChart({ symbol, name, last }: Props) {
       last={last}
       dp={1}
       everyMs={CANDLES_MS}
+      overlay={overlay}
+      controls={
+        <button
+          className={oiOn ? "xbtn on" : "xbtn"}
+          aria-pressed={oiOn}
+          onClick={() => setOiOn((on) => !on)}
+          title="Open interest by strike for the nearest expiry, with its walls and max pain"
+        >
+          OI
+        </button>
+      }
     />
   );
 }

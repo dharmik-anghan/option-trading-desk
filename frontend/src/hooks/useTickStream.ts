@@ -9,18 +9,18 @@ export interface StreamedPrice {
 }
 
 /**
- * Prices pushed from the backend rather than asked for.
- *
- * The socket to the exchange was already there; this is the missing half. A tick
- * reached the backend's hub and then sat until the page polled for it, which is
- * why `/api/perps` was being called every two seconds - the prices were live and
- * the browser was not.
+ * Prices pushed from the backend rather than asked for, from one of its streams:
+ * `/api/perps/stream` for the perpetuals desk, `/api/quotes/stream` for the
+ * indices on the options desk.
  *
  * `EventSource` rather than a websocket: the traffic is one-way, and the browser
  * reconnects a dropped EventSource by itself. A websocket would mean a protocol
  * upgrade and reconnection logic of our own for the same result.
  */
-export function usePerpPrices(enabled: boolean): {
+export function useTickStream(
+  path: string,
+  enabled: boolean,
+): {
   prices: Record<string, StreamedPrice>;
   connected: boolean;
 } {
@@ -35,7 +35,7 @@ export function usePerpPrices(enabled: boolean): {
     // because writing state in an effect to represent "we did not do anything"
     // starts a render for nothing.
     if (!enabled) return;
-    const source = new EventSource(`${API_BASE}/api/perps/stream`);
+    const source = new EventSource(`${API_BASE}${path}`);
 
     source.onopen = () => setConnected(true);
 
@@ -72,7 +72,7 @@ export function usePerpPrices(enabled: boolean): {
       source.close();
       setConnected(false);
     };
-  }, [enabled]);
+  }, [path, enabled]);
 
   // Disabled is not connected, whatever the last connection did before it closed.
   return { prices, connected: enabled && connected };

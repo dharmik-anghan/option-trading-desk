@@ -1,6 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PANE_LEFT, PANE_RIGHT, PANE_WIDTH } from "../charts/layout";
-import type { Candle } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AreaSeries,
+  CandlestickSeries,
+  ColorType,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  createChart,
+  createSeriesMarkers,
+} from "lightweight-charts";
+import type {
+  IChartApi,
+  IPriceLine,
+  ISeriesApi,
+  LogicalRange,
+  SeriesMarker,
+  Time,
+  UTCTimestamp,
+  WhitespaceData,
+} from "lightweight-charts";
+import type { Candle, IndicatorLine } from "../api";
+import { OiProfile, fade } from "../charts/oiProfile";
+import type { OiRow } from "../charts/oiProfile";
+import { compact, int } from "../format";
 
 interface Props {
   candles: readonly Candle[];
@@ -12,71 +35,119 @@ interface Props {
   last: number | null;
   /** Decimal places the venue quotes in, so the axis invents no precision. */
   dp: number;
+  /** Height of the price pane, before any oscillator panes. */
   height?: number;
   /** Things drawn on top of the price: a backtest's entry and exit, its stop and
       target, and the stretch of time the position was held. Optional, because a
       live chart has none of them. */
   overlay?: Overlay;
-  /** Told the window on screen and the bar under the cursor, so a panel drawn
-      underneath can show the same bars and the same moment. Without it an
-      oscillator draws the whole series while the candles are zoomed into a
-      corner of it, and the two disagree about which bar is which. */
-  onView?: (view: { start: number; end: number; hovered: number | null }) => void;
+  /** Indicators that are not prices, one pane each under the candles, sharing
+      their time axis and crosshair. `colour` indexes the indicator palette. */
+  oscillators?: readonly { line: IndicatorLine; colour: number }[];
 }
 
 export interface Overlay {
   /** Horizontal lines at a price, each with a short label on the axis. */
-  levels?: { price: number; label: string; kind: "entry" | "exit" | "stop" | "target" }[];
+  levels?: { price: number; label: string; kind: Kind }[];
   /** A point in time and price: where a position was opened or closed. */
   marks?: { at: string; price: number; kind: "entry" | "exit"; side: "long" | "short" }[];
   /** A level that existed between two moments rather than across the chart —
       a broken swing runs from where it was set to where it was taken, and
       drawing it full width states it at times it had not happened. */
-  segments?: {
-    from: string;
-    to: string;
-    price: number;
-    label: string;
-    kind: "entry" | "exit" | "stop" | "target";
-  }[];
+  segments?: { from: string; to: string; price: number; label: string; kind: Kind }[];
   /** The stretch a position was held over, shaded. */
   band?: { from: string; to: string };
   /** Indicator lines, one value per candle, null where not yet defined. */
   lines?: { label: string; values: (number | null)[] }[];
+  /** Open interest by strike, drawn against the price axis. */
+  profile?: OiRow[];
 }
 
-const W = PANE_WIDTH;
-const PAD = { top: 8, right: PANE_RIGHT, bottom: 18, left: PANE_LEFT };
+/** `rise` and `fall` are a direction of price, drawn in the candles' colours;
+    `wall` is a level the option market set, in the market hue. */
+type Kind = "entry" | "exit" | "stop" | "target" | "rise" | "fall" | "wall";
 
-/** Fewest bars worth showing. Below this the chart is a magnifying glass. */
-const MIN_BARS = 12;
+/** Height of each oscillator pane, for sizing the box. */
+const PANE_H = 100;
+/** The price pane's share of the height against each oscillator's one. */
+const PRICE_SHARE = 5;
 
-/** Empty space past the last bar, as a fraction of the window.
- *
- * Every trading chart leaves some. Without it the newest bar is jammed against
- * the price axis, there is nowhere to draw a level ahead of price, and - the
- * thing that actually gets noticed - the chart cannot be dragged at all when it
- * is showing the whole series, because there is nothing either side to drag it
- * towards. */
-const RIGHT_MARGIN = 0.3;
+/** Bars on screen when a series first opens. More is a wall of slivers. */
+const OPEN_BARS = 200;
 
-/** How far the price axis may be stretched or squeezed by hand, as a multiple
-    of the range that fits the bars on screen. */
-const PRICE_ZOOM = { min: 0.15, max: 8 };
+/** Bounded indicators keep their own bounds rather than being fitted to what
+    is on screen: an RSI of 45 touching the top of its pane says the opposite
+    of what an oscillator is for. */
+const BOUNDED: Record<string, [number, number]> = {
+  rsi: [0, 100],
+  pivot_gap_rank: [0, 100],
+};
+
+/** Lines worth marking on a bounded indicator. */
+const GUIDES: Record<string, number[]> = {
+  rsi: [30, 70],
+  pivot_gap_rank: [10, 90],
+};
+
+/** The desk's tokens, read off the page so the chart follows the theme. */
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    panel: v("--panel", "#fbfaf8"),
+    grid: v("--grid", "#e8e4dd"),
+    line: v("--line", "#cfc8bd"),
+    fg: v("--fg", "#1b1f24"),
+    dim: v("--dim", "#5c5f67"),
+    you: v("--you", "#5b4bd6"),
+    mkt: v("--mkt", "#805706"),
+    up: v("--up", "#0a6b45"),
+    // Candles take the desk's own ink, not the P&L pair: up in the accent,
+    // down in the quiet grey. Green and red stay for money.
+    rise: v("--you", "#5b4bd6"),
+    fall: v("--dim", "#5c5f67"),
+    dn: v("--dn", "#ae2835"),
+    held: v("--selbg", "rgba(91, 75, 214, 0.1)"),
+    font: v("--n", "system-ui, sans-serif"),
+    ind: [0, 1, 2, 3, 4].map((i) => v(`--i${i}`, "#6b7280")),
+  };
+}
+type Palette = ReturnType<typeof palette>;
+
+/** Changes whenever the theme does, by switch or by the OS. */
+function useThemeTick(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", bump);
+    const watch = new MutationObserver(bump);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      media.removeEventListener("change", bump);
+      watch.disconnect();
+    };
+  }, []);
+  return tick;
+}
 
 /**
- * Candles, drawn as candles.
+ * A bar's time as the chart wants it: seconds, shifted by the local offset.
  *
- * A line would be smaller and less honest: the range within a bar is the part a
- * level-watcher cares about, because a wick through 24,000 is a test of 24,000
- * whether or not the bar closed there.
- *
- * Direction uses the same two hues as P&L. That is the one place the desk's
- * colour law bends, and deliberately: up and down mean the same thing to a
- * reader here as they do on a position, and inventing a third pair for price
- * would make the screen say that they are different ideas.
+ * The library labels its axis in UTC. Shifting each bar by the browser's own
+ * offset makes those labels read as wall-clock time here, so a 09:15 bar says
+ * 09:15 rather than 03:45.
  */
-/** A time worth putting under a crosshair: the day and the minute, no more. */
+function chartTime(ms: number): UTCTimestamp {
+  return (Math.floor(ms / 1000) - new Date(ms).getTimezoneOffset() * 60) as UTCTimestamp;
+}
+
+/** A change in open interest, compacted and signed. */
+function change(by: number): string {
+  return by > 0 ? `+${compact(by)}` : compact(by);
+}
+
+/** A time worth putting in the reading: the day and the minute, no more. */
 function when(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
@@ -98,7 +169,7 @@ function Reading({
   label: string;
   value: number;
   dp: number;
-  tone?: "up" | "dn";
+  tone?: "rise" | "fall";
 }) {
   return (
     <span className="ohlc">
@@ -108,6 +179,17 @@ function Reading({
   );
 }
 
+/**
+ * Candles, drawn by TradingView's Lightweight Charts.
+ *
+ * Panning, zooming, both axes and the crosshair are the library's; what is
+ * ours is the data and the overlay. Oscillators go in panes of the same chart
+ * rather than separate drawings, so they share the time axis and the crosshair
+ * with the candles by construction.
+ *
+ * Direction is drawn in the desk's accent and its grey rather than the P&L
+ * pair, so green and red on this screen still only ever mean money.
+ */
 export function CandleChart({
   candles,
   seriesId,
@@ -115,628 +197,443 @@ export function CandleChart({
   dp,
   height = 260,
   overlay,
-  onView,
+  oscillators = [],
 }: Props) {
-  // The window, as a count of bars and where it ends. Held as an end index so
-  // that new bars arriving keep the view pinned to the right, which is what
-  // anyone watching a live chart expects - anchoring on the start would have the
-  // latest price walk off the edge.
-  const [bars, setBars] = useState<number | null>(null);
-  const [end, setEnd] = useState<number | null>(null);
-  const drag = useRef<{ x: number; end: number } | null>(null);
-  // How much of the price axis to show, as a multiple of the range the bars on
-  // screen need. One is the range itself; larger flattens the chart and smaller
-  // magnifies the moves. Horizontal zoom answers "how much history", and this
-  // answers "how big is a move" - two different questions, and a chart that
-  // only ever auto-fits the price can answer neither, because every window
-  // looks equally volatile when it is always scaled to its own extremes.
-  const [priceZoom, setPriceZoom] = useState(1);
-  const scaling = useRef<{ y: number; zoom: number } | null>(null);
-  // The same gesture on the other axis: how many bars fit across the plot.
-  const timing = useRef<{ x: number; bars: number; end: number } | null>(null);
-  // The drawing area, measured rather than assumed. The viewBox is fixed and
-  // the element scales to fit it, so a box taller than the viewBox's aspect
-  // letterboxes: the candles sit in a band with empty space above and below,
-  // which is exactly what the structure panel looked like. Measuring lets the
-  // viewBox match the box, so the chart fills whatever it is given.
-  const box = useRef<SVGSVGElement | null>(null);
-  const [measured, setMeasured] = useState<number | null>(null);
-  // The bar under the cursor, as an index into the whole series, and where the
-  // cursor sits vertically as a fraction of the plot. Both null when the pointer
-  // is elsewhere, which is what hides the crosshair.
+  const box = useRef<HTMLDivElement | null>(null);
+  const chart = useRef<IChartApi | null>(null);
+  const price = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const shownSeries = useRef<string | null>(null);
+  const theme = useThemeTick();
+  // The bar under the cursor, as an index into the bars drawn.
   const [hovered, setHovered] = useState<number | null>(null);
-  const [cursorRatio, setCursorRatio] = useState<number | null>(null);
-  // Mirrored in state because the cursor depends on it and a ref must not be
-  // read during render.
-  const [dragging, setDragging] = useState(false);
+  // The price level under the cursor, for reading the OI profile.
+  const [cursorPrice, setCursorPrice] = useState<number | null>(null);
 
-  // Geometry first, because the pointer handlers need it to say which bar is
-  // under the cursor. The viewBox is fixed and the element is scaled to fit, so
-  // everything here is a fraction of the element rather than a pixel of it.
-  // Scaled to the viewBox's own units: the element is W units wide however many
-  // pixels that is, so a box of 780x500 pixels is 1000x641 units.
-  const H = measured ?? height;
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
-
-  const total = candles.length;
-  const showing = Math.max(MIN_BARS, Math.min(bars ?? total, total));
-  // How far past the last bar the window may be pushed. The window keeps its
-  // width at both ends rather than shrinking into the edge, so panning to the
-  // start of the series shows a full screen of bars beginning at the first.
-  const margin = Math.round(showing * RIGHT_MARGIN);
-  const endIndex = Math.max(
-    Math.min(showing, total),
-    Math.min(end ?? total, total + margin),
-  );
-  const startIndex = Math.max(0, endIndex - showing);
-  // Only the bars that exist. The window can reach past them, which is what
-  // leaves the empty space on the right.
-  const shown = useMemo(
-    () => candles.slice(startIndex, Math.min(endIndex, total)),
-    [candles, startIndex, endIndex, total],
-  );
-  const fitted = bars === null && end === null;
-
-  // A changed series - new symbol, new timeframe - resets the window: keeping a
-  // 20-bar window across a switch from 1d to 5m shows twenty of the wrong bars.
-  // Adjusted during render rather than in an effect, so there is no frame drawn
-  // with the old window against the new data. Keyed on the series and not on the
-  // bar count, because the count changes every time a bar closes and that would
-  // throw away a pan the moment the chart refreshed.
-  const [shownSeries, setShownSeries] = useState(seriesId);
-  if (shownSeries !== seriesId) {
-    setShownSeries(seriesId);
-    setBars(null);
-    setEnd(null);
-  }
-
-  const zoom = useCallback(
-    (factor: number, anchorRatio = 1) => {
-      setBars((current) => {
-        const from = current ?? total;
-        const next = Math.max(MIN_BARS, Math.min(total, Math.round(from * factor)));
-        // Keep the bar under the cursor where it is, so zooming reads as moving
-        // closer rather than jumping somewhere else.
-        setEnd((currentEnd) => {
-          const e = currentEnd ?? total;
-          const anchor = e - from + from * anchorRatio;
-          const room = total + Math.round(next * RIGHT_MARGIN);
-          return Math.max(
-            Math.min(next, total),
-            Math.min(room, Math.round(anchor + next * (1 - anchorRatio))),
-          );
-        });
-        return next;
-      });
-    },
-    [total],
-  );
-
-  /** True when the pointer is over the price axis rather than the plot. */
-  const overAxis = (event: { clientX: number }, box: DOMRect) =>
-    box.width > 0 && (event.clientX - box.left) / box.width > (PAD.left + plotW) / W;
-
-  /** True when it is over the time axis along the bottom. The price axis wins
-      the corner where the two meet, which is what every charting package does
-      and what a hand reaching for one of them expects. */
-  const overTime = (event: { clientX: number; clientY: number }, box: DOMRect) =>
-    box.height > 0 &&
-    !overAxis(event, box) &&
-    (event.clientY - box.top) / box.height > (PAD.top + plotH) / H;
-
-  const stretch = (factor: number) =>
-    setPriceZoom((z) => Math.min(PRICE_ZOOM.max, Math.max(PRICE_ZOOM.min, z * factor)));
-
-  const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
-    if (!total) return;
-    event.preventDefault();
-    const box = event.currentTarget.getBoundingClientRect();
-    // Over the axis, the wheel is about price rather than about history. That
-    // is where every charting package puts it, and it is the only place on the
-    // chart where the gesture is unambiguous.
-    if (overAxis(event, box)) {
-      stretch(event.deltaY > 0 ? 1.15 : 1 / 1.15);
-      return;
-    }
-    const ratio = box.width ? (event.clientX - box.left) / box.width : 1;
-    zoom(event.deltaY > 0 ? 1.25 : 0.8, Math.min(1, Math.max(0, ratio)));
-  };
-
-  const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (!total) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const box = event.currentTarget.getBoundingClientRect();
-    if (overAxis(event, box)) {
-      scaling.current = { y: event.clientY, zoom: priceZoom };
-      return;
-    }
-    if (overTime(event, box)) {
-      timing.current = { x: event.clientX, bars: showing, end: endIndex };
-      return;
-    }
-    drag.current = { x: event.clientX, end: endIndex };
-    setDragging(true);
-  };
-
-  /** Back to what fits. Double-click an axis, as everywhere else. */
-  const onDoubleClick = (event: React.MouseEvent<SVGSVGElement>) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    if (overAxis(event, box)) setPriceZoom(1);
-    else if (overTime(event, box)) {
-      setBars(null);
-      setEnd(null);
-    }
-  };
-
-  const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    const held = drag.current;
-    const box = event.currentTarget.getBoundingClientRect();
-
-    const squeezing = timing.current;
-    if (squeezing !== null) {
-      if (!box.width) return;
-      // Right widens the bars and left packs more in, which is the direction
-      // the hand expects: dragging the time scale to the left pulls more
-      // history onto the screen.
-      const moved = (event.clientX - squeezing.x) / box.width;
-      const next = Math.max(
-        MIN_BARS,
-        Math.min(total, Math.round(squeezing.bars * Math.exp(-moved * 2))),
-      );
-      setBars(next);
-      // The right-hand edge stays put, so the newest bar does not walk off
-      // while the scale is being adjusted.
-      setEnd(squeezing.end);
-      return;
-    }
-
-    const stretching = scaling.current;
-    if (stretching !== null) {
-      if (!box.height) return;
-      // Down squeezes the axis and up magnifies it, which is the direction the
-      // hand expects: dragging the scale down pulls the extremes in towards the
-      // middle of the chart.
-      const moved = (event.clientY - stretching.y) / box.height;
-      setPriceZoom(
-        Math.min(PRICE_ZOOM.max, Math.max(PRICE_ZOOM.min, stretching.zoom * Math.exp(moved * 2))),
-      );
-      return;
-    }
-
-    if (held === null) {
-      // Not dragging: track the cursor. Measured against the plot rather than the
-      // whole element, so the bar under the pointer is the bar the pointer looks
-      // like it is over rather than one offset by the axis.
-      if (!box.width || !box.height || !shown.length) return;
-      const acrossPlot =
-        ((event.clientX - box.left) / box.width - PAD.left / W) / (plotW / W);
-      const bar = Math.floor(acrossPlot * showing);
-      setHovered(bar >= 0 && startIndex + bar < total ? startIndex + bar : null);
-      const downPlot =
-        ((event.clientY - box.top) / box.height - PAD.top / H) / (plotH / H);
-      setCursorRatio(downPlot >= 0 && downPlot <= 1 ? downPlot : null);
-      return;
-    }
-
-    if (!box.width) return;
-    // Bars per pixel, so a drag moves the chart by what is under the finger
-    // rather than by an arbitrary step.
-    const moved = ((held.x - event.clientX) / box.width) * showing;
-    setBars(showing);
-    setEnd(
-      Math.max(
-        Math.min(showing, total),
-        Math.min(total + margin, Math.round(held.end + moved)),
-      ),
-    );
-  };
-
-  const onPointerLeave = () => {
-    setHovered(null);
-    setCursorRatio(null);
-  };
-
-  const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
-    drag.current = null;
-    scaling.current = null;
-    timing.current = null;
-    setDragging(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
+  // The bars the chart can take: in order, one per moment. `orig` maps each
+  // back to its place in `candles`, which is what the indicator values run on.
+  const bars = useMemo(() => {
+    const ms: number[] = [];
+    const orig: number[] = [];
+    candles.forEach((c, i) => {
+      const t = Date.parse(c.at);
+      if (Number.isNaN(t) || (ms.length && t <= ms[ms.length - 1])) return;
+      ms.push(t);
+      orig.push(i);
+    });
+    return { ms, orig, times: ms.map(chartTime) };
+  }, [candles]);
 
   useEffect(() => {
     const element = box.current;
-    if (element === null || typeof ResizeObserver === "undefined") return;
-    const watch = new ResizeObserver(() => {
-      const rect = element.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const units = Math.round((rect.height / rect.width) * W);
-      // Bounded: a collapsed panel would otherwise produce a viewBox of a few
-      // units and a chart of solid ink.
-      setMeasured(Math.max(120, Math.min(1400, units)));
+    if (element === null) return;
+    const made = createChart(element, {
+      autoSize: true,
+      crosshair: { mode: CrosshairMode.Normal },
+      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 6 },
+      rightPriceScale: { borderVisible: false },
     });
-    watch.observe(element);
-    return () => watch.disconnect();
+    made.subscribeCrosshairMove((param) => {
+      const at = param.time === undefined ? null : param.logical;
+      setHovered(at === undefined || at === null ? null : Math.round(at));
+      const series = price.current;
+      setCursorPrice(
+        param.point && series ? series.coordinateToPrice(param.point.y) : null,
+      );
+    });
+    chart.current = made;
+    return () => {
+      made.remove();
+      chart.current = null;
+      price.current = null;
+    };
   }, []);
 
   useEffect(() => {
-    onView?.({ start: startIndex, end: endIndex, hovered });
-    // `onView` is deliberately not a dependency: a parent that rebuilds the
-    // callback each render would otherwise make this fire forever.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startIndex, endIndex, hovered]);
+    const made = chart.current;
+    if (made === null) return;
+    const p = palette();
+    made.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: p.panel },
+        textColor: p.dim,
+        fontFamily: p.font,
+        fontSize: 10,
+        panes: { separatorColor: p.grid, separatorHoverColor: fade(p.line, 0.5) },
+      },
+      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      crosshair: {
+        vertLine: { color: p.dim, labelBackgroundColor: p.fg },
+        horzLine: { color: p.dim, labelBackgroundColor: p.fg },
+      },
+      timeScale: { borderColor: p.grid },
+    });
 
-  const view = useMemo(() => {
-    if (!shown.length) return null;
-    const lows = shown.map((c) => c.low);
-    const highs = shown.map((c) => c.high);
-    // Indicator values count towards the range. A 200-period average sitting
-    // below every bar on screen would otherwise be drawn off the bottom, which
-    // reads as the line not being there at all.
-    const drawn: number[] = [];
-    for (const line of overlay?.lines ?? []) {
-      for (let i = startIndex; i < endIndex; i += 1) {
-        const v = line.values[i];
-        if (typeof v === "number") drawn.push(v);
-      }
+    // Rebuilt whole rather than patched: the overlay changes shape between
+    // calls, and the library redraws a few thousand bars in no time at all.
+    const keep: LogicalRange | null =
+      shownSeries.current === seriesId ? made.timeScale().getVisibleLogicalRange() : null;
+    for (const s of [...made.panes().flatMap((pane) => pane.getSeries())]) made.removeSeries(s);
+    price.current = null;
+    if (!bars.times.length) return;
+
+    draw(made, p, candles, bars, dp, overlay, oscillators, price);
+
+    // Shares rather than pixels: the chart sizes itself to its box, and fixed
+    // heights were handed whatever was left over - which, after a rebuild,
+    // could be an oscillator taking most of the panel.
+    made.panes().forEach((pane, i) => pane.setStretchFactor(i === 0 ? PRICE_SHARE : 1));
+    if (keep !== null) {
+      made.timeScale().setVisibleLogicalRange(keep);
+    } else {
+      shownSeries.current = seriesId;
+      const n = bars.times.length;
+      if (n > OPEN_BARS) made.timeScale().setVisibleLogicalRange({ from: n - OPEN_BARS, to: n + 6 });
+      else made.timeScale().fitContent();
     }
-    let min = Math.min(...lows, ...drawn, last ?? Infinity);
-    let max = Math.max(...highs, ...drawn, last ?? -Infinity);
-    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    if (min === max) {
-      // A flat window still needs a band, or every bar collapses onto one line.
-      min -= Math.abs(min) * 0.001 || 1;
-      max += Math.abs(max) * 0.001 || 1;
-    }
-    const pad = (max - min) * 0.06;
-    // Stretched about the middle, so the bars stay where they are and only the
-    // amount of price on either side of them changes.
-    const mid = (max + min) / 2;
-    const half = (max - min) / 2 + pad;
-    return { min: mid - half * priceZoom, max: mid + half * priceZoom };
-  }, [shown, last, overlay, startIndex, endIndex, priceZoom]);
+  }, [candles, bars, seriesId, dp, height, overlay, oscillators, theme]);
 
-  if (view === null) {
-    return <p className="empty">No candles yet.</p>;
-  }
-
-  const y = (price: number) =>
-    PAD.top + plotH - ((price - view.min) / (view.max - view.min)) * plotH;
-  // Bars share the width of the *window*, not of the bars that exist in it -
-  // which is what turns the unused end of the window into empty space rather
-  // than stretching the last few candles across it.
-  const step = plotW / showing;
-  const bodyW = Math.max(1, step * 0.8);
-
-  // Where a moment falls on the x axis. A timestamp that is not one of the bars
-  // on screen is placed at the bar containing it, because a trade is filled at a
-  // bar's open and the label belongs on that bar rather than between two.
-  const xOf = (at: string): number | null => {
-    const want = Date.parse(at);
-    if (Number.isNaN(want)) return null;
-    let index = -1;
-    for (let i = 0; i < shown.length; i += 1) {
-      if (Date.parse(shown[i].at) <= want) index = i;
-      else break;
-    }
-    if (index < 0) return null;
-    return PAD.left + index * step + step / 2;
-  };
-
-  // The window's own edges in time, for deciding whether something that
-  // happened between two moments is on screen at all.
-  const firstAt = shown.length ? Date.parse(shown[0].at) : NaN;
-  const lastAt = shown.length ? Date.parse(shown[shown.length - 1].at) : NaN;
-
-  /**
-   * Where a span between two moments falls on the x axis, or null when it
-   * falls outside the window entirely.
-   *
-   * The null case is the point. `xOf` answers null both for a moment before
-   * the first bar on screen and for one after the last, and the caller used to
-   * turn those into the left and right edges of the plot - so a break that had
-   * happened and finished long before the visible window was drawn as a line
-   * across the whole chart, at a price from somewhere off to the left.
-   */
-  const spanOf = (fromAt: string, toAt: string): { x1: number; x2: number } | null => {
-    const a = Date.parse(fromAt);
-    const b = Date.parse(toAt);
-    if (Number.isNaN(a) || Number.isNaN(b) || !shown.length) return null;
-    if (b < firstAt || a > lastAt) return null;
-    return {
-      // Clamped rather than dropped when only one end is off screen: a break
-      // whose origin has scrolled away still began somewhere to the left.
-      x1: a < firstAt ? PAD.left : (xOf(fromAt) ?? PAD.left),
-      x2: b > lastAt ? PAD.left + plotW : (xOf(toAt) ?? PAD.left + plotW),
+  // The live price, on its own: it moves every tick, and a tick should not
+  // rebuild the chart. It does follow a rebuild, which removes the series it
+  // was drawn on - hence the rebuild's inputs among its own.
+  useEffect(() => {
+    const series = price.current;
+    if (series === null || last === null) return;
+    const p = palette();
+    series.applyOptions({ lastValueVisible: false, priceLineVisible: false });
+    const line: IPriceLine = series.createPriceLine({
+      price: last,
+      color: p.you,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      axisLabelColor: p.you,
+      axisLabelTextColor: p.panel,
+    });
+    return () => {
+      // The series may have been removed by a rebuild, taking the line with it.
+      if (price.current === series) series.removePriceLine(line);
     };
+  }, [last, candles, bars, seriesId, dp, height, overlay, oscillators, theme]);
+
+  // The newest bar, moved by the live price while its period is still open, so
+  // a streamed tick shows in the candle and not only in the line. The extremes
+  // are kept across ticks: the polled bar only knows the high and low as of
+  // its last fetch.
+  const forming = useRef<{ time: number; high: number; low: number } | null>(null);
+  useEffect(() => {
+    const series = price.current;
+    const n = bars.ms.length;
+    if (series === null || last === null || n === 0) return;
+    // A bar's length, as the shortest gap among the last few: weekends and
+    // holidays only ever make gaps longer.
+    let step = Infinity;
+    for (let i = Math.max(1, n - 6); i < n; i += 1) step = Math.min(step, bars.ms[i] - bars.ms[i - 1]);
+    if (!Number.isFinite(step) || Date.now() >= bars.ms[n - 1] + step) return;
+    const bar = candles[bars.orig[n - 1]];
+    const time = bars.times[n - 1];
+    const held = forming.current?.time === time ? forming.current : null;
+    const high = Math.max(bar.high, held?.high ?? -Infinity, last);
+    const low = Math.min(bar.low, held?.low ?? Infinity, last);
+    forming.current = { time, high, low };
+    series.update({ time, open: bar.open, high, low, close: last });
+  }, [last, candles, bars, seriesId, dp, height, overlay, oscillators, theme]);
+
+  const fit = () => {
+    const made = chart.current;
+    if (made === null) return;
+    made.timeScale().fitContent();
+    made.panes().forEach((_, i) => made.priceScale("right", i).applyOptions({ autoScale: true }));
   };
 
-  const marks = (overlay?.marks ?? [])
-    .map((mark) => ({ ...mark, x: xOf(mark.at) }))
-    .filter((mark): mark is typeof mark & { x: number } => mark.x !== null);
+  // Hovered, or the newest bar when the cursor is elsewhere, as every
+  // charting package does: the reading is never empty.
+  const at = hovered !== null && hovered >= 0 && hovered < bars.orig.length
+    ? hovered
+    : bars.orig.length - 1;
+  const index = bars.orig[at] ?? -1;
+  const onBar = candles[index] as Candle | undefined;
 
-  const band = (() => {
-    if (!overlay?.band) return null;
-    const span = spanOf(overlay.band.from, overlay.band.to);
-    if (span === null) return null;
-    return { x: span.x1, width: Math.max(1, span.x2 - span.x1) };
+  // The strike nearest the cursor, while it is over the price pane.
+  const strikeRow = (() => {
+    const rows = overlay?.profile;
+    if (!rows?.length || cursorPrice === null) return null;
+    return rows.reduce((best, r) =>
+      Math.abs(r.strike - cursorPrice) < Math.abs(best.strike - cursorPrice) ? r : best,
+    );
   })();
-
-  // Four gridlines: enough to read a level off, few enough not to be a net.
-  const ticks = [0, 1, 2, 3, 4].map((i) => view.min + ((view.max - view.min) * i) / 4);
-
-  // The bar under the cursor, as an offset into what is on screen, and the price
-  // the cursor is level with. Both only exist while the pointer is over the plot.
-  const hoverAt = hovered !== null ? hovered - startIndex : null;
-  const onBar = hoverAt !== null && hoverAt >= 0 && hoverAt < shown.length ? shown[hoverAt] : null;
-  const hoverX = hoverAt !== null ? PAD.left + hoverAt * step + step / 2 : null;
-  const cursorPrice =
-    cursorRatio === null ? null : view.max - cursorRatio * (view.max - view.min);
 
   return (
     <div className="candlewrap">
+      {!onBar && <p className="empty">No candles yet.</p>}
+      {onBar && (
       <div className="reading">
-        {onBar ? (
-          <>
-            <span className="when">{when(onBar.at)}</span>
-            <Reading label="O" value={onBar.open} dp={dp} />
-            <Reading label="H" value={onBar.high} dp={dp} />
-            <Reading label="L" value={onBar.low} dp={dp} />
-            <Reading
-              label="C"
-              value={onBar.close}
-              dp={dp}
-              tone={onBar.close >= onBar.open ? "up" : "dn"}
-            />
-            {(overlay?.lines ?? []).map((line, n) => {
-              // Indexed by where the bar sits in the series, not by where it
-              // sits on screen. `line.values` runs the whole series, so reading
-              // it at the window offset showed the value from the first bars of
-              // the series whenever the chart had been panned or zoomed.
-              const value = hovered === null ? null : line.values[hovered];
-              return typeof value === "number" ? (
-                <span key={line.label} className={`ind i${n % 5}`}>
-                  {line.label} {value.toFixed(dp)}
-                </span>
-              ) : null;
-            })}
-          </>
-        ) : (
-          <span className="dim">Hover a candle to read it.</span>
+        <span className="when">{when(onBar.at)}</span>
+        <Reading label="O" value={onBar.open} dp={dp} />
+        <Reading label="H" value={onBar.high} dp={dp} />
+        <Reading label="L" value={onBar.low} dp={dp} />
+        <Reading label="C" value={onBar.close} dp={dp} tone={onBar.close >= onBar.open ? "rise" : "fall"} />
+        {(overlay?.lines ?? []).map((line, n) => {
+          const value = line.values[index];
+          return typeof value === "number" ? (
+            <span key={line.label} className={`ind i${n % 5}`}>
+              {line.label} {value.toFixed(dp)}
+            </span>
+          ) : null;
+        })}
+        {oscillators.map(({ line, colour }) => {
+          const value = line.values[index];
+          return typeof value === "number" ? (
+            <span key={line.label} className={`ind i${colour % 5}`}>
+              {line.label} {value.toFixed(BOUNDED[line.name] ? 0 : 2)}
+            </span>
+          ) : null;
+        })}
+        {strikeRow && (
+          <span className="oiread">
+            <em>{int(strikeRow.strike)}</em> PE {compact(strikeRow.put)}{" "}
+            <i>{change(strikeRow.put - strikeRow.putPrev)}</i> · CE {compact(strikeRow.call)}{" "}
+            <i>{change(strikeRow.call - strikeRow.callPrev)}</i>
+          </span>
         )}
-      </div>
-
-      <div className="zoom">
-        <button
-          className="xbtn"
-          onClick={() => zoom(1.25)}
-          disabled={showing >= total}
-          aria-label="Show more bars"
-          title="Show more bars"
-        >
-          &minus;
-        </button>
-        <button
-          className="xbtn"
-          onClick={() => zoom(0.8)}
-          disabled={showing <= MIN_BARS}
-          aria-label="Show fewer bars"
-          title="Show fewer bars"
-        >
-          +
-        </button>
-        <button
-          className="xbtn"
-          onClick={() => {
-            setBars(null);
-            setEnd(null);
-            setPriceZoom(1);
-          }}
-          disabled={fitted && priceZoom === 1}
-        >
+        <span className="sp" />
+        <button className="xbtn" onClick={fit} title="Show every bar">
           Fit
         </button>
-        <span className="dim">
-          {fitted ? `all ${total} bars` : `${showing} of ${total} bars`}
-        </span>
-        <span className="sp" />
-        <span className="dim">
-          drag to pan · scroll to zoom · drag an axis to stretch it
-        </span>
       </div>
-      <svg
-      ref={box}
-      className={dragging ? "candles dragging" : "candles"}
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="Price candles"
-      onWheel={onWheel}
-      onDoubleClick={onDoubleClick}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onPointerLeave={onPointerLeave}
-    >
-      {ticks.map((price) => (
-        <g key={price}>
-          <line x1={PAD.left} x2={PAD.left + plotW} y1={y(price)} y2={y(price)} className="cgrid" />
-          <text x={PAD.left + plotW + 5} y={y(price) + 3.5} className="caxis">
-            {price.toFixed(dp)}
-          </text>
-        </g>
-      ))}
-
-      {/* Under the candles, so a shaded holding period never hides a bar. */}
-      {band !== null && (
-        <rect
-          x={band.x}
-          y={PAD.top}
-          width={band.width}
-          height={plotH}
-          className="cheld"
-        />
       )}
-
-      {/* A level that only existed between two moments. Off-screen ones are
-          dropped rather than clamped into a line across the chart. */}
-      {(overlay?.segments ?? []).map((seg, n) => {
-        const span = spanOf(seg.from, seg.to);
-        if (span === null) return null;
-        return (
-          <g key={`${n}-${seg.from}-${seg.to}`} className={`clevel ${seg.kind}`}>
-            <line x1={span.x1} x2={span.x2} y1={y(seg.price)} y2={y(seg.price)} />
-            <text x={span.x1 + 3} y={y(seg.price) - 4} className="clevellabel">
-              {seg.label}
-            </text>
-          </g>
-        );
-      })}
-
-      {(overlay?.levels ?? []).map((level) => (
-        <g key={`${level.kind}-${level.price}`} className={`clevel ${level.kind}`}>
-          <line x1={PAD.left} x2={PAD.left + plotW} y1={y(level.price)} y2={y(level.price)} />
-          <text x={PAD.left + 4} y={y(level.price) - 4} className="clevellabel">
-            {level.label}
-          </text>
-        </g>
-      ))}
-
-      {shown.map((c, i) => {
-        const cx = PAD.left + i * step + step / 2;
-        const rising = c.close >= c.open;
-        const top = y(Math.max(c.open, c.close));
-        const bottom = y(Math.min(c.open, c.close));
-        return (
-          <g key={c.at} className={rising ? "up" : "dn"}>
-            <line x1={cx} x2={cx} y1={y(c.high)} y2={y(c.low)} className="cwick" />
-            <rect
-              x={cx - bodyW / 2}
-              y={top}
-              width={bodyW}
-              // A doji has no body; give it a hairline so the bar still exists.
-              height={Math.max(1, bottom - top)}
-              className="cbody"
-            />
-          </g>
-        );
-      })}
-
-      {/* Over the candles, because a line hidden behind a wick is not a line.
-          Slowest first, which `StrategySpec.indicators` already orders them by,
-          so a fast line crossing a slow one stays legible. */}
-      {(overlay?.lines ?? []).map((line, n) => {
-        const path: string[] = [];
-        let drawing = false;
-        for (let i = 0; i < shown.length; i += 1) {
-          // `startIndex + i`, because `values` runs the whole series while `i`
-          // runs the window. Drawn at `i` alone, a panned chart plotted the
-          // indicator's opening values over its closing bars - invisible at
-          // full fit, which is why it survived, and wrong everywhere else.
-          const value = line.values[startIndex + i];
-          if (typeof value !== "number") {
-            // A gap, not a jump to zero: the indicator had no value here.
-            drawing = false;
-            continue;
-          }
-          const px = PAD.left + i * step + step / 2;
-          path.push(`${drawing ? "L" : "M"}${px.toFixed(1)} ${y(value).toFixed(1)}`);
-          drawing = true;
-        }
-        return (
-          <path key={line.label} d={path.join(" ")} className={`cline i${n % 5}`} />
-        );
-      })}
-
-      {/* Over the candles: the two moments that matter most on this chart. */}
-      {marks.map((mark) => (
-        <g key={`${mark.kind}-${mark.at}`} className={`cmark ${mark.kind} ${mark.side}`}>
-          <circle cx={mark.x} cy={y(mark.price)} r={4.5} />
-          <text x={mark.x} y={y(mark.price) + (mark.kind === "entry" ? -9 : 15)}>
-            {mark.kind === "entry" ? (mark.side === "long" ? "buy" : "sell") : "close"}
-          </text>
-        </g>
-      ))}
-
-      {/* The crosshair. Under the price label below so the two do not fight, and
-          over the candles so it can be followed across them. */}
-      {hoverX !== null && (
-        <line x1={hoverX} x2={hoverX} y1={PAD.top} y2={PAD.top + plotH} className="cross" />
-      )}
-      {cursorPrice !== null && (
-        <>
-          <line
-            x1={PAD.left}
-            x2={PAD.left + plotW}
-            y1={y(cursorPrice)}
-            y2={y(cursorPrice)}
-            className="cross"
-          />
-          <rect
-            x={PAD.left + plotW + 1}
-            y={y(cursorPrice) - 8}
-            width={PAD.right - 2}
-            height={16}
-            className="crossbg"
-          />
-          <text x={PAD.left + plotW + 5} y={y(cursorPrice) + 3.5} className="crosstext">
-            {cursorPrice.toFixed(dp)}
-          </text>
-        </>
-      )}
-      {onBar !== null && hoverX !== null && (
-        <text
-          x={Math.min(Math.max(hoverX, PAD.left + 34), PAD.left + plotW - 34)}
-          y={H - 5}
-          className="crosswhen"
-        >
-          {when(onBar.at)}
-        </text>
-      )}
-
-      {/* The price axis, as something you can grab. Invisible, but it is what
-          turns "drag the axis to stretch it" from a line of help text into an
-          affordance a cursor announces. */}
-      <rect
-        x={PAD.left + plotW}
-        y={PAD.top}
-        width={PAD.right}
-        height={plotH}
-        className="cscale"
+      <div
+        ref={box}
+        className="lwchart"
+        // A definite height, which a flex parent may then grow. Without one the
+        // chart sizes itself to its own canvas and keeps growing.
+        style={{ height: height + PANE_H * oscillators.length }}
       />
-      <rect
-        x={PAD.left}
-        y={PAD.top + plotH}
-        width={plotW}
-        height={PAD.bottom}
-        className="ctime"
-      />
-
-      {last !== null && (
-        <g>
-          <line
-            x1={PAD.left}
-            x2={PAD.left + plotW}
-            y1={y(last)}
-            y2={y(last)}
-            className="clast"
-          />
-          <rect
-            x={PAD.left + plotW + 1}
-            y={y(last) - 8}
-            width={PAD.right - 2}
-            height={16}
-            className="clastbg"
-          />
-          <text x={PAD.left + plotW + 5} y={y(last) + 3.5} className="clasttext">
-            {last.toFixed(dp)}
-          </text>
-        </g>
-      )}
-      </svg>
     </div>
   );
+}
+
+/** Everything on the chart, from the shading at the back to the marks in front. */
+function draw(
+  made: IChartApi,
+  p: Palette,
+  candles: readonly Candle[],
+  bars: { ms: number[]; orig: number[]; times: UTCTimestamp[] },
+  dp: number,
+  overlay: Overlay | undefined,
+  oscillators: readonly { line: IndicatorLine; colour: number }[],
+  price: { current: ISeriesApi<"Candlestick"> | null },
+) {
+  const { ms, orig, times } = bars;
+  const first = ms[0];
+  const lastMs = ms[ms.length - 1];
+  const tone: Record<Kind, string> = {
+    entry: p.you,
+    exit: p.dim,
+    stop: p.dn,
+    target: p.up,
+    rise: p.rise,
+    fall: p.fall,
+    wall: p.mkt,
+  };
+
+  /** The bar a moment falls in, by index: the last that opened at or before
+      it. A fill is at a bar's open, so its mark belongs on that bar. */
+  const barOf = (iso: string): number | null => {
+    const want = Date.parse(iso);
+    if (Number.isNaN(want) || want < first) return null;
+    let lo = 0;
+    let hi = ms.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (ms[mid] <= want) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+
+  /** A span's first and last bar, or null when it falls outside the series. A
+      span with one end off the series is clamped to it: it still began
+      somewhere to the left. */
+  const spanOf = (from: string, to: string): [number, number] | null => {
+    const a = Date.parse(from);
+    const b = Date.parse(to);
+    if (Number.isNaN(a) || Number.isNaN(b) || b < first || a > lastMs) return null;
+    return [barOf(from) ?? 0, barOf(to) ?? ms.length - 1];
+  };
+
+  const blank = (i: number): WhitespaceData<Time> => ({ time: times[i] });
+
+  // The holding period, shaded full height behind everything else: an area
+  // pinned to the top of its own hidden scale fills down to the floor.
+  if (overlay?.band) {
+    const span = spanOf(overlay.band.from, overlay.band.to);
+    if (span !== null) {
+      const held = made.addSeries(AreaSeries, {
+        priceScaleId: "held",
+        lineColor: "transparent",
+        topColor: p.held,
+        bottomColor: p.held,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }),
+      });
+      held.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+      held.setData(times.map((t, i) => (i >= span[0] && i <= span[1] ? { time: t, value: 1 } : blank(i))));
+    }
+  }
+
+  // Volume along the floor of the price pane, where there is any. An index
+  // trades none, and a row of zero bars is not information.
+  if (orig.some((i) => candles[i].volume > 0)) {
+    const volume = made.addSeries(HistogramSeries, {
+      priceScaleId: "volume",
+      priceFormat: { type: "volume" },
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
+    volume.setData(
+      orig.map((i, n) => {
+        const c = candles[i];
+        return { time: times[n], value: c.volume, color: fade(c.close >= c.open ? p.rise : p.fall, 0.3) };
+      }),
+    );
+  }
+
+  const step = 1 / 10 ** dp;
+  const series = made.addSeries(CandlestickSeries, {
+    upColor: p.rise,
+    downColor: p.fall,
+    borderUpColor: p.rise,
+    borderDownColor: p.fall,
+    wickUpColor: p.rise,
+    wickDownColor: p.fall,
+    priceFormat: { type: "price", precision: dp, minMove: step },
+  });
+  series.setData(
+    orig.map((i, n) => {
+      const c = candles[i];
+      return { time: times[n], open: c.open, high: c.high, low: c.low, close: c.close };
+    }),
+  );
+  price.current = series;
+
+  if (overlay?.profile?.length) {
+    series.attachPrimitive(new OiProfile(overlay.profile, { ink: p.fg, wall: p.mkt }));
+  }
+
+  for (const level of overlay?.levels ?? []) {
+    series.createPriceLine({
+      price: level.price,
+      color: tone[level.kind],
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: level.label,
+    });
+  }
+
+  // Indicator lines over the candles. Slowest first, which
+  // `StrategySpec.indicators` already orders them by.
+  (overlay?.lines ?? []).forEach((line, n) => {
+    const drawn = made.addSeries(LineSeries, {
+      color: p.ind[n % 5],
+      lineWidth: 2,
+      priceFormat: { type: "price", precision: dp, minMove: step },
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    drawn.setData(
+      orig.map((i, k) => {
+        const value = line.values[i];
+        // A gap, not a jump to zero: the indicator had no value here.
+        return typeof value === "number" ? { time: times[k], value } : blank(k);
+      }),
+    );
+  });
+
+  // A level that only existed between two moments, labelled where it ended.
+  // Off-screen ones are dropped rather than clamped into a line across the chart.
+  for (const seg of overlay?.segments ?? []) {
+    const span = spanOf(seg.from, seg.to);
+    if (span === null) continue;
+    const drawn = made.addSeries(LineSeries, {
+      color: tone[seg.kind],
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceFormat: { type: "price", precision: dp, minMove: step },
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const ends = span[0] === span[1] ? [span[0]] : span;
+    drawn.setData(ends.map((i) => ({ time: times[i], value: seg.price })));
+    createSeriesMarkers(drawn, [
+      {
+        time: times[span[1]],
+        position: "atPriceTop",
+        price: seg.price,
+        shape: "square",
+        size: 0,
+        color: tone[seg.kind],
+        text: seg.label,
+      },
+    ]);
+  }
+
+  // The two moments that matter most on a trade chart, at the price they filled.
+  const marks: SeriesMarker<Time>[] = [];
+  for (const mark of overlay?.marks ?? []) {
+    const i = barOf(mark.at);
+    if (i === null) continue;
+    const buying = (mark.kind === "entry") === (mark.side === "long");
+    marks.push({
+      time: times[i],
+      position: buying ? "atPriceBottom" : "atPriceTop",
+      price: mark.price,
+      shape: buying ? "arrowUp" : "arrowDown",
+      color: mark.kind === "entry" ? p.you : p.dim,
+      text: mark.kind === "entry" ? (mark.side === "long" ? "buy" : "sell") : "close",
+    });
+  }
+  marks.sort((a, b) => (a.time as number) - (b.time as number));
+  if (marks.length) createSeriesMarkers(series, marks);
+
+  // Oscillators, a pane each: an RSI and Bitcoin share an axis no better than
+  // two oscillators with different ranges do.
+  oscillators.forEach(({ line, colour }, n) => {
+    const bounds = BOUNDED[line.name];
+    const drawn = made.addSeries(
+      LineSeries,
+      {
+        color: p.ind[colour % 5],
+        lineWidth: 2,
+        title: line.label,
+        priceLineVisible: false,
+        priceFormat: { type: "price", precision: bounds ? 0 : 2, minMove: bounds ? 1 : 0.01 },
+        autoscaleInfoProvider: bounds
+          ? () => ({ priceRange: { minValue: bounds[0], maxValue: bounds[1] } })
+          : undefined,
+      },
+      n + 1,
+    );
+    drawn.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.08 } });
+    drawn.setData(
+      orig.map((i, k) => {
+        const value = line.values[i];
+        return typeof value === "number" ? { time: times[k], value } : blank(k);
+      }),
+    );
+    for (const guide of GUIDES[line.name] ?? []) {
+      drawn.createPriceLine({
+        price: guide,
+        color: p.line,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: false,
+      });
+    }
+  });
 }

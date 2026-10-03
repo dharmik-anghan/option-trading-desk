@@ -16,7 +16,7 @@ import {
 } from "./api";
 import type { Theme } from "./hooks/useTheme";
 import { useLive, useNow } from "./hooks/useLive";
-import { usePerpPrices } from "./hooks/usePerpPrices";
+import { useTickStream } from "./hooks/useTickStream";
 import { Toolbar } from "./components/Toolbar";
 import { MarketWatch } from "./components/MarketWatch";
 import { NewsPanel } from "./components/NewsPanel";
@@ -54,6 +54,8 @@ type View = "trading" | "oi" | "greeks";
 // server-side (broker/cache.py), so these are an upper bound, not a floor.
 const PORTFOLIO_MS = 8000;
 const QUOTES_MS = 8000;
+/** The quote poll while the index stream is live: a backstop, not the source. */
+const QUOTES_BACKUP_MS = 60000;
 const CHAIN_MS = 12000;
 const CONTEXT_MS = 15000;
 // Both are somebody else's website behind a server-side cache, so polling them
@@ -116,20 +118,39 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // The options polls stop while the perpetuals desk is open, and vice versa.
   // Two desks' worth of requests for one desk on screen is how a rate limit gets
   // spent on panels nobody is looking at.
-  const quotes = useLive(
+  // The indices, pushed by the options venue's socket. While it is delivering,
+  // the quote poll only backs it up - it still carries the previous close the
+  // day's change is measured from, which a tick does not.
+  const indexTicks = useTickStream("/api/quotes/stream", !onPerps && !paused);
+  const indexLive = indexTicks.connected && Object.keys(indexTicks.prices).length > 0;
+  const polledQuotes = useLive(
     () => getQuotes(WATCHLIST),
-    QUOTES_MS,
+    indexLive ? QUOTES_BACKUP_MS : QUOTES_MS,
     [],
     paused || onPerps,
     600,
   );
+  // Polled quotes with the streamed price laid over them. Only the price: the
+  // previous close stays the poll's, so every change on the desk is measured
+  // from the same figure.
+  const quotes = useMemo(() => {
+    const data = polledQuotes.data;
+    if (!data) return polledQuotes;
+    const merged: typeof data = { ...data };
+    for (const [sym, tick] of Object.entries(indexTicks.prices)) {
+      const q = merged[sym];
+      if (q) merged[sym] = { ...q, ltp: tick.price };
+    }
+    return { ...polledQuotes, data: merged };
+  }, [polledQuotes, indexTicks.prices]);
+
   // Positions, contract limits and stream health, on a slow poll. Prices do not
   // come from here any more - they are pushed, below - so this no longer needs to
   // run every couple of seconds.
   const perps = useLive(getPerpsDesk, PERPS_MS, [basketNonce], paused || !onPerps, 100);
   // Prices, pushed. The socket to the exchange was always there; this is the half
   // that was missing, and why /api/perps was being called every two seconds.
-  const streamed = usePerpPrices(onPerps && !paused);
+  const streamed = useTickStream("/api/perps/stream", onPerps && !paused);
   // no request at all while the chain is hidden
   const chain = useLive(
     () => getOptionChain(symbol, depth, expiry),
@@ -226,7 +247,11 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
 
   // quotes cover every symbol and always poll; the chain is only open sometimes
   const spot =
-    quotes.data?.[symbol]?.ltp ?? context.data?.spot ?? chain.data?.underlying_ltp ?? null;
+    indexTicks.prices[symbol]?.price ??
+    quotes.data?.[symbol]?.ltp ??
+    context.data?.spot ??
+    chain.data?.underlying_ltp ??
+    null;
   const quote = quotes.data?.[symbol];
   const dayChange = quote ? quote.ltp - quote.prev_close : (context.data?.change ?? null);
   const dayChangePct = quote
@@ -451,7 +476,8 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         <IndexChart
           symbol={symbol}
           name={UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol}
-          last={context.data?.spot ?? null}
+          last={spot}
+          walls={context.data ?? null}
         />
       )}
 
