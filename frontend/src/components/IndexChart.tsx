@@ -118,8 +118,8 @@ export function IndexChart({ symbol, name, last, walls, live }: Props) {
     400,
   );
 
-  // The near-month future's OI, bar by bar, for the buildup pane under the
-  // candles. Continuous across expiries; the contract is the one the strip shows.
+  // Futures OI across the near, next and far months, bar by bar, for the
+  // buildup pane under the candles. The near month is the one the strip shows.
   const future = walls?.futures_symbol ?? null;
   const futuresOi = useLive(
     () => getFuturesOi(future ?? "", frame.interval, OI_DAYS[frame.interval] ?? 280),

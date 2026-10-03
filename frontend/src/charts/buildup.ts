@@ -25,14 +25,11 @@ export interface OiAtBar {
   /** OI change since the bar before, null on the first and on a roll. */
   change: number | null;
   kind: Buildup | null;
-  /** The continuous series switched to the next contract on this bar. */
+  /** The near month expired on this bar; its change is the expiry. */
   roll: boolean;
 }
 
-/** A rise in OI this large in one bar is the continuous series switching to
-    the next contract, not positions being opened: rolls measured at +95% to
-    +275% on NIFTY, against a typical day's 3%. */
-const ROLL_JUMP = 0.8;
+
 
 /**
  * Futures OI laid onto a chart's bars: for each bar, the last reading taken
@@ -46,10 +43,10 @@ const ROLL_JUMP = 0.8;
  */
 export function alignOi(
   starts: readonly number[],
-  points: readonly { at: string; close: number; oi: number }[],
+  points: readonly { at: string; close: number; oi: number; roll?: boolean }[],
 ): (OiAtBar | null)[] {
   const parsed = points
-    .map((p) => ({ t: Date.parse(p.at), close: p.close, oi: p.oi }))
+    .map((p) => ({ t: Date.parse(p.at), close: p.close, oi: p.oi, roll: p.roll ?? false }))
     .filter((p) => !Number.isNaN(p.t))
     .sort((a, b) => a.t - b.t);
   // Two sources can stamp the same bar differently - midnight, or the 09:15
@@ -64,17 +61,20 @@ export function alignOi(
   for (let i = 0; i < starts.length; i += 1) {
     const end = i + 1 < starts.length ? starts[i + 1] - skew : Infinity;
     let last: { close: number; oi: number } | null = null;
+    let rolled = false;
     while (j < parsed.length && parsed[j].t < end) {
       last = parsed[j];
+      rolled ||= parsed[j].roll;
       j += 1;
     }
     if (last === null) {
       out.push(null);
       continue;
     }
-    const raw = prev ? last.oi - prev.oi : null;
-    const roll = prev !== null && raw !== null && prev.oi > 0 && raw / prev.oi > ROLL_JUMP;
-    const change = roll ? null : raw;
+    // The server flags the bar the near month expired on: what was left in it
+    // settles and disappears, so that change is the expiry, not positions.
+    const roll = rolled;
+    const change = roll || !prev ? null : last.oi - prev.oi;
     const kind = prev && change !== null ? buildup(last.close - prev.close, change) : null;
     out.push({ oi: last.oi, change, kind, roll });
     prev = last;

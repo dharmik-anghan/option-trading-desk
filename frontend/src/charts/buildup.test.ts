@@ -38,11 +38,11 @@ describe("alignOi", () => {
     expect(out[2]?.change).toBe(4);
   });
 
-  it("calls a jump to the next contract a roll, not a buildup", () => {
+  it("shows no buildup on the bar the server flags as the expiry", () => {
     const out = alignOi([day(1), day(2), day(3)], [
-      { at: at(1), close: 100, oi: 60 },
-      { at: at(2), close: 101, oi: 180 },
-      { at: at(3), close: 102, oi: 185 },
+      { at: at(1), close: 100, oi: 260 },
+      { at: at(2), close: 101, oi: 200, roll: true },
+      { at: at(3), close: 102, oi: 205 },
     ]);
     expect(out[1]).toMatchObject({ roll: true, change: null, kind: null });
     expect(out[2]).toMatchObject({ roll: false, change: 5, kind: "long-buildup" });

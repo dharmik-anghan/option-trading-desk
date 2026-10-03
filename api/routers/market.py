@@ -30,6 +30,7 @@ from api.schemas import (
 from broker.base import OpenInterestHistory, OptionsBroker
 from broker.errors import BrokerError
 from broker.fyers.stream import ALSO_STREAMED
+from broker.fyers.symbols import later_future
 from broker.models import OptionChain, Quote
 from streaming import TickHub
 from streaming.sse import sse, tick_events
@@ -209,19 +210,36 @@ _OI_CHUNK_INTRADAY = 90
 
 class OiPointOut(BaseModel):
     at: str
+    #: The near-month future's close.
     close: float
+    #: Open interest across the near, next and far monthly futures.
     oi: float
+    #: The near month expired into the next on this bar. Whatever OI was left
+    #: in the expiring contract settles and disappears, so the bar's change is
+    #: the expiry, not positions being closed.
+    roll: bool = False
+
+
+#: The near month and the two after it: every NIFTY monthly future that trades.
+_FUTURES_HELD = 3
+
+#: A one-bar rise this large in the near-month series is the continuous history
+#: switching contract - NIFTY's measured +95% to +275% against a typical 3%.
+_ROLL_JUMP = 0.8
 
 
 @router.get("/api/futures-oi/{symbol:path}", response_model=list[OiPointOut])
 def futures_oi(
     symbol: str, broker: BrokerDep, interval: str = "1d", days: int = 270
 ) -> list[OiPointOut]:
-    """A futures contract's close and open interest, bar by bar, continuous
-    across expiries - for the index chart's OI pane.
+    """Futures close and open interest, bar by bar, for the index chart's OI pane.
 
-    Continuous history stitches each contract to the next, so OI drops at a
-    rollover: that bar's change is the roll, not positions being closed.
+    `symbol` is the near-month future. OI is the sum over it and the two
+    months after, each read as Fyers' continuous series for that position in
+    the curve. Following the near month alone misreads every expiry week:
+    traders move positions to the next month, the near month's OI falls, and
+    the pane called that unwinding - on 21-29 Sep 2026 near-month OI fell 103
+    lakh while the total rose 24 lakh into a 760-point fall.
     """
     resolution = OI_RESOLUTION.get(interval)
     if resolution is None:
@@ -230,17 +248,39 @@ def futures_oi(
         raise HTTPException(status_code=400, detail="days must be 1 to 1500")
     if not isinstance(broker, OpenInterestHistory):
         raise HTTPException(status_code=400, detail="This venue's history carries no OI")
+    contracts = [symbol] + [
+        month for n in range(1, _FUTURES_HELD) if (month := later_future(symbol, n)) is not None
+    ]
     chunk = _OI_CHUNK_DAYS.get(resolution, _OI_CHUNK_INTRADAY)
     end = date.today()
-    start = end - timedelta(days=days)
-    seen: dict[str, OiPointOut] = {}
-    while start <= end:
-        stop = min(end, start + timedelta(days=chunk - 1))
-        for bar in broker.get_history_oi(symbol, resolution, start, stop):
-            at = bar.timestamp.isoformat()
-            seen[at] = OiPointOut(at=at, close=bar.close, oi=bar.oi)
-        start = stop + timedelta(days=1)
-    return sorted(seen.values(), key=lambda p: p.at)
+
+    def read(contract: str) -> dict[str, tuple[float, float]]:
+        out: dict[str, tuple[float, float]] = {}
+        start = end - timedelta(days=days)
+        while start <= end:
+            stop = min(end, start + timedelta(days=chunk - 1))
+            for bar in broker.get_history_oi(contract, resolution, start, stop):
+                out[bar.timestamp.isoformat()] = (bar.close, bar.oi)
+            start = stop + timedelta(days=1)
+        return out
+
+    near, *ahead = [read(c) for c in contracts]
+    points: list[OiPointOut] = []
+    held = [0.0] * len(ahead)
+    previous: float | None = None
+    for at in sorted(near):
+        close, near_oi = near[at]
+        # A later month missing a bar keeps its last reading, rather than
+        # counting as nothing for one bar and everything the next.
+        for i, series in enumerate(ahead):
+            if at in series:
+                held[i] = series[at][1]
+        roll = (
+            previous is not None and previous > 0 and (near_oi - previous) / previous > _ROLL_JUMP
+        )
+        points.append(OiPointOut(at=at, close=close, oi=near_oi + sum(held), roll=roll))
+        previous = near_oi
+    return points
 
 
 @router.get("/api/quotes", response_model=dict[str, Quote])

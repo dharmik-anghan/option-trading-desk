@@ -64,7 +64,7 @@ export interface Overlay {
   /** Open interest by strike, drawn against the price axis. */
   profile?: OiRow[];
   /** A future's close and OI over time, for a buildup pane under the candles. */
-  futuresOi?: { at: string; close: number; oi: number }[];
+  futuresOi?: { at: string; close: number; oi: number; roll?: boolean }[];
 }
 
 /** `rise` and `fall` are a direction of price, drawn in the candles' colours;
@@ -416,7 +416,7 @@ export function CandleChart({
             <em>Fut OI</em> {compact(oiBars[at].oi)}
             {oiBars[at].change !== null && <> <i>{change(oiBars[at].change ?? 0)}</i></>}
             {oiBars[at].kind && <> · {BUILDUP_LABEL[oiBars[at].kind]}</>}
-            {oiBars[at].roll && <> · rolled to the next contract</>}
+            {oiBars[at].roll && <> · expiry: the near month settled</>}
           </span>
         )}
         {strikeRow && (
@@ -717,12 +717,12 @@ function draw(
             : blank(k),
       ),
     );
-    // Where the continuous series moved to the next contract: its jump in OI
-    // is the switch, so it is marked rather than drawn as a buildup.
+    // Where the near month expired: what was left in it settled and is gone
+    // from the total, so the bar is marked rather than drawn as a buildup.
     const rolls: SeriesMarker<Time>[] = [];
     oiBars.forEach((b, k) => {
       if (b?.roll) {
-        rolls.push({ time: times[k], position: "aboveBar", shape: "circle", size: 0, color: p.dim, text: "roll" });
+        rolls.push({ time: times[k], position: "aboveBar", shape: "circle", size: 0, color: p.dim, text: "expiry" });
       }
     });
     if (rolls.length) createSeriesMarkers(changes, rolls);

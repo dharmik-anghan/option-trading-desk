@@ -150,8 +150,12 @@ export const WATCHLIST: readonly string[] = [...UNDERLYINGS.map((u) => u.id), IN
 /** A futures bar's close and its open interest, for the index chart's OI pane. */
 export interface FuturesOiPoint {
   at: string;
+  /** The near-month future's close. */
   close: number;
+  /** Open interest across the near, next and far months. */
   oi: number;
+  /** The near month expired on this bar. */
+  roll: boolean;
 }
 
 export function getFuturesOi(

@@ -150,6 +150,21 @@ def futures_symbol(option_symbol: str, strike: float) -> str | None:
     return None if prefix is None else prefix + "FUT"
 
 
+_MONTHLY_FUTURE = re.compile(r"^(?P<ex>[A-Z]+):(?P<name>[A-Z]+)(?P<yy>\d{2})(?P<mon>[A-Z]{3})FUT$")
+
+
+def later_future(future: str, months: int) -> str | None:
+    """The monthly future `months` after this one: "NSE:NIFTY26OCTFUT", 1 ->
+    "NSE:NIFTY26NOVFUT", across a year end too. None for a symbol that is not
+    a monthly future."""
+    m = _MONTHLY_FUTURE.match(future)
+    if m is None or m["mon"] not in _MONTH_ABBR:
+        return None
+    index = _MONTH_ABBR.index(m["mon"]) + months
+    year = int(m["yy"]) + index // 12
+    return f"{m['ex']}:{m['name']}{year % 100:02d}{_MONTH_ABBR[index % 12]}FUT"
+
+
 class FyersSymbols:
     """This module as a `broker.contracts.ContractCodec`."""
 
