@@ -175,3 +175,56 @@ def test_a_dropped_connection_is_reopened_after_two_misses() -> None:
 
     asyncio.run(run())
     assert len(h.sockets) == 2
+
+
+class DeadSocket(FakeSocket):
+    """A socket whose connect fails, though the library still calls on_open."""
+
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.alive = False
+
+    def connect(self) -> None:
+        self.on_open()
+
+
+def test_a_failed_open_does_not_subscribe() -> None:
+    # Subscribing calls Fyers' REST API; a socket that never opened must not
+    # spend the rate limit on it every few seconds.
+    sockets: list[DeadSocket] = []
+
+    def factory(*args: Any) -> DeadSocket:
+        sockets.append(DeadSocket(*args))
+        return sockets[-1]
+
+    async def run() -> None:
+        stream = FyersStream(
+            socket_factory=factory, token=lambda: ("APP-100", "t1"), check_every=60
+        )
+        await stream.start([NIFTY], lambda _: None)
+        assert not stream.connected
+        await stream.stop()
+
+    asyncio.run(run())
+    assert sockets[0].subscribed == []
+
+
+def test_a_socket_that_keeps_failing_is_retried_less_and_less() -> None:
+    sockets: list[DeadSocket] = []
+
+    def factory(*args: Any) -> DeadSocket:
+        sockets.append(DeadSocket(*args))
+        return sockets[-1]
+
+    async def run() -> None:
+        stream = FyersStream(
+            socket_factory=factory, token=lambda: ("APP-100", "t1"), check_every=0.01
+        )
+        await stream.start([NIFTY], lambda _: None)
+        await asyncio.sleep(0.6)
+        await stream.stop()
+
+    asyncio.run(run())
+    # Without backoff a reopen every two checks is ~30 sockets in 0.6s; with it,
+    # waits of 0.02, 0.04, 0.08, 0.16, 0.32 allow only a handful.
+    assert 2 <= len(sockets) <= 8, len(sockets)

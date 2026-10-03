@@ -21,10 +21,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any, Protocol
+
+import certifi
 
 from broker.fyers.token_store import get_access_token
 from broker.models import Tick
@@ -36,6 +40,11 @@ log = logging.getLogger(__name__)
 
 #: How often the watchdog looks at the token and the connection.
 CHECK_EVERY = 30.0
+
+#: Longest the watchdog waits between attempts to reopen a socket that keeps
+#: failing. Each attempt costs Fyers REST calls, so a socket that cannot connect
+#: must not spend the rate limit the rest of the desk polls with.
+MAX_BACKOFF = 900.0
 
 #: Symbols streamed whatever the desk lists: the VIX sits beside the indices on
 #: the watchlist but is not an underlying anything is traded on.
@@ -67,6 +76,11 @@ def _fyers_socket(
 ) -> DataSocket:
     from fyers_apiv3.FyersWebsocket import data_ws
 
+    # websocket-client verifies against the platform's store unless told
+    # otherwise, and on a python.org build of Python that store is empty: every
+    # connect fails the certificate check and the library retries every few
+    # seconds. The same bundle the perpetuals stream uses.
+    os.environ.setdefault("WEBSOCKET_CLIENT_CA_BUNDLE", certifi.where())
     LOGS_DIR.mkdir(exist_ok=True)
     socket: DataSocket = data_ws.FyersDataSocket(
         access_token=login,
@@ -183,9 +197,12 @@ class FyersStream:
 
         Two misses in a row before reopening a dropped connection: the library
         reconnects by itself, and a check that lands mid-reconnect should not
-        tear down a socket that was about to recover.
+        tear down a socket that was about to recover. A reopen that does not
+        take doubles the wait before the next, up to `MAX_BACKOFF`.
         """
         missed = 0
+        failures = 0
+        not_before = 0.0
         while True:
             await asyncio.sleep(self._check_every)
             try:
@@ -196,26 +213,41 @@ class FyersStream:
             fresh = f"{login[0]}:{login[1]}" != self._login
             socket = self._socket
             alive = socket is not None and _alive(socket)
-            missed = 0 if alive else missed + 1
-            if not fresh and missed < 2:
-                continue
+            if alive:
+                missed = failures = 0
+                if not fresh:
+                    continue
+            else:
+                missed += 1
+                if not fresh and (missed < 2 or time.monotonic() < not_before):
+                    continue
             log.info("fyers stream reopening (%s)", "new token" if fresh else "connection lost")
             await self._close()
             try:
                 await self._open()
                 self.reconnects += 1
-                missed = 0
             except Exception:  # noqa: BLE001 - the next round tries again
                 log.warning("fyers stream could not reopen", exc_info=True)
+            missed = 0
+            if not fresh:
+                failures += 1
+                wait = min(MAX_BACKOFF, self._check_every * 2**failures)
+                not_before = time.monotonic() + wait
 
     # ------------------------------------------------- callbacks, on its thread
 
     def _opened(self) -> None:
-        """Subscribe on every open, which is when a fresh socket has nothing."""
-        self.connected = True
+        """Subscribe on every open, which is when a fresh socket has nothing.
+
+        The library calls this after every connect attempt, including one that
+        failed. Subscribing calls a Fyers REST endpoint, so it is only done for
+        a socket that actually opened.
+        """
         socket = self._socket
-        if socket is None:
+        if socket is None or not _alive(socket):
+            log.warning("fyers stream did not open")
             return
+        self.connected = True
         socket.subscribe(symbols=self._symbols, data_type="SymbolUpdate")
         log.info("fyers stream subscribed to %s", ", ".join(self._symbols))
 
