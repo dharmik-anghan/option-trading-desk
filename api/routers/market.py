@@ -5,10 +5,12 @@ Reads only - nothing here can change an account.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from datetime import date, timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from analytics import market_context as mc
 from analytics.payoff import (
@@ -24,12 +26,18 @@ from api.schemas import (
 )
 from broker.base import OptionsBroker
 from broker.errors import BrokerError
+from broker.fyers.stream import ALSO_STREAMED
 from broker.models import OptionChain, Quote
+from streaming import TickHub
+from streaming.sse import sse, tick_events
+from venues import AssetClass, serving
+from venues.instruments import listed_on
 
 router = APIRouter()
 
 
 _CONTEXT_STRIKE_COUNT = 40
+
 
 @router.get("/api/option-chain/{symbol:path}", response_model=OptionChain)
 def option_chain(
@@ -37,6 +45,7 @@ def option_chain(
 ) -> OptionChain:
     """`expiry` is a token from a previous response's `expiries`; empty = nearest."""
     return broker.get_option_chain(symbol, strike_count=strike_count, expiry_token=expiry)
+
 
 @router.get("/api/market/{symbol:path}", response_model=MarketContextResponse)
 def market_context(
@@ -111,6 +120,7 @@ def market_context(
         skew=mc.skew(strikes, spot),
     )
 
+
 def _historical_vol(symbol: str, broker: OptionsBroker, sessions: int) -> float | None:
     """Annualised volatility from daily closes, or None if history is unavailable.
 
@@ -120,12 +130,11 @@ def _historical_vol(symbol: str, broker: OptionsBroker, sessions: int) -> float 
     try:
         # enough calendar days to cover `sessions` trading ones, with slack
         span = max(40, int(sessions * 2.2))
-        candles = broker.get_history(
-            symbol, "D", date.today() - timedelta(days=span), date.today()
-        )
+        candles = broker.get_history(symbol, "D", date.today() - timedelta(days=span), date.today())
     except BrokerError:
         return None
     return mc.historical_vol([c.close for c in candles], sessions=sessions)
+
 
 def _futures_price(symbol: str | None, broker: OptionsBroker) -> float | None:
     if not symbol:
@@ -137,11 +146,27 @@ def _futures_price(symbol: str | None, broker: OptionsBroker) -> float | None:
     quote = quotes.get(symbol)
     return quote.ltp if quote else None
 
+
 def _index_quote(symbol: str, broker: OptionsBroker) -> Quote | None:
     try:
         return broker.get_quote([symbol]).get(symbol)
     except BrokerError:
         return None
+
+
+@router.get("/api/quotes/stream")
+async def quote_stream(request: Request) -> StreamingResponse:
+    """The options venue's prices as they arrive: the indices and the VIX.
+
+    The watchlist, the header's spot and the chart's live price read this; the
+    polled `/api/quotes` stays for a page's first paint and for when the venue's
+    socket is down.
+    """
+    closing: asyncio.Event | None = getattr(request.app.state, "shutting_down", None)
+    hub = getattr(request.app.state, "tick_hub", None)
+    symbols = [*listed_on(serving(AssetClass.INDEX_OPTIONS).id), *ALSO_STREAMED]
+    return sse(tick_events(request, hub if isinstance(hub, TickHub) else None, closing, symbols))
+
 
 @router.get("/api/quotes", response_model=dict[str, Quote])
 def quotes(symbols: str, broker: BrokerDep) -> dict[str, Quote]:

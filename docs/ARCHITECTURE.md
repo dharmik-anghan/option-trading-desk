@@ -117,9 +117,10 @@ version where it was, so it is retried rather than skipped.
   timestamped option-chain snapshots, the basis for later historical
   premium/IV comparisons
 
-`Broker.subscribe_ticks` is defined but `FyersBroker` raises
-`NotImplementedError` for it — deferred until a real consumer needs live
-ticks (see `docs/PHASES.md`).
+Fyers' live ticks come from `broker/fyers/stream.py` (`FyersStream`, an
+`AsyncStreaming`), registered as the venue's `stream` in `broker/factory.py`
+and started by the app's lifespan like any other venue's stream. The blocking
+`Broker.subscribe_ticks` is still unimplemented for Fyers.
 
 ## What's built (Phase 2 & 3)
 

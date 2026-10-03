@@ -17,11 +17,9 @@ test-first (TDD) and isn't considered done until its checkpoint passes.
   - [x] SQLite storage for option-chain snapshots (`storage/db.py`,
     `storage/option_chain_repo.py`) — this is what makes historical
     premium/IV comparison (e.g. today's straddle vs last week's) possible later
-  - [~] WebSocket tick streaming — **deferred**, not implemented in Phase 1.
-    It's a long-lived stateful connection with no automated way to verify
-    without a live market session, and nothing yet consumes live ticks.
-    `Broker.subscribe_ticks` raises `NotImplementedError` until the phase
-    that first needs live ticks (likely Phase 5/6) implements it for real.
+  - [x] WebSocket tick streaming for the indices — `broker/fyers/stream.py`,
+    pushed to the browser over `/api/quotes/stream`. Option legs and the
+    order socket are still to come.
   - [x] Checkpoint: `uv run python scripts/fetch_option_chain.py` fetched a
     real Nifty option chain (42 strikes) and stored it to SQLite
 - [x] **Phase 2 — Options analytics** — done

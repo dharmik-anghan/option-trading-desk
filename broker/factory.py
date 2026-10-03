@@ -21,6 +21,7 @@ from broker.contracts import ContractCodec
 from broker.errors import AuthFailed
 from broker.fyers import SYMBOLS as FYERS_SYMBOLS
 from broker.fyers import FyersBroker
+from broker.fyers.stream import FyersStream
 from broker.fyers.token_store import get_access_token
 from broker.shark import SharkBroker
 from broker.shark.stream import SharkStream
@@ -67,6 +68,7 @@ FACTORIES: dict[str, Factory] = {
         cached=True,
         codec=FYERS_SYMBOLS,
         configured=lambda s: s.has_fyers,
+        stream=FyersStream,
     ),
     "shark": Factory(_build_shark, configured=lambda s: s.has_shark, stream=SharkStream),
 }

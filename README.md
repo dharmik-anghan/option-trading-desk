@@ -281,9 +281,10 @@ one situation reading as two is worse than a wrong figure.
   than a websocket: the traffic is one-way and a browser reconnects an EventSource
   by itself. The rest of that desk - positions, contract limits - still polls, on a
   slow timer, because it changes on the scale of an order rather than a tick.
-- **The options desk polls.** Fyers' `subscribe_ticks` still raises, so those
-  prices are a few seconds behind - immaterial for defined-risk positions held
-  for weeks, and it would matter intraday. The perpetuals desk streams.
+- **Index prices on the options desk are pushed too**, from Fyers' data socket
+  (`broker/fyers/stream.py`) through `/api/quotes/stream`. The quote poll drops to
+  a once-a-minute backstop while the stream delivers. Option legs, the chain and
+  positions still poll; streaming those is the next step.
 - **`python-engineio` is pinned below 4.11.** `fyers-apiv3` pins `aiohttp==3.9.3`
   exactly, and from 4.11 engineio calls an aiohttp API that version lacks, so a
   newer one installs cleanly and fails at connect time.

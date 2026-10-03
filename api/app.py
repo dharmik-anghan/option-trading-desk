@@ -75,8 +75,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     Alerts used to be computed in the browser, so nothing was watching when the
     tab was closed. This is the task that fixes that, and it is the reason the
-    app has a lifespan at all - the websocket work that comes next will hang off
-    the same hook.
+    app has a lifespan at all - the venues' tick streams hang off the same hook.
 
     Everything is best-effort: if the watcher cannot be built, the desk still
     serves. A trading screen that refuses to start because a notifier is

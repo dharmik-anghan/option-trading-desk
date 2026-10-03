@@ -12,9 +12,7 @@ Prices come from the tick stream rather than a request per read: this venue allo
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -26,20 +24,19 @@ from api.deps import DbPathDep, PerpsBrokerDep, PerpsVenueDep
 from api.store import open_db
 from broker.base import PerpetualsData
 from broker.errors import BrokerError
-from broker.models import Tick
 from broker.perp_models import ContractSpec
 from execution.perps import PerpOrder, PositionGone, close, perp_limits, place, protect
 from settings import load_settings
 from storage.perp_order_repo import recent_orders
 from streaming import TickHub
-from venues import Capability, for_venue
+from streaming.sse import sse, tick_events
+from venues import AssetClass, Capability, for_venue, serving
 from venues.calendar import is_open
-from venues.instruments import instrument
+from venues.instruments import instrument, listed_on
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["perps"], prefix="/api/perps")
-
 
 
 class InstrumentResponse(BaseModel):
@@ -384,7 +381,11 @@ def place_order(
     conn = open_db(db_path)
     try:
         placed = place(
-            conn, broker, order, price=price, limits=perp_limits(load_settings()),
+            conn,
+            broker,
+            order,
+            price=price,
+            limits=perp_limits(load_settings()),
             now=datetime.now(UTC),
         )
     finally:
@@ -444,115 +445,23 @@ def order_log(db_path: DbPathDep, limit: int = 50) -> list[OrderRecordResponse]:
         conn.close()
 
 
-#: How long to wait for a tick before sending a keep-alive. Proxies and browsers
-#: drop a connection that has said nothing, and a silent instrument is normal at
-#: three in the morning.
-STREAM_HEARTBEAT = 15.0
-
-
-async def _next_tick(
-    queue: asyncio.Queue[Tick], closing: asyncio.Event | None
-) -> Tick | None:
-    """The next tick, or None if the app is going down first.
-
-    Raises TimeoutError when neither happens within the heartbeat, which is the
-    normal case for an instrument nobody is trading at three in the morning.
-    """
-    if closing is None:
-        return await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT)
-
-    waits = [asyncio.create_task(queue.get()), asyncio.create_task(closing.wait())]
-    try:
-        done, _ = await asyncio.wait(
-            waits, timeout=STREAM_HEARTBEAT, return_when=asyncio.FIRST_COMPLETED
-        )
-        if not done:
-            raise TimeoutError
-        for task in waits:
-            if task.done() and not task.cancelled():
-                result = task.result()
-                if isinstance(result, Tick):
-                    return result
-        return None
-    finally:
-        # A tick pulled from the queue by a task nobody read is a lost tick, but
-        # this only happens on shutdown or a heartbeat, where losing one is fine.
-        for task in waits:
-            task.cancel()
-
-
 @router.get("/stream")
 async def stream(request: Request) -> StreamingResponse:
     """Prices as they arrive, rather than the browser asking every two seconds.
-
-    Server-sent events, not a websocket. The traffic is one-way - the desk needs
-    prices pushed and has nothing to say back - and SSE is a plain HTTP response a
-    browser reconnects by itself, where a websocket would mean a protocol upgrade,
-    a ping loop and reconnection logic of our own for the same result.
 
     The socket to the venue was already here; this is the missing half. A tick that
     arrived from the exchange reached the hub and then sat there until the page
     asked for it, which is why /api/perps was being called every two seconds.
 
-    Each reader gets its own bounded queue, and the queue is unregistered when the
-    reader goes - a browser closing a tab must not leave one growing behind it.
+    Only this desk's instruments: the hub also carries the options venue's ticks.
     """
-
-    async def events() -> AsyncIterator[str]:
-        hub = _hub(request)
-        # The app's shutdown flag, when there is one. Without it this generator
-        # loops until its reader disconnects, and on shutdown the reader has not
-        # disconnected - so uvicorn waits for the response and the response waits
-        # for the reader.
-        closing: asyncio.Event | None = getattr(request.app.state, "shutting_down", None)
-        if hub is None:
-            # Said once, rather than holding a connection open that will never
-            # carry anything: the stream never started.
-            yield 'event: closed\ndata: {"reason":"no price stream"}\n\n'
-            return
-        with hub.subscribe() as queue:
-            # The current picture first, so a page that has just loaded is not
-            # blank until something moves.
-            for symbol, price in hub.prices().items():
-                yield f"data: {json.dumps({'symbol': symbol, 'price': price})}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    return
-                if closing is not None and closing.is_set():
-                    return
-                try:
-                    tick = await _next_tick(queue, closing)
-                except TimeoutError:
-                    # A comment, which SSE ignores: it keeps the connection open
-                    # without the client having to filter a fake price.
-                    yield ": keep-alive\n\n"
-                    continue
-                if tick is None:
-                    # Shutting down.
-                    return
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {
-                            "symbol": tick.symbol,
-                            "price": tick.price,
-                            "change_pct": tick.change_pct,
-                            "at": tick.at.isoformat(),
-                        }
-                    )
-                    + "\n\n"
-                )
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={
-            # Without this a proxy will buffer the stream and deliver it in lumps,
-            # which defeats the point.
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    # The app's shutdown flag, when there is one. Without it the generator loops
+    # until its reader disconnects, and on shutdown the reader has not
+    # disconnected - so uvicorn waits for the response and the response waits for
+    # the reader.
+    closing: asyncio.Event | None = getattr(request.app.state, "shutting_down", None)
+    symbols = listed_on(serving(AssetClass.PERPETUALS).id)
+    return sse(tick_events(request, _hub(request), closing, symbols))
 
 
 class CloseResponse(BaseModel):
@@ -564,9 +473,7 @@ class CloseResponse(BaseModel):
 
 
 @router.post("/positions/{position_id}/close", response_model=CloseResponse)
-def close_position(
-    position_id: str, db_path: DbPathDep, broker: PerpsBrokerDep
-) -> CloseResponse:
+def close_position(position_id: str, db_path: DbPathDep, broker: PerpsBrokerDep) -> CloseResponse:
     """Close one position at the market, for its full size - see `execution.perps.close`.
 
     The desk could open a position and not close one, which is the wrong way round:
