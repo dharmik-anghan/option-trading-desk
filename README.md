@@ -60,6 +60,48 @@ than being polled: the venue allows 60 requests a minute against Fyers' ~200, an
 it pushes. Note that prices are quoted in USDT while the account margins in INR,
 so those two figures are deliberately labelled in different units.
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+
+**Options desk** — chart, open structures, the chain's buildup
+<img src="docs/screenshots/options-desk.png" width="480">
+
+</td>
+<td width="50%">
+
+**Crypto desk** — perpetuals on Shark, ticket and open positions
+<img src="docs/screenshots/crypto-desk.png" width="480">
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Options backtest** — a strategy built leg by leg, run over stored history
+<img src="docs/screenshots/options-backtest.png" width="480">
+
+</td>
+<td width="50%">
+
+**Rotation** — sectors against the index on a relative-rotation graph
+<img src="docs/screenshots/rotation.png" width="480">
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Pre-open** — NSE's 09:00 opening auction, recorded before it is gone
+<img src="docs/screenshots/preopen.png" width="480">
+
+</td>
+<td width="50%"></td>
+</tr>
+</table>
+
 ## Running it
 
 ### With Docker
