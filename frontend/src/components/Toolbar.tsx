@@ -12,6 +12,19 @@ import { ContextStrip } from "./ContextStrip";
 import { VenueSwitch } from "./VenueSwitch";
 import { dayIST, dir, num, pct, signed } from "../format";
 
+/** "Mon 09:15", in India's time whatever the machine's. */
+function opensAt(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return at.toLocaleString("en-IN", {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  });
+}
+
 interface Props {
   symbol: string;
   spot: number | null;
@@ -26,6 +39,8 @@ interface Props {
   trouble: { text: string; transient: boolean } | null;
   stale: boolean;
   agoSeconds: number | null;
+  /** When the market next opens, while it is closed: the desk is not polling. */
+  closedUntil: string | null;
   paused: boolean;
   onPause: () => void;
   theme: "dark" | "light";
@@ -58,6 +73,7 @@ export function Toolbar({
   trouble,
   stale,
   agoSeconds,
+  closedUntil,
   paused,
   onPause,
   theme,
@@ -80,12 +96,18 @@ export function Toolbar({
   const rateLimited = trouble?.transient || health?.rate_limited === true;
   const blocking = trouble && !trouble.transient;
 
-  const dotClass = blocking ? "dot bad" : paused || rateLimited || stale ? "dot off" : "dot";
+  const dotClass = blocking
+    ? "dot bad"
+    : paused || closedUntil || rateLimited || stale
+      ? "dot off"
+      : "dot";
   const feedText = paused
     ? "Paused"
     : blocking
       ? trouble.text
-      : rateLimited
+      : closedUntil
+        ? `Market closed · opens ${opensAt(closedUntil)}`
+        : rateLimited
         ? "Rate limited — figures a few seconds behind"
         : agoSeconds === null
           ? "Connecting…"

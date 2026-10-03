@@ -77,6 +77,8 @@ export interface Health {
   status: string;
   /** True while reads are being served from cache over a broker rate limit. */
   rate_limited: boolean;
+  /** Whether the NSE is trading, and when it next opens if not. */
+  nse?: { open: boolean; closes_at: string | null; next_open: string | null };
 }
 
 export interface MarketContext {

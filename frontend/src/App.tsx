@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
   WATCHLIST,
@@ -54,10 +54,8 @@ type View = "trading" | "oi" | "greeks";
 // server-side (broker/cache.py), so these are an upper bound, not a floor.
 const PORTFOLIO_MS = 8000;
 const QUOTES_MS = 8000;
-/** The quote poll while the index stream is live: a backstop, not the source. */
-const QUOTES_BACKUP_MS = 60000;
 const CHAIN_MS = 12000;
-const CONTEXT_MS = 15000;
+const CONTEXT_MS = 60000;
 // Both are somebody else's website behind a server-side cache, so polling them
 // hard buys nothing - the backend would just hand back the same snapshot.
 const NEWS_MS = 120000;
@@ -114,18 +112,25 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
 
   const health = useLive(getHealth, HEALTH_MS, [], paused, 0);
   const venues = useLive(getVenues, 0, [], paused, 50);
-  const portfolio = useLive(getPortfolio, PORTFOLIO_MS, [], paused, 150);
+  // Whether the NSE is trading. Nothing on the options desk can change while it
+  // is not - a Saturday, a holiday, the night - so every options poll below
+  // loads once and stops, and starts again by itself at the bell (health is
+  // what notices, and it never calls the broker). Assumed open until health has
+  // said, so a first load is not held back.
+  const nseOpen = health.data?.nse?.open ?? true;
+  const every = (ms: number) => (nseOpen ? ms : 0);
+  const portfolio = useLive(getPortfolio, every(PORTFOLIO_MS), [], paused, 150);
   // The options polls stop while the perpetuals desk is open, and vice versa.
   // Two desks' worth of requests for one desk on screen is how a rate limit gets
   // spent on panels nobody is looking at.
-  // The indices, pushed by the options venue's socket. While it is delivering,
-  // the quote poll only backs it up - it still carries the previous close the
-  // day's change is measured from, which a tick does not.
+  // The indices, pushed by the options venue's socket.
   const indexTicks = useTickStream("/api/quotes/stream", !onPerps && !paused);
   const indexLive = indexTicks.connected && Object.keys(indexTicks.prices).length > 0;
+  // While the stream delivers, the quotes are read once - for the previous
+  // close the day's change is measured from - and not polled at all.
   const polledQuotes = useLive(
     () => getQuotes(WATCHLIST),
-    indexLive ? QUOTES_BACKUP_MS : QUOTES_MS,
+    indexLive ? 0 : every(QUOTES_MS),
     [],
     paused || onPerps,
     600,
@@ -154,15 +159,21 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // no request at all while the chain is hidden
   const chain = useLive(
     () => getOptionChain(symbol, depth, expiry),
-    CHAIN_MS,
+    every(CHAIN_MS),
     [symbol, expiry, depth, chainOpen],
     paused || !chainOpen,
     1050,
   );
-  const baskets = useLive(() => getBaskets(true), BASKETS_MS, [basketNonce], paused || onPerps, 300);
+  const baskets = useLive(
+    () => getBaskets(true),
+    every(BASKETS_MS),
+    [basketNonce],
+    paused || onPerps,
+    300,
+  );
   const context = useLive(
     () => getMarketContext(symbol),
-    CONTEXT_MS,
+    every(CONTEXT_MS),
     [symbol],
     paused || onPerps,
     850,
@@ -179,18 +190,30 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // each pass is a chain fetch - so this is the slowest poll on the desk.
   const vol = useLive(
     () => getVolatility(symbol),
-    VOL_MS,
+    every(VOL_MS),
     [symbol],
     paused || onPerps,
     2700,
   );
   const history = useLive(
     () => getPortfolioHistory(7),
-    BASKETS_MS,
+    every(BASKETS_MS),
     [basketNonce],
     paused || onPerps,
     1500,
   );
+
+  // With the market shut the portfolio is read once, but an order can still be
+  // placed after hours - so coming back to the page reads it again.
+  const refreshPortfolio = portfolio.refresh;
+  useEffect(() => {
+    if (nseOpen) return;
+    const onShow = () => {
+      if (document.visibilityState === "visible") refreshPortfolio();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, [nseOpen, refreshPortfolio]);
 
   const now = useNow(!paused);
   const lastAt = useMemo(
@@ -243,7 +266,8 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
   // only speak up when they have genuinely got nothing to show.
   const blockingOnly = (e: Error | null): Error | null =>
     e && !describeError(e)?.transient ? e : null;
-  const stale = agoSeconds !== null && agoSeconds > PORTFOLIO_MS / 1000 + 8;
+  // Figures are only stale if they should be moving.
+  const stale = nseOpen && agoSeconds !== null && agoSeconds > PORTFOLIO_MS / 1000 + 8;
 
   // quotes cover every symbol and always poll; the chain is only open sometimes
   const spot =
@@ -353,6 +377,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
         trouble={trouble}
         stale={stale}
         agoSeconds={agoSeconds}
+        closedUntil={!onPerps && !nseOpen ? (health.data?.nse?.next_open ?? null) : null}
         paused={paused}
         onPause={() => setPaused((p) => !p)}
         theme={theme}
@@ -478,6 +503,7 @@ export default function App({ venueId, onVenue, onHome, theme, onTheme }: Props)
           name={UNDERLYINGS.find((u) => u.id === symbol)?.name ?? symbol}
           last={spot}
           walls={context.data ?? null}
+          live={nseOpen}
         />
       )}
 

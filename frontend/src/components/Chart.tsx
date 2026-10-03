@@ -167,7 +167,8 @@ interface Props {
   dp?: number;
   /** Drawn on top of the price, beyond the indicator lines. */
   overlay?: Overlay;
-  /** How often to refetch, so a closed bar appears without a reload. */
+  /** How often to refetch, so a closed bar appears without a reload. Zero
+      fetches once: a market that is shut has no new bars to show. */
   everyMs: number;
   /** Which chart's indicator set this is, so two desks remember their own. */
   scope: string;
@@ -260,7 +261,8 @@ export function Chart({
   const sizes = useMemo(() => frames.map((f) => f.interval), [frames]);
   const structure = useLive(
     () => getStructure(source, symbol, k, sizes, bars || DEFAULT_LOOKBACK),
-    STRUCTURE_MS,
+    // A chart told not to refresh its candles has no new bars to read either.
+    everyMs > 0 ? STRUCTURE_MS : 0,
     [source, symbol, k, sizes.join(","), bars],
     !structureOn,
     600,

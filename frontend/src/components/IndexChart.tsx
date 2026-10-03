@@ -16,6 +16,8 @@ interface Props {
   last: number | null;
   /** The desk's reading of the nearest expiry: where its walls and max pain are. */
   walls: MarketContext | null;
+  /** Whether the NSE is trading. Closed, the chart loads once and stops polling. */
+  live: boolean;
 }
 
 //: A closed bar is the only thing that moves this chart, and the smallest size
@@ -96,7 +98,7 @@ const FRAMES: Frame[] = [
  * appeared to have no chart at all, and that the feature could not exist
  * anywhere else. It now does: the perpetuals chart has the same switch.
  */
-export function IndexChart({ symbol, name, last, walls }: Props) {
+export function IndexChart({ symbol, name, last, walls, live }: Props) {
   const [frame, setFrame] = useState<Frame>(FRAMES[1]);
 
   // Open interest over the price: the walls as lines, and every strike as a
@@ -106,7 +108,7 @@ export function IndexChart({ symbol, name, last, walls }: Props) {
   useEffect(() => rememberOi(symbol, oiOn), [symbol, oiOn]);
   const chain = useLive(
     () => getOptionChain(symbol, OI_STRIKES),
-    OI_MS,
+    live ? OI_MS : 0,
     [symbol],
     !oiOn,
     400,
@@ -148,7 +150,7 @@ export function IndexChart({ symbol, name, last, walls }: Props) {
       bars={BARS}
       last={last}
       dp={1}
-      everyMs={CANDLES_MS}
+      everyMs={live ? CANDLES_MS : 0}
       overlay={overlay}
       controls={
         <button
