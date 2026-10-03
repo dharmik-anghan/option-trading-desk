@@ -125,16 +125,16 @@ class Rank:
         return "middling by its own history"
 
 
-def rank_of(value: float, history: Sequence[float]) -> Rank | None:
+def rank_of(value: float, history: Sequence[float], minimum: int = 30) -> Rank | None:
     """Where `value` stands in `history`. None when there is not enough of it.
 
-    Thirty readings is the floor, and it is a low one: a rank over two months of
+    Thirty readings is the default floor, and it is a low one: a rank over two months of
     history is a statement about two months. The count comes back with the figure
     so a screen can say how much is behind it rather than presenting a number
     built on a fortnight as though it were built on a year.
     """
     usable = [v for v in history if math.isfinite(v)]
-    if len(usable) < 30:
+    if len(usable) < minimum:
         return None
     low, high = min(usable), max(usable)
     span = high - low

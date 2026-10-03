@@ -20,6 +20,8 @@ large or small by its own standards.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -38,6 +40,7 @@ from marketdata import Interval
 from marketdata.models import Bar
 from storage.vol_repo import vol_history
 from venues import OPTION_UNDERLYINGS
+from venues.calendar import IST
 from venues.instruments import INDIA_VIX
 from venues.instruments import NSE_BARS as SOURCE
 
@@ -48,6 +51,10 @@ router = APIRouter(tags=["volatility"], prefix="/api/volatility")
 #: month, sixty a quarter - and the three together say whether the market has
 #: been getting quieter or louder, which one of them alone cannot.
 WINDOWS = (10, 20, 60)
+
+#: Sessions the India VIX is ranked against - the options backtest's default
+#: `vix_lookback`, so the panel and a backtest filter mean the same percentile.
+VIX_LOOKBACK = 252
 
 
 class RankOut(BaseModel):
@@ -159,10 +166,16 @@ def volatility(
     spread = now.atm_iv - twenty if now.atm_iv is not None and twenty is not None else None
     ratio = iv_hv_ratio(now.atm_iv, twenty)
 
-    vix_bars = _bars(request, INDIA_VIX, 800)
+    # Ranked exactly as the options backtest ranks it (optbt/context.py): the
+    # previous year of sessions, today's close left out. Over two years the same
+    # reading came out a different percentile here than in a backtest filter, so
+    # a rule tested as "VIX above the 70th" did not mean what this panel said.
+    vix_bars = _bars(request, INDIA_VIX, 400)
+    today = datetime.now(IST).date()
+    vix_history = [b.close for b in vix_bars if b.ts.astimezone(IST).date() < today][-VIX_LOOKBACK:]
     vix_rank = (
-        rank_of(now.india_vix, [b.close for b in vix_bars])
-        if now.india_vix is not None and vix_bars
+        rank_of(now.india_vix, vix_history, minimum=max(20, VIX_LOOKBACK // 4))
+        if now.india_vix is not None and vix_history
         else None
     )
     if now.india_vix is not None and vix_rank is None:
