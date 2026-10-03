@@ -146,3 +146,19 @@ export const UNDERLYINGS = [
 
 /** Everything the watchlist quotes: the tradable underlyings plus India VIX. */
 export const WATCHLIST: readonly string[] = [...UNDERLYINGS.map((u) => u.id), INDIA_VIX.id];
+
+/** A futures bar's close and its open interest, for the index chart's OI pane. */
+export interface FuturesOiPoint {
+  at: string;
+  close: number;
+  oi: number;
+}
+
+export function getFuturesOi(
+  symbol: string,
+  interval: string,
+  days: number,
+): Promise<FuturesOiPoint[]> {
+  const params = new URLSearchParams({ interval, days: String(days) });
+  return getJson<FuturesOiPoint[]>(`/api/futures-oi/${encodeURIComponent(symbol)}?${params}`);
+}

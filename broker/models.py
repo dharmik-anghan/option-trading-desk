@@ -105,6 +105,14 @@ class Candle(BaseModel):
     volume: float
 
 
+class OiBar(BaseModel):
+    """A futures bar's close and the open interest at its end."""
+
+    timestamp: datetime
+    close: float
+    oi: float
+
+
 class OrderRequest(BaseModel):
     symbol: str
     #: Float for the same reason as Position.net_quantity: perpetuals trade in

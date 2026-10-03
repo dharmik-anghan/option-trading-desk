@@ -21,6 +21,7 @@ from broker.models import (
     Fill,
     Funds,
     Greeks,
+    OiBar,
     OptionChain,
     OptionChainRow,
     OrderRequest,
@@ -181,6 +182,16 @@ def parse_candles(raw: dict[str, Any]) -> list[Candle]:
     ]
 
 
+def parse_oi_bars(raw: dict[str, Any]) -> list[OiBar]:
+    """History asked for with `oi_flag`: OI is a seventh column after volume."""
+    _check_ok(raw)
+    return [
+        OiBar(timestamp=datetime.fromtimestamp(c[0], tz=UTC), close=c[4], oi=c[6])
+        for c in raw.get("candles") or []
+        if len(c) >= 7
+    ]
+
+
 _FUND_TITLES = {
     "Total Balance": "total_balance",
     "Utilized Amount": "utilized_margin",
@@ -237,7 +248,7 @@ HISTORY_PAGE = 100
 
 
 def _fill_time(text: str) -> datetime:
-    """"29-Sep-2026 10:36:04" (IST) -> aware UTC."""
+    """ "29-Sep-2026 10:36:04" (IST) -> aware UTC."""
     return datetime.strptime(text, "%d-%b-%Y %H:%M:%S").replace(tzinfo=IST).astimezone(UTC)
 
 
@@ -330,6 +341,24 @@ class FyersBroker(Broker):
             }
         )
         return parse_candles(raw)
+
+    def get_history_oi(
+        self, symbol: str, resolution: str, date_from: date, date_to: date
+    ) -> list[OiBar]:
+        raw = self._client.history(
+            data={
+                "symbol": symbol,
+                "resolution": resolution,
+                "date_format": "1",
+                "range_from": date_from.isoformat(),
+                "range_to": date_to.isoformat(),
+                # Continuous: one contract's history stitched to the ones before
+                # it, so a nine-month daily chart is not three months of bars.
+                "cont_flag": "1",
+                "oi_flag": "1",
+            }
+        )
+        return parse_oi_bars(raw)
 
     def get_funds(self) -> Funds:
         raw = _call(self._client.funds)

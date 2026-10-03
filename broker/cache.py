@@ -26,12 +26,13 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, TypeVar
 
-from broker.base import OptionsBroker
+from broker.base import OpenInterestHistory, OptionsBroker
 from broker.errors import RateLimited
 from broker.models import (
     Candle,
     Fill,
     Funds,
+    OiBar,
     OptionChain,
     OrderRequest,
     OrderResult,
@@ -49,6 +50,8 @@ POSITIONS_TTL = 3.0
 FUNDS_TTL = 15.0
 CHAIN_TTL = 5.0
 HISTORY_TTL = 300.0
+#: Futures OI: an intraday bar closes every few minutes.
+OI_TTL = 60.0
 
 
 @dataclass
@@ -149,6 +152,17 @@ class CachedBroker(OptionsBroker):
             key,
             HISTORY_TTL,
             lambda: self._inner.get_history(symbol, resolution, date_from, date_to),
+        )
+
+    def get_history_oi(
+        self, symbol: str, resolution: str, date_from: date, date_to: date
+    ) -> list[OiBar]:
+        inner = self._inner
+        if not isinstance(inner, OpenInterestHistory):
+            raise NotImplementedError("this venue's history carries no open interest")
+        key = ("get_history_oi", (symbol, resolution, date_from, date_to))
+        return self._cached(
+            key, OI_TTL, lambda: inner.get_history_oi(symbol, resolution, date_from, date_to)
         )
 
     def get_positions(self) -> list[Position]:

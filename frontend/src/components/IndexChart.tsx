@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getOptionChain } from "../api";
+import { getFuturesOi, getOptionChain } from "../api";
 import type { MarketContext, OptionChain } from "../api";
 import type { OiRow } from "../charts/oiProfile";
 import { useLive } from "../hooks/useLive";
@@ -27,6 +27,10 @@ const CANDLES_MS = 120000;
 //: OI moves through the session but not by the second; once a minute is
 //: plenty, and the chain is the heaviest call the desk makes.
 const OI_MS = 60000;
+
+/** Calendar days of futures OI to read for each size: enough to cover the
+    chart's bars, which are a fixed count per size. */
+const OI_DAYS: Record<string, number> = { "15m": 14, "1h": 45, "4h": 150, "1d": 280, "1w": 1300 };
 
 /** Strikes either side of the money for the profile. */
 const OI_STRIKES = 20;
@@ -114,6 +118,17 @@ export function IndexChart({ symbol, name, last, walls, live }: Props) {
     400,
   );
 
+  // The near-month future's OI, bar by bar, for the buildup pane under the
+  // candles. Continuous across expiries; the contract is the one the strip shows.
+  const future = walls?.futures_symbol ?? null;
+  const futuresOi = useLive(
+    () => getFuturesOi(future ?? "", frame.interval, OI_DAYS[frame.interval] ?? 280),
+    live ? OI_MS : 0,
+    [future, frame.interval],
+    !oiOn || future === null,
+    700,
+  );
+
   // Taken out as numbers, so a context refresh that moved no wall does not
   // rebuild the chart.
   const resistance = walls?.resistance ?? null;
@@ -133,8 +148,8 @@ export function IndexChart({ symbol, name, last, walls, live }: Props) {
     if (maxPain !== null) {
       levels.push({ price: maxPain, label: "MP", kind: "wall" });
     }
-    return { levels, profile: profileOf(chain.data) };
-  }, [oiOn, resistance, support, maxPain, chain.data]);
+    return { levels, profile: profileOf(chain.data), futuresOi: futuresOi.data ?? undefined };
+  }, [oiOn, resistance, support, maxPain, chain.data, futuresOi.data]);
 
   return (
     <Chart

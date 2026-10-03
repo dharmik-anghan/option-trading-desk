@@ -13,6 +13,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from analytics import market_context as mc
 from analytics.payoff import (
@@ -26,7 +27,7 @@ from api.pricing import (
 from api.schemas import (
     MarketContextResponse,
 )
-from broker.base import OptionsBroker
+from broker.base import OpenInterestHistory, OptionsBroker
 from broker.errors import BrokerError
 from broker.fyers.stream import ALSO_STREAMED
 from broker.models import OptionChain, Quote
@@ -194,6 +195,52 @@ async def quote_stream(request: Request, symbols: str = "") -> StreamingResponse
                 yield frame
 
     return sse(events())
+
+
+#: The resolution futures OI is read at for each chart size. A week reads days,
+#: and the page takes the last reading inside each of its own bars.
+OI_RESOLUTION = {"15m": "15", "1h": "60", "4h": "240", "1d": "D", "1w": "D"}
+
+#: Longest span one history request may cover, by resolution: Fyers refuses
+#: more than about a year of days or a hundred days of intraday bars.
+_OI_CHUNK_DAYS = {"D": 360}
+_OI_CHUNK_INTRADAY = 90
+
+
+class OiPointOut(BaseModel):
+    at: str
+    close: float
+    oi: float
+
+
+@router.get("/api/futures-oi/{symbol:path}", response_model=list[OiPointOut])
+def futures_oi(
+    symbol: str, broker: BrokerDep, interval: str = "1d", days: int = 270
+) -> list[OiPointOut]:
+    """A futures contract's close and open interest, bar by bar, continuous
+    across expiries - for the index chart's OI pane.
+
+    Continuous history stitches each contract to the next, so OI drops at a
+    rollover: that bar's change is the roll, not positions being closed.
+    """
+    resolution = OI_RESOLUTION.get(interval)
+    if resolution is None:
+        raise HTTPException(status_code=400, detail=f"No OI at interval {interval!r}")
+    if not 1 <= days <= 1500:
+        raise HTTPException(status_code=400, detail="days must be 1 to 1500")
+    if not isinstance(broker, OpenInterestHistory):
+        raise HTTPException(status_code=400, detail="This venue's history carries no OI")
+    chunk = _OI_CHUNK_DAYS.get(resolution, _OI_CHUNK_INTRADAY)
+    end = date.today()
+    start = end - timedelta(days=days)
+    seen: dict[str, OiPointOut] = {}
+    while start <= end:
+        stop = min(end, start + timedelta(days=chunk - 1))
+        for bar in broker.get_history_oi(symbol, resolution, start, stop):
+            at = bar.timestamp.isoformat()
+            seen[at] = OiPointOut(at=at, close=bar.close, oi=bar.oi)
+        start = stop + timedelta(days=1)
+    return sorted(seen.values(), key=lambda p: p.at)
 
 
 @router.get("/api/quotes", response_model=dict[str, Quote])

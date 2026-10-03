@@ -21,6 +21,8 @@ import type {
   WhitespaceData,
 } from "lightweight-charts";
 import type { Candle, IndicatorLine } from "../api";
+import { BUILDUP_LABEL, alignOi } from "../charts/buildup";
+import type { OiAtBar } from "../charts/buildup";
 import { OiProfile, fade } from "../charts/oiProfile";
 import type { OiRow } from "../charts/oiProfile";
 import { compact, int } from "../format";
@@ -61,6 +63,8 @@ export interface Overlay {
   lines?: { label: string; values: (number | null)[] }[];
   /** Open interest by strike, drawn against the price axis. */
   profile?: OiRow[];
+  /** A future's close and OI over time, for a buildup pane under the candles. */
+  futuresOi?: { at: string; close: number; oi: number }[];
 }
 
 /** `rise` and `fall` are a direction of price, drawn in the candles' colours;
@@ -223,6 +227,14 @@ export function CandleChart({
     return { ms, orig, times: ms.map(chartTime) };
   }, [candles]);
 
+  // Futures OI per drawn bar, for the buildup pane; empty when there is none.
+  const futuresOi = overlay?.futuresOi;
+  const oiBars = useMemo(
+    () => (futuresOi?.length ? alignOi(bars.ms, futuresOi) : []),
+    [bars.ms, futuresOi],
+  );
+  const oiPane = oiBars.some((b) => b !== null);
+
   useEffect(() => {
     const element = box.current;
     if (element === null) return;
@@ -276,7 +288,7 @@ export function CandleChart({
     price.current = null;
     if (!bars.times.length) return;
 
-    draw(made, p, candles, bars, dp, overlay, oscillators, price);
+    draw(made, p, candles, bars, dp, overlay, oscillators, price, oiBars);
 
     // Shares rather than pixels: the chart sizes itself to its box, and fixed
     // heights were handed whatever was left over - which, after a rebuild,
@@ -290,7 +302,7 @@ export function CandleChart({
       if (n > OPEN_BARS) made.timeScale().setVisibleLogicalRange({ from: n - OPEN_BARS, to: n + 6 });
       else made.timeScale().fitContent();
     }
-  }, [candles, bars, seriesId, dp, height, overlay, oscillators, theme]);
+  }, [candles, bars, seriesId, dp, height, overlay, oscillators, theme, oiBars]);
 
   // The live price, on its own: it moves every tick, and a tick should not
   // rebuild the chart. It does follow a rebuild, which removes the series it
@@ -388,6 +400,14 @@ export function CandleChart({
             </span>
           ) : null;
         })}
+        {oiPane && oiBars[at] && (
+          <span className="oiread">
+            <em>Fut OI</em> {compact(oiBars[at].oi)}
+            {oiBars[at].change !== null && <> <i>{change(oiBars[at].change ?? 0)}</i></>}
+            {oiBars[at].kind && <> · {BUILDUP_LABEL[oiBars[at].kind]}</>}
+            {oiBars[at].roll && <> · rolled to the next contract</>}
+          </span>
+        )}
         {strikeRow && (
           <span className="oiread">
             <em>{int(strikeRow.strike)}</em> PE {compact(strikeRow.put)}{" "}
@@ -406,7 +426,7 @@ export function CandleChart({
         className="lwchart"
         // A definite height, which a flex parent may then grow. Without one the
         // chart sizes itself to its own canvas and keeps growing.
-        style={{ height: height + PANE_H * oscillators.length }}
+        style={{ height: height + PANE_H * (oscillators.length + (oiPane ? 1 : 0)) }}
       />
     </div>
   );
@@ -422,6 +442,7 @@ function draw(
   overlay: Overlay | undefined,
   oscillators: readonly { line: IndicatorLine; colour: number }[],
   price: { current: ISeriesApi<"Candlestick"> | null },
+  oiBars: readonly (OiAtBar | null)[],
 ) {
   const { ms, orig, times } = bars;
   const first = ms[0];
@@ -636,4 +657,63 @@ function draw(
       });
     }
   });
+
+  // Futures OI, a pane of its own under the oscillators: the change each bar,
+  // coloured by what price did with it, over the level as a thin line. New
+  // positions (OI up) are solid and closing ones faded; up moves take the
+  // candles' rising colour and down moves their falling one - so a solid
+  // purple bar is longs being built and a faded grey one longs letting go.
+  if (oiBars.some((b) => b !== null)) {
+    const pane = oscillators.length + 1;
+    const tone = {
+      "long-buildup": p.rise,
+      "short-covering": fade(p.rise, 0.45),
+      "short-buildup": p.fall,
+      "long-unwinding": fade(p.fall, 0.45),
+    } as const;
+    const level = made.addSeries(
+      LineSeries,
+      {
+        color: fade(p.dim, 0.7),
+        lineWidth: 1,
+        priceScaleId: "oi-level",
+        priceFormat: { type: "volume" },
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      },
+      pane,
+    );
+    level.priceScale().applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
+    level.setData(oiBars.map((b, k) => (b ? { time: times[k], value: b.oi } : blank(k))));
+    const changes = made.addSeries(
+      HistogramSeries,
+      {
+        title: "Fut OI Δ",
+        priceFormat: { type: "volume" },
+        priceLineVisible: false,
+        lastValueVisible: false,
+      },
+      pane,
+    );
+    changes.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
+    changes.setData(
+      oiBars.map((b, k) =>
+        b && b.change !== null
+          ? { time: times[k], value: b.change, color: b.kind ? tone[b.kind] : fade(p.dim, 0.4) }
+          : b?.roll
+            ? { time: times[k], value: 0, color: "transparent" }
+            : blank(k),
+      ),
+    );
+    // Where the continuous series moved to the next contract: its jump in OI
+    // is the switch, so it is marked rather than drawn as a buildup.
+    const rolls: SeriesMarker<Time>[] = [];
+    oiBars.forEach((b, k) => {
+      if (b?.roll) {
+        rolls.push({ time: times[k], position: "aboveBar", shape: "circle", size: 0, color: p.dim, text: "roll" });
+      }
+    });
+    if (rolls.length) createSeriesMarkers(changes, rolls);
+  }
 }

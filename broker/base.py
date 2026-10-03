@@ -31,6 +31,7 @@ from broker.models import (
     Candle,
     Fill,
     Funds,
+    OiBar,
     OptionChain,
     OrderRequest,
     OrderResult,
@@ -100,6 +101,17 @@ class FillHistory(Protocol):
 
     def get_fills(self, date_from: date, date_to: date) -> list[Fill]:
         """Every fill between two dates (inclusive), oldest first."""
+        ...
+
+
+@runtime_checkable
+class OpenInterestHistory(Protocol):
+    """Futures bars with their open interest. Venues whose history carries OI."""
+
+    def get_history_oi(
+        self, symbol: str, resolution: str, date_from: date, date_to: date
+    ) -> list[OiBar]:
+        """Close and OI per bar between two dates, continuous across expiries."""
         ...
 
 

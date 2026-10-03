@@ -19,6 +19,10 @@ export interface Live<T> {
  * and a response that arrives after its request was superseded is dropped,
  * so switching underlying can't repaint the panel with the old one's data.
  */
+/** First retry of a failed fetch-once, and the longest wait between retries. */
+const RETRY_MS = 5000;
+const RETRY_MAX_MS = 60000;
+
 export function useLive<T>(
   fetcher: () => Promise<T>,
   intervalMs: number,
@@ -69,16 +73,27 @@ export function useLive<T>(
       };
     }
 
+    // A fetch-once panel - interval 0, as every options panel is while the
+    // market is shut - has no next poll to recover by. So a failure there is
+    // retried on a backoff until one lands; otherwise one rate-limited burst at
+    // page load blanks the panel until the next session.
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     const run = async () => {
       try {
         const next = await fetcherRef.current();
         if (stopped || seq.current !== mine) return;
+        failures = 0;
         setData(next);
         setError(null);
         setAt(Date.now());
       } catch (e) {
         if (stopped || seq.current !== mine) return;
         setError(e instanceof Error ? e : new Error(String(e)));
+        if (intervalMs <= 0) {
+          failures += 1;
+          retry = setTimeout(run, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1)));
+        }
       } finally {
         if (!stopped && seq.current === mine) setLoading(false);
       }
@@ -96,6 +111,7 @@ export function useLive<T>(
     return () => {
       stopped = true;
       clearTimeout(start);
+      clearTimeout(retry);
       if (interval !== undefined) clearInterval(interval);
     };
   }, [depsKey, intervalMs, paused, nonce, staggerMs]);
