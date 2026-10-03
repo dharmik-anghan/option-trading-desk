@@ -168,6 +168,15 @@ class Context:
     def pending(self) -> bool:
         return bool(self._engine.pending)
 
+    @property
+    def last_closed(self) -> Trade | None:
+        """The trade that just finished, if the previous bar closed one.
+
+        Read the same bar a position goes flat and no later - it is not a
+        history, only what a strategy needs to decide whether to re-enter.
+        """
+        return self._engine.last_closed
+
     def open(
         self,
         key: OptionKey,
@@ -257,6 +266,9 @@ class Engine:
         self.costs = costs or CostModel()
         self.pending: list[_Order] = []
         self.trade: Trade | None = None
+        #: The trade that most recently went flat - a strategy's only way to
+        #: notice a close happened, since `self.trade` is already None by then.
+        self.last_closed: Trade | None = None
         self.view: View
         self._trades: list[Trade] = []
         self._next_id = 1
@@ -443,6 +455,7 @@ class Engine:
         reasons = [leg.exit_reason for leg in trade.legs if leg.exit_ts == ts]
         trade.reason = reasons[-1] if reasons else None
         self.trade = None
+        self.last_closed = trade
 
     def _excursion(self, ctx: Context) -> None:
         trade = self.trade

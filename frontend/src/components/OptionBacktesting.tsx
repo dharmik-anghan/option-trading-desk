@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { getOptbtUnderlyings, runOptbt } from "../api";
-import type { OptbtAdjust, OptbtCoverage, OptbtDays, OptbtExpiryChoice, OptbtResult } from "../api";
+import type {
+  OptbtAdjust,
+  OptbtCoverage,
+  OptbtDays,
+  OptbtExpiryChoice,
+  OptbtReEntry,
+  OptbtResult,
+  OptbtTrigger,
+} from "../api";
 import { BackButton } from "./BackButton";
 import { LegRow } from "./optbt/LegRow";
 import { OptResult } from "./optbt/OptResult";
@@ -83,6 +91,16 @@ export function OptionBacktesting({ onHome }: Props) {
     max_per_trade: 1,
   });
   const [equalWings, setEqualWings] = useState(false);
+  const [trigger, setTrigger] = useState<OptbtTrigger>({
+    mode: "time",
+    move_pct: 0.5,
+    range_until: null,
+  });
+  const [reentry, setReentry] = useState<OptbtReEntry>({
+    enabled: false,
+    trigger: "leg_stop",
+    max_times: 1,
+  });
   const [trail, setTrail] = useState(false);
   const [slippage, setSlippage] = useState(0.3);
   const [minSlip, setMinSlip] = useState(0.05);
@@ -147,6 +165,8 @@ export function OptionBacktesting({ onHome }: Props) {
       days,
       adjust: { ...adjust, enabled: adjust.enabled && hold === "expiry" },
       equal_wings: equalWings,
+      trigger,
+      reentry: { ...reentry, enabled: reentry.enabled && hold === "intraday" },
       slippage: slippage / 100,
       min_slip: minSlip,
       brokerage,
@@ -163,7 +183,8 @@ export function OptionBacktesting({ onHome }: Props) {
   const conditions = countDays(days);
   const exits =
     [stop.value, target.value, hold === "expiry" ? exitDte : null].filter((v) => v !== null).length +
-    (trail ? 1 : 0);
+    (trail ? 1 : 0) +
+    (hold === "intraday" && reentry.enabled ? 1 : 0);
 
   return (
     <main className="bt obt ob">
@@ -274,10 +295,47 @@ export function OptionBacktesting({ onHome }: Props) {
               Positional
             </button>
           </div>
-          <label className="ob-field">
+          <label className="ob-field" title={trigger.mode !== "time" ? "Earliest the trigger starts watching" : undefined}>
             <span>Enter</span>
             <input type="time" step={60} value={entry} onChange={(e) => setEntry(e.target.value)} />
           </label>
+          <div className="ob-field" title="Trade at the clock time, once spot has moved a percent from it, or once spot closes outside the range formed before a time">
+            <span>Trigger</span>
+            <div className="ob-limit">
+              <select
+                value={trigger.mode}
+                onChange={(e) =>
+                  setTrigger({ ...trigger, mode: e.target.value as OptbtTrigger["mode"] })
+                }
+                aria-label="Entry trigger"
+              >
+                <option value="time">At the time</option>
+                <option value="move_pct">On a % move</option>
+                <option value="range_breakout">On a range breakout</option>
+              </select>
+              {trigger.mode === "move_pct" && (
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={trigger.move_pct}
+                  onChange={(e) =>
+                    setTrigger({ ...trigger, move_pct: Math.max(0.1, Number(e.target.value)) })
+                  }
+                  aria-label="Percent spot must move from its price at entry"
+                />
+              )}
+              {trigger.mode === "range_breakout" && (
+                <input
+                  type="time"
+                  step={60}
+                  value={trigger.range_until ?? entry}
+                  onChange={(e) => setTrigger({ ...trigger, range_until: e.target.value })}
+                  aria-label="The range runs from entry to this time"
+                />
+              )}
+            </div>
+          </div>
           <label className="ob-field" title={hold === "expiry" ? "On the day the nearest leg expires" : undefined}>
             <span>{hold === "expiry" ? "Exit on expiry day" : "Exit"}</span>
             <input type="time" step={60} value={exit} onChange={(e) => setExit(e.target.value)} />
@@ -392,6 +450,47 @@ export function OptionBacktesting({ onHome }: Props) {
                 <option value="cost">Move their stops to cost</option>
               </select>
             </label>
+            {hold === "intraday" && (
+              <div className="ob-field" title="Sells the same legs again, fresh, at the price when it re-enters">
+                <span>After the position goes flat</span>
+                <div className="ob-limit">
+                  <select
+                    value={reentry.enabled ? reentry.trigger : "off"}
+                    onChange={(e) =>
+                      e.target.value === "off"
+                        ? setReentry({ ...reentry, enabled: false })
+                        : setReentry({
+                            ...reentry,
+                            enabled: true,
+                            trigger: e.target.value as OptbtReEntry["trigger"],
+                          })
+                    }
+                    aria-label="Re-enter after"
+                  >
+                    <option value="off">Stay out for the day</option>
+                    <option value="leg_stop">Re-enter after a leg's own stop</option>
+                    <option value="mtm_stop">Re-enter after the whole-position stop</option>
+                    <option value="any">Re-enter after any exit</option>
+                  </select>
+                  {reentry.enabled && (
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={reentry.max_times}
+                      onChange={(e) =>
+                        setReentry({
+                          ...reentry,
+                          max_times: Math.max(1, Math.min(10, Math.round(Number(e.target.value)))),
+                        })
+                      }
+                      aria-label="Re-entries at most, per day"
+                      title="At most, per day"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </details>
 

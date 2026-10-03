@@ -29,7 +29,7 @@ from typing import ClassVar, Literal
 from analytics import black_scholes as bs
 from broker.models import OptionType
 from optbt.data.models import Kind
-from optbt.engine import Context, Leg, Level, Side
+from optbt.engine import Context, Leg, Level, Side, Trade
 from optbt.market import OptionKey, Quote, View
 from optbt.marks import implied_vol
 from venues.calendar import NSE_CLOSE
@@ -82,11 +82,19 @@ class StrikeRule:
     #: "delta": the strike whose delta (absolute) is nearest `delta` - 0.30 to sell,
     #: 0.17 to buy. Worked out from each strike's own premium, since the store
     #: has no greeks: see `strike_deltas`.
-    mode: Literal["atm", "premium", "pct", "delta"] = "atm"
+    #: "straddle_width": `width_mult` times the ATM straddle's combined premium,
+    #: away from the ATM strike - a strangle sized to how much premium is on
+    #: the table today, wider when the market is pricing more movement.
+    #: "sp_pct": the strike whose own premium is closest to `sp_pct` percent of
+    #: the ATM straddle's combined premium - "sell the leg worth a quarter of
+    #: the straddle", read off the chain rather than guessed in rupees.
+    mode: Literal["atm", "premium", "pct", "delta", "straddle_width", "sp_pct"] = "atm"
     offset: int = 0
     premium: float = 0.0
     pct: float = 0.0
     delta: float = 0.30
+    width_mult: float = 1.0
+    sp_pct: float = 25.0
 
 
 @dataclass(frozen=True)
@@ -196,6 +204,43 @@ class Adjustment:
 
 
 @dataclass(frozen=True)
+class EntryTrigger:
+    """When to try the entry, beyond simply waiting for the clock.
+
+    "time" is the plain case: the first bar at or after `entry`. "move_pct"
+    waits for spot to have moved that many percent from its price *at* `entry`
+    before taking the trade - a momentum entry rather than a scheduled one.
+    "range_breakout" waits for spot to close outside the high-low range formed
+    between `entry` and `range_until`, in either direction.
+
+    Either way the day's other limits still apply: nothing fires at or after
+    `exit`, and a trigger that never comes is a day not traded, counted like
+    any other `ctx.skip`.
+    """
+
+    mode: Literal["time", "move_pct", "range_breakout"] = "time"
+    move_pct: float = 0.5
+    range_until: time | None = None
+
+
+@dataclass(frozen=True)
+class ReEntry:
+    """Trying the same legs again after the position goes flat, same day.
+
+    Only for an intraday strategy - a positional one holds past the day the
+    question would apply to. `trigger` is what the previous attempt has to
+    have ended on: "leg_stop" only after one of its own legs stopped out,
+    "mtm_stop" only after the whole-position stop or credit-stop closed it,
+    "any" after whatever closed it, a timed exit included - "re-execute" in
+    the ordinary sense. `max_times` counts re-entries, not the first entry.
+    """
+
+    enabled: bool = False
+    trigger: Literal["leg_stop", "mtm_stop", "any"] = "leg_stop"
+    max_times: int = 1
+
+
+@dataclass(frozen=True)
 class LegsConfig:
     legs: tuple[LegSpec, ...]
     #: The expiry every leg trades unless it names its own.
@@ -226,6 +271,8 @@ class LegsConfig:
     #: After the strikes are chosen, set both wings of a condor to the same
     #: width - the average of the two - so each side risks about the same.
     equal_wings: bool = False
+    trigger: EntryTrigger = field(default_factory=EntryTrigger)
+    reentry: ReEntry = field(default_factory=ReEntry)
 
 
 def atm_strike(chain: list[Quote], spot: float) -> float | None:
@@ -333,11 +380,39 @@ def strike_deltas(
     return out
 
 
+def atm_straddle_premium(chain: list[Quote], spot: float) -> tuple[float, float] | None:
+    """The ATM strike's call + put premium, and the strike itself - or None."""
+    atm = atm_strike(chain, spot)
+    if atm is None:
+        return None
+    priced = {(q.key.kind, q.key.strike): q.price for q in chain if q.price > 0}
+    call, put = priced.get((Kind.CALL, atm)), priced.get((Kind.PUT, atm))
+    if call is None or put is None:
+        return None
+    return call + put, atm
+
+
 def pick_strike(
     chain: list[Quote], spot: float, kind: Kind, rule: StrikeRule, now: datetime | None = None
 ) -> tuple[float | None, str]:
     """The strike a rule means, or None and why not."""
     priced = {q.key.strike: q.price for q in chain if q.key.kind is kind and q.price > 0}
+    if rule.mode in ("straddle_width", "sp_pct"):
+        found = atm_straddle_premium(chain, spot)
+        if found is None:
+            return None, "no ATM straddle priced"
+        premium, atm = found
+        if not priced:
+            return None, "no strike priced"
+        if rule.mode == "straddle_width":
+            direction = 1 if kind is Kind.CALL else -1
+            aim = atm + direction * premium * rule.width_mult
+            strike = min(priced, key=lambda k: (abs(k - aim), k))
+            if abs(strike - aim) > spot * 0.01:
+                return None, "strike not quoted"
+            return strike, ""
+        aim = premium * rule.sp_pct / 100
+        return min(priced, key=lambda k: (abs(priced[k] - aim), k)), ""
     if rule.mode == "delta":
         if now is None:
             return None, "no time to measure delta from"
@@ -395,37 +470,119 @@ class LegStrategy:
         self._tried_today = False
         #: Per trade: how many rolls, and the day of the last one.
         self._rolled: dict[int, tuple[int, date]] = {}
-
+        #: Re-entry bookkeeping for the day: how many have happened, and the id
+        #: of the last closed trade already judged (so one close is not read twice).
+        self._reentries_today = 0
+        self._reacted_closed_id: int | None = None
+        #: Trigger bookkeeping: spot at `entry` for "move_pct", the range formed
+        #: by `entry` to `range_until` for "range_breakout".
+        self._ref_price: float | None = None
+        self._range_hi: float | None = None
+        self._range_lo: float | None = None
 
     def on_day(self, ctx: Context) -> None:
         self._tried_today = False
+        self._reentries_today = 0
+        self._reacted_closed_id = None
+        self._ref_price = None
+        self._range_hi = None
+        self._range_lo = None
 
     def on_bar(self, ctx: Context) -> None:
         cfg = self.config
         view = ctx.view
         clock = view.clock
+        self._track_trigger(view)
 
         if ctx.open_legs:
             self._manage(ctx)
             return
 
-        if self._tried_today or ctx.pending or view.day.weekday() not in cfg.weekdays:
+        if ctx.pending or view.day.weekday() not in cfg.weekdays:
             return
-        late = _plus(cfg.entry, ENTRY_GRACE)
         if cfg.hold == "intraday" and clock >= cfg.exit:
             return
-        if clock >= late:
-            self._tried_today = True
-            # Counted only when the session itself opened after the entry window
-            # (a Muhurat session). A day whose entry time passed while a
-            # positional trade was still open is simply not an entry day.
-            if view.session_start > cfg.entry:
-                ctx.skip("no session at the entry time")
+
+        if self._tried_today:
+            self._try_reentry(ctx)
             return
-        if clock < cfg.entry:
+        self._try_first_entry(ctx)
+
+    def _track_trigger(self, view: View) -> None:
+        """What `_triggered` will read: the reference price, or the range."""
+        trig = self.config.trigger
+        clock = view.clock
+        if trig.mode == "range_breakout" and trig.range_until is not None:
+            if self.config.entry <= clock < trig.range_until:
+                spot = view.spot()
+                self._range_hi = spot if self._range_hi is None else max(self._range_hi, spot)
+                self._range_lo = spot if self._range_lo is None else min(self._range_lo, spot)
+        elif trig.mode == "move_pct" and self._ref_price is None and clock >= self.config.entry:
+            self._ref_price = view.spot()
+
+    def _triggered(self, view: View) -> bool:
+        trig = self.config.trigger
+        if trig.mode == "move_pct":
+            if not self._ref_price:
+                return False
+            moved = abs(view.spot() - self._ref_price) / self._ref_price * 100
+            return moved >= trig.move_pct
+        if trig.mode == "range_breakout":
+            if self._range_hi is None or self._range_lo is None:
+                return False
+            spot = view.spot()
+            return spot > self._range_hi or spot < self._range_lo
+        return True  # "time": the clock alone is the trigger
+
+    def _entry_start(self) -> time:
+        trig = self.config.trigger
+        if trig.mode == "range_breakout" and trig.range_until is not None:
+            return trig.range_until
+        return self.config.entry
+
+    def _try_first_entry(self, ctx: Context) -> None:
+        cfg = self.config
+        view = ctx.view
+        clock = view.clock
+        if clock < self._entry_start():
+            return
+        if cfg.trigger.mode == "time":
+            late = _plus(cfg.entry, ENTRY_GRACE)
+            if clock >= late:
+                self._tried_today = True
+                # Counted only when the session itself opened after the entry
+                # window (a Muhurat session). A day whose entry time passed
+                # while a positional trade was still open is simply not an
+                # entry day.
+                if view.session_start > cfg.entry:
+                    ctx.skip("no session at the entry time")
+                return
+        if not self._triggered(view):
             return
         self._tried_today = True
         self._enter(ctx)
+
+    def _try_reentry(self, ctx: Context) -> None:
+        re = self.config.reentry
+        if not re.enabled or self.config.hold != "intraday" or self._reentries_today >= re.max_times:
+            return
+        closed = ctx.last_closed
+        if closed is None or closed.id == self._reacted_closed_id:
+            return
+        self._reacted_closed_id = closed.id
+        if not self._reentry_qualifies(closed, re.trigger):
+            return
+        self._reentries_today += 1
+        self._enter(ctx)
+
+    @staticmethod
+    def _reentry_qualifies(trade: Trade, trigger: Literal["leg_stop", "mtm_stop", "any"]) -> bool:
+        if trigger == "any":
+            return True
+        reasons = {leg.exit_reason for leg in trade.legs}
+        if trigger == "leg_stop":
+            return "stop" in reasons
+        return "mtm stop" in reasons  # trigger == "mtm_stop"
 
     def _expiry_of(self, spec: LegSpec) -> ExpiryChoice:
         return spec.expiry or self.config.expiry

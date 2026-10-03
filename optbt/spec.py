@@ -17,16 +17,21 @@ from optbt.engine import Level, Side
 from optbt.strategies.legs import (
     Adjustment,
     DayFilter,
+    EntryTrigger,
     ExpiryChoice,
     LegsConfig,
     LegSpec,
+    ReEntry,
     StrikeRule,
 )
 
 #: Bumped when the shape changes in a way an older reader would misread.
 #: 2: the expiry is a choice (series, nth, min_left, days), set on the strategy
 #: and optionally on a leg. Version 1's per-leg "week"/"next_week"/... still read.
-VERSION = 2
+#: 3: `trigger` (when the entry fires) and `reentry` (trying it again after the
+#: position goes flat) on the strategy; `width_mult` and `sp_pct` on a leg's
+#: strike. Missing on an older spec, both read as off.
+VERSION = 3
 
 
 def _level_out(level: Level | None) -> dict[str, Any] | None:
@@ -76,6 +81,8 @@ def to_dict(config: LegsConfig) -> dict[str, Any]:
                     "premium": leg.strike.premium,
                     "pct": leg.strike.pct,
                     "delta": leg.strike.delta,
+                    "width_mult": leg.strike.width_mult,
+                    "sp_pct": leg.strike.sp_pct,
                 },
                 "stop": _level_out(leg.stop),
                 "target": _level_out(leg.target),
@@ -117,6 +124,18 @@ def to_dict(config: LegsConfig) -> dict[str, Any]:
             "max_per_trade": config.adjust.max_per_trade,
         },
         "equal_wings": config.equal_wings,
+        "trigger": {
+            "mode": config.trigger.mode,
+            "move_pct": config.trigger.move_pct,
+            "range_until": config.trigger.range_until.isoformat()
+            if config.trigger.range_until
+            else None,
+        },
+        "reentry": {
+            "enabled": config.reentry.enabled,
+            "trigger": config.reentry.trigger,
+            "max_times": config.reentry.max_times,
+        },
     }
 
 
@@ -131,6 +150,8 @@ def from_dict(raw: dict[str, Any]) -> LegsConfig:
         raise ValueError(f"spec version {version} is newer than this reader ({VERSION})")
     days = raw.get("days") or {}
     adjust = raw.get("adjust") or {}
+    trigger = raw.get("trigger") or {}
+    reentry = raw.get("reentry") or {}
     defaults = LegsConfig(legs=())
     return LegsConfig(
         legs=tuple(
@@ -159,4 +180,13 @@ def from_dict(raw: dict[str, Any]) -> LegsConfig:
         days=DayFilter(**{**days, "open_zones": frozenset(days.get("open_zones", ()))}),
         adjust=Adjustment(**adjust),
         equal_wings=bool(raw.get("equal_wings", False)),
+        trigger=EntryTrigger(
+            **{
+                **trigger,
+                "range_until": (
+                    _time_in(trigger["range_until"]) if trigger.get("range_until") else None
+                ),
+            }
+        ),
+        reentry=ReEntry(**reentry),
     )

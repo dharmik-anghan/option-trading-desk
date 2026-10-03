@@ -14,12 +14,17 @@ export interface LegDraft {
   lots: number;
   /** 0 trades the strategy's expiry; 1-3 this leg's own nth of the same series. */
   expiryNth: number;
-  /** "atm" with an offset, "premium" with a target premium, "pct" from spot. */
-  strikeMode: "atm" | "premium" | "pct" | "delta";
+  /** "atm" with an offset, "premium" with a target premium, "pct" from spot,
+      "straddle_width"/"sp_pct" sized off the ATM straddle's own premium. */
+  strikeMode: "atm" | "premium" | "pct" | "delta" | "straddle_width" | "sp_pct";
   offset: number;
   premium: number;
   pct: number;
   delta: number;
+  /** Multiple of the ATM straddle's premium, for "straddle_width". */
+  widthMult: number;
+  /** Percent of the ATM straddle's premium, for "sp_pct". */
+  spPct: number;
   stopKind: "none" | "pct" | "points";
   stopValue: number;
   targetKind: "none" | "pct" | "points";
@@ -45,6 +50,8 @@ export function leg(
     premium: 50,
     pct: 4,
     delta: 0.3,
+    widthMult: 1,
+    spPct: 25,
     stopKind: stop.kind,
     stopValue: stop.value,
     targetKind: "none",
@@ -141,7 +148,15 @@ export function toRequest(l: LegDraft, expiry: OptbtExpiryChoice): OptbtLegIn {
     kind: l.kind,
     lots: l.lots,
     expiry: l.expiryNth && expiry.series !== "days" ? { ...expiry, nth: l.expiryNth } : null,
-    strike: { mode: l.strikeMode, offset: l.offset, premium: l.premium, pct: l.pct, delta: l.delta },
+    strike: {
+      mode: l.strikeMode,
+      offset: l.offset,
+      premium: l.premium,
+      pct: l.pct,
+      delta: l.delta,
+      width_mult: l.widthMult,
+      sp_pct: l.spPct,
+    },
     stop: level(l.stopKind, l.stopValue),
     target: level(l.targetKind, l.targetValue),
   };

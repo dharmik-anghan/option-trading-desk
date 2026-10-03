@@ -45,12 +45,26 @@ class Market:
         self.conn = duckdb.connect()
         self.conn.execute(SCHEMA)
 
-    def index(self, day: date, level: float = 23450.0, *, close_at: float | None = None) -> None:
+    def index(
+        self,
+        day: date,
+        level: float = 23450.0,
+        *,
+        close_at: float | None = None,
+        changes: dict[time, tuple[float, float, float, float]] | None = None,
+    ) -> None:
+        """A flat index, except for minutes given as (o, h, l, c) - and the very
+        last bar of the day, which `close_at` alone can still override."""
+        changes = changes or {}
         minutes = _minutes(day)
+        last = level
         rows = []
         for ts in minutes:
-            p = close_at if close_at is not None and ts == minutes[-1] else level
-            rows.append(f"('{INDEX}', '1', TIMESTAMP '{ts}', {p}, {p}, {p}, {p}, 0)")
+            o, h, lo, c = changes.get(ts.time(), (last, last, last, last))
+            if close_at is not None and ts == minutes[-1]:
+                o = h = lo = c = close_at
+            last = c
+            rows.append(f"('{INDEX}', '1', TIMESTAMP '{ts}', {o}, {h}, {lo}, {c}, 0)")
         self.conn.execute(f"INSERT INTO index_bar VALUES {','.join(rows)}")
 
     def option(
@@ -910,3 +924,160 @@ def test_a_leg_that_has_not_traded_since_the_market_moved_is_not_valued_at_its_o
         date(2026, 9, 21), date(2026, 9, 22)
     ).trades
     assert all(leg.exit_reason != "mtm target" for leg in trade.legs), trade.events
+
+
+# ------------------------------------------------------------- re-entry
+
+
+def test_reentry_after_a_whole_position_stop_sells_again_at_the_new_price() -> None:
+    """CE jumps from 100 to 120 at 10:00, a 1,300 loss that trips a 1,000 mtm
+    stop: both legs are bought back at 10:01's open (120, 100). Re-entry sells
+    the same legs again at 10:02's open, at those same now-flat prices - a
+    fresh 220-point credit - and nothing moves again, so the second trade's
+    own exit at 15:15 is at breakeven."""
+    from optbt.strategies.legs import LegsConfig, LegSpec, LegStrategy, ReEntry
+
+    m = _straddle_day(ce={time(10, 0): (100.0, 120.0, 100.0, 120.0)})
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.SELL, Kind.PUT)),
+        mtm_stop=1000,
+        reentry=ReEntry(enabled=True, trigger="mtm_stop", max_times=1),
+    )
+    result = Engine(m.history(), LegStrategy(config), FREE).run(DAY, DAY)
+    assert len(result.trades) == 2
+    first, second = result.trades
+    assert first.reason == "mtm stop"
+    assert first.net == pytest.approx(-1_300)
+    assert [leg.entry_ts.time() for leg in second.legs] == [time(10, 2), time(10, 2)]
+    assert sorted(leg.entry_price for leg in second.legs) == [100.0, 120.0]
+    assert second.net == pytest.approx(0)
+
+
+def test_reentry_stops_at_max_times() -> None:
+    """The re-entered position trips the same mtm stop again at 11:00; with
+    max_times=1 that does not start a third trade, so two trades in total."""
+    from optbt.strategies.legs import LegsConfig, LegSpec, LegStrategy, ReEntry
+
+    m = _straddle_day(
+        ce={
+            time(10, 0): (100.0, 120.0, 100.0, 120.0),
+            time(11, 0): (120.0, 140.0, 120.0, 140.0),
+        }
+    )
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.SELL, Kind.PUT)),
+        mtm_stop=1000,
+        reentry=ReEntry(enabled=True, trigger="mtm_stop", max_times=1),
+    )
+    result = Engine(m.history(), LegStrategy(config), FREE).run(DAY, DAY)
+    assert len(result.trades) == 2
+    assert [t.reason for t in result.trades] == ["mtm stop", "mtm stop"]
+
+
+def test_reentry_on_leg_stop_ignores_a_timed_exit() -> None:
+    """trigger="leg_stop" only re-enters after a leg's own stop - not after a
+    quiet day that simply timed out at the exit."""
+    from optbt.strategies.legs import LegsConfig, LegSpec, LegStrategy, Level, ReEntry
+
+    at_exit = {time(15, 15): (100.0, 100.0, 100.0, 100.0)}
+    m = _straddle_day(ce=at_exit, pe=at_exit)
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL), LegSpec(Side.SELL, Kind.PUT)),
+        reentry=ReEntry(enabled=True, trigger="leg_stop", max_times=2),
+    )
+    result = Engine(m.history(), LegStrategy(config), FREE).run(DAY, DAY)
+    assert len(result.trades) == 1
+    assert result.trades[0].reason == "time"
+
+
+# ------------------------------------------------------------- entry triggers
+
+
+def test_move_pct_trigger_waits_for_spot_to_move_from_its_price_at_entry() -> None:
+    """Spot is flat at 23,450 through the morning, then jumps to 23,684.5 (+1%)
+    at 10:00. With a 0.5% trigger the sale happens on the next bar, 10:01 - not
+    at 09:20, where a fixed-time entry would have sold."""
+    from optbt.strategies.legs import EntryTrigger, LegsConfig, LegSpec, LegStrategy
+
+    m = Market()
+    m.index(DAY, changes={time(10, 0): (23450.0, 23684.5, 23450.0, 23684.5)})
+    for strike in (23400.0, 23450.0, 23500.0, 23700.0, 23650.0):
+        m.option(DAY, strike, Kind.CALL, 100.0)
+    m.option(DAY, 23450.0, Kind.PUT, 100.0)  # so the ATM strike can be found
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL),),
+        trigger=EntryTrigger(mode="move_pct", move_pct=0.5),
+    )
+    (trade,) = Engine(m.history(), LegStrategy(config), FREE).run(DAY, DAY).trades
+    assert trade.legs[0].entry_ts.time() == time(10, 1)
+
+
+def test_range_breakout_trigger_waits_for_a_close_outside_the_opening_range() -> None:
+    """09:20-09:35 wiggles between 23,440 and 23,460; at 09:35 it jumps to
+    23,500, outside that range, and the sale happens on the next bar, 09:36."""
+    from optbt.strategies.legs import EntryTrigger, LegsConfig, LegSpec, LegStrategy
+
+    m = Market()
+    m.index(
+        DAY,
+        changes={
+            time(9, 25): (23450.0, 23460.0, 23450.0, 23455.0),
+            time(9, 30): (23455.0, 23455.0, 23440.0, 23445.0),
+            time(9, 35): (23445.0, 23500.0, 23445.0, 23500.0),
+        },
+    )
+    for strike in (23400.0, 23450.0, 23500.0, 23550.0):
+        m.option(DAY, strike, Kind.CALL, 100.0)
+    m.option(DAY, 23450.0, Kind.PUT, 100.0)  # so the ATM strike can be found
+    config = LegsConfig(
+        legs=(LegSpec(Side.SELL, Kind.CALL),),
+        trigger=EntryTrigger(mode="range_breakout", range_until=time(9, 35)),
+    )
+    (trade,) = Engine(m.history(), LegStrategy(config), FREE).run(DAY, DAY).trades
+    assert trade.legs[0].entry_ts.time() == time(9, 36)
+
+
+# ------------------------------------------------------------- strike modes
+
+
+def test_straddle_width_strike_offsets_by_the_atm_straddles_premium() -> None:
+    """ATM (23,450) call + put = 100 + 80 = 180. A call at width_mult 1 aims for
+    23,450 + 180 = 23,630 and a put for 23,450 - 180 = 23,270 - both quoted, and
+    picked over a further strike on each side."""
+    from optbt.data.history import History
+    from optbt.strategies.legs import StrikeRule, pick_strike
+
+    m = Market()
+    m.index(DAY)
+    m.option(DAY, 23450.0, Kind.CALL, 100.0)
+    m.option(DAY, 23450.0, Kind.PUT, 80.0)
+    m.option(DAY, 23630.0, Kind.CALL, 20.0)
+    m.option(DAY, 23750.0, Kind.CALL, 10.0)
+    m.option(DAY, 23270.0, Kind.PUT, 15.0)
+    m.option(DAY, 23150.0, Kind.PUT, 8.0)
+    history: History = m.history()
+    chain = history.chain_at(EXPIRY, datetime.combine(DAY, time(9, 20)))
+    rule = StrikeRule(mode="straddle_width", width_mult=1.0)
+    strike, why = pick_strike(chain, 23450.0, Kind.CALL, rule)
+    assert (strike, why) == (23630.0, "")
+    strike, why = pick_strike(chain, 23450.0, Kind.PUT, rule)
+    assert (strike, why) == (23270.0, "")
+
+
+def test_sp_pct_strike_targets_a_share_of_the_straddle_premium() -> None:
+    """Straddle premium 180; 25% of that is 45, and the 23,600 call at 44 is
+    the closest quoted premium to it."""
+    from optbt.data.history import History
+    from optbt.strategies.legs import StrikeRule, pick_strike
+
+    m = Market()
+    m.index(DAY)
+    m.option(DAY, 23450.0, Kind.CALL, 100.0)
+    m.option(DAY, 23450.0, Kind.PUT, 80.0)
+    m.option(DAY, 23600.0, Kind.CALL, 44.0)
+    m.option(DAY, 23650.0, Kind.CALL, 30.0)
+    history: History = m.history()
+    chain = history.chain_at(EXPIRY, datetime.combine(DAY, time(9, 20)))
+    rule = StrikeRule(mode="sp_pct", sp_pct=25.0)
+    strike, why = pick_strike(chain, 23450.0, Kind.CALL, rule)
+    assert (strike, why) == (23600.0, "")

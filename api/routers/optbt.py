@@ -144,11 +144,16 @@ class StrikeIn(BaseModel):
 
     #: "atm": `offset` listed strikes from the money, + OTM, - ITM.
     #: "premium": the strike whose premium is closest to `premium`.
-    mode: Literal["atm", "premium", "pct", "delta"] = "atm"
+    #: "straddle_width": `width_mult` times the ATM straddle's premium, away
+    #: from the ATM strike. "sp_pct": the strike whose own premium is closest
+    #: to `sp_pct` percent of the ATM straddle's premium.
+    mode: Literal["atm", "premium", "pct", "delta", "straddle_width", "sp_pct"] = "atm"
     offset: int = Field(default=0, ge=-20, le=20)
     premium: float = Field(default=0.0, ge=0)
     pct: float = Field(default=0.0, ge=-30, le=30)
     delta: float = Field(default=0.30, gt=0, lt=1)
+    width_mult: float = Field(default=1.0, gt=0, le=5)
+    sp_pct: float = Field(default=25.0, gt=0, le=200)
 
 
 class ExpiryIn(BaseModel):
@@ -214,6 +219,27 @@ class AdjustIn(BaseModel):
     max_per_trade: int = Field(default=1, ge=1, le=5)
 
 
+class TriggerIn(BaseModel):
+    """When the entry fires. See optbt.strategies.legs.EntryTrigger."""
+
+    model_config = STRICT
+
+    mode: Literal["time", "move_pct", "range_breakout"] = "time"
+    move_pct: float = Field(default=0.5, gt=0, le=20)
+    range_until: time | None = None
+
+
+class ReEntryIn(BaseModel):
+    """Trying the same legs again after the position goes flat, same day.
+    See optbt.strategies.legs.ReEntry."""
+
+    model_config = STRICT
+
+    enabled: bool = False
+    trigger: Literal["leg_stop", "mtm_stop", "any"] = "leg_stop"
+    max_times: int = Field(default=1, ge=1, le=10)
+
+
 class RunRequest(BaseModel):
     """A strategy as legs, and everything that decides what running it means."""
 
@@ -239,6 +265,8 @@ class RunRequest(BaseModel):
     days: DaysIn = Field(default_factory=DaysIn)
     adjust: AdjustIn = Field(default_factory=AdjustIn)
     equal_wings: bool = False
+    trigger: TriggerIn = Field(default_factory=TriggerIn)
+    reentry: ReEntryIn = Field(default_factory=ReEntryIn)
     #: Slippage per fill as a fraction of premium, and its floor in rupees.
     slippage: float = Field(default=0.003, ge=0, le=0.1)
     min_slip: float = Field(default=0.05, ge=0, le=5)

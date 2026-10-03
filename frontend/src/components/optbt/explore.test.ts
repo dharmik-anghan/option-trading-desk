@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OptbtTrade } from "../../api";
-import { NO_FILTER, apply, breakdown, byMonth, curve, figures } from "./explore";
+import { NO_FILTER, apply, breakdown, byMonth, curve, figures, moreFigures } from "./explore";
 
 function trade(
   id: number,
@@ -64,6 +64,36 @@ describe("the result explorer", () => {
     expect(f.maxDrawdown).toBe(1000);
     expect(curve(RUN).map(([, v]) => v)).toEqual([1000, 600, 900, 0]);
     expect(byMonth(RUN)).toEqual({ "2026-01": 600, "2026-02": -600 });
+  });
+
+  it("derives streaks, expectancy and the drawdown's recovery by day", () => {
+    const m = moreFigures(RUN);
+    // Day nets: +1000, -400, +300, -900 - alternating, so every streak is 1.
+    expect(m.maxWinStreak).toBe(1);
+    expect(m.maxLossStreak).toBe(1);
+    expect(m.tradingDays).toBe(4);
+    expect(m.winDays).toBe(2);
+    // Win and loss average both 650, half the days each way: net expectancy 0.
+    expect(m.expectancy).toBeCloseTo(0);
+    // Peaked at 1000 on day 1, fell to 0 on day 4 - never climbs back to 1000.
+    expect(m.ddFrom).toBe("2026-01-05");
+    expect(m.ddTrough).toBe("2026-02-03");
+    expect(m.ddRecovered).toBeNull();
+    expect(m.ddRecoveryDays).toBeNull();
+    expect(m.returnToMdd).toBe(0);
+  });
+
+  it("marks a drawdown recovered once equity matches its peak again", () => {
+    const run = [
+      trade(1, "2026-01-05", 1000),
+      trade(2, "2026-01-06", -600), // trough: cum 400, 600 under the peak
+      trade(3, "2026-01-08", 700), // cum 1100: past the 1000 peak - recovered
+    ];
+    const m = moreFigures(run);
+    expect(m.ddTrough).toBe("2026-01-06");
+    expect(m.ddRecovered).toBe("2026-01-08");
+    expect(m.ddRecoveryDays).toBe(2);
+    expect(m.returnToMdd).toBeCloseTo(1100 / 600);
   });
 
   it("groups trades for the breakdown tables", () => {

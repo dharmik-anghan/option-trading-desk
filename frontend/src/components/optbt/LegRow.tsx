@@ -90,9 +90,9 @@ export function LegRow({ index, leg, onChange, onCopy, onRemove, daysSeries }: P
         <select
           value={leg.strikeMode === "atm" ? String(leg.offset) : leg.strikeMode}
           onChange={(e) =>
-            e.target.value === "premium" || e.target.value === "pct" || e.target.value === "delta"
-              ? onChange({ ...leg, strikeMode: e.target.value })
-              : onChange({ ...leg, strikeMode: "atm", offset: Number(e.target.value) })
+            /^-?\d+$/.test(e.target.value)
+              ? onChange({ ...leg, strikeMode: "atm", offset: Number(e.target.value) })
+              : onChange({ ...leg, strikeMode: e.target.value as LegDraft["strikeMode"] })
           }
           aria-label="Strike"
           title="Counted in listed strikes from the money. OTM is above spot for a call, below for a put."
@@ -105,6 +105,8 @@ export function LegRow({ index, leg, onChange, onCopy, onRemove, daysSeries }: P
           <option value="delta">Delta…</option>
           <option value="pct">% from spot…</option>
           <option value="premium">Premium near ₹…</option>
+          <option value="straddle_width">x straddle width…</option>
+          <option value="sp_pct">% of straddle premium…</option>
         </select>
         {leg.strikeMode === "delta" && (
           <input
@@ -136,6 +138,28 @@ export function LegRow({ index, leg, onChange, onCopy, onRemove, daysSeries }: P
             value={leg.premium}
             onChange={(e) => set("premium", Math.max(0, Number(e.target.value)))}
             aria-label="Target premium in rupees"
+          />
+        )}
+        {leg.strikeMode === "straddle_width" && (
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={leg.widthMult}
+            onChange={(e) => set("widthMult", Math.max(0.1, Number(e.target.value)))}
+            aria-label="Multiple of the ATM straddle's premium"
+            title="The ATM call + put premium, times this, away from the ATM strike"
+          />
+        )}
+        {leg.strikeMode === "sp_pct" && (
+          <input
+            type="number"
+            min={1}
+            step={5}
+            value={leg.spPct}
+            onChange={(e) => set("spPct", Math.max(1, Number(e.target.value)))}
+            aria-label="Percent of the ATM straddle's premium"
+            title="The strike whose own premium is nearest this percent of the ATM straddle's"
           />
         )}
       </div>

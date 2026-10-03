@@ -38,14 +38,18 @@ export interface OptbtLegIn {
   lots: number;
   /** This leg's own expiry; null trades the strategy's. */
   expiry: OptbtExpiryChoice | null;
-  /** atm: `offset` strikes from the money. premium: nearest to `premium`. pct: `pct`% from spot. */
+  /** atm: `offset` strikes from the money. premium: nearest to `premium`. pct: `pct`% from spot.
+      straddle_width: `width_mult` x the ATM straddle's premium, away from ATM.
+      sp_pct: the strike whose own premium is nearest `sp_pct`% of the ATM straddle's. */
   strike: {
-    mode: "atm" | "premium" | "pct" | "delta";
+    mode: "atm" | "premium" | "pct" | "delta" | "straddle_width" | "sp_pct";
     offset: number;
     premium: number;
     pct: number;
     /** Absolute delta to aim for, e.g. 0.30. */
     delta: number;
+    width_mult: number;
+    sp_pct: number;
   };
   stop: OptbtLevel | null;
   target: OptbtLevel | null;
@@ -85,6 +89,23 @@ export interface OptbtAdjust {
 
 export const PIVOT_ZONES = ["below S2", "S2-S1", "S1-P", "P-R1", "R1-R2", "above R2"] as const;
 
+/** When the entry fires. "time": the clock alone. "move_pct": spot must move
+    this far from its price at `entry` first. "range_breakout": spot must close
+    outside the high-low range formed between `entry` and `range_until`. */
+export interface OptbtTrigger {
+  mode: "time" | "move_pct" | "range_breakout";
+  move_pct: number;
+  range_until: string | null;
+}
+
+/** Trying the same legs again after the position goes flat, same day. */
+export interface OptbtReEntry {
+  enabled: boolean;
+  /** What the previous attempt has to have ended on. */
+  trigger: "leg_stop" | "mtm_stop" | "any";
+  max_times: number;
+}
+
 export interface OptbtRunRequest {
   underlying: string;
   start: string;
@@ -106,6 +127,8 @@ export interface OptbtRunRequest {
   days: OptbtDays;
   adjust: OptbtAdjust;
   equal_wings: boolean;
+  trigger: OptbtTrigger;
+  reentry: OptbtReEntry;
   slippage: number;
   min_slip: number;
   brokerage: number;

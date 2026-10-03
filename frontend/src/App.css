@@ -1719,29 +1719,24 @@ a.nitem:hover .nhead {
 .home {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 10vh 24px 48px;
+  padding: 6vh 24px 48px;
 }
-.home header h1 {
-  margin: 0;
+.home h1 {
+  margin: 28px 0 0;
   font-family: var(--u);
   font-size: 30px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.home header p {
-  margin: 10px 0 0;
-  max-width: 60ch;
-  color: var(--dim);
-  font-size: 13px;
-  line-height: 1.55;
-}
 .home .cards {
-  margin-top: 40px;
+  margin-top: 28px;
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
 }
+/* Each card carries one accent, reusing the desk's own chart colours rather
+   than a new palette - the same hue the mark above the fold is drawn in. */
 .home .card {
   display: block;
   text-align: left;
@@ -1749,16 +1744,36 @@ a.nitem:hover .nhead {
   color: var(--fg);
   background: var(--panel);
   border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
   border-radius: 3px;
   padding: 16px 16px 14px;
   cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.home .card:hover:not(:disabled) {
-  border-color: var(--you);
+.home .card[data-accent="you"] { --accent: var(--you); }
+.home .card[data-accent="mkt"] { --accent: var(--mkt); }
+.home .card[data-accent="up"] { --accent: var(--up); }
+.home .card[data-accent="i2"] { --accent: var(--i2); }
+.home .card[data-accent="i3"] { --accent: var(--i3); }
+.home .card[data-accent="i4"] { --accent: var(--i4); }
+.home .card:hover:not(:disabled),
+.home .card:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .home .card:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+@media (prefers-reduced-motion: reduce) {
+  .home .card {
+    transition: border-color 0.15s ease;
+  }
+  .home .card:hover:not(:disabled),
+  .home .card:focus-visible:not(:disabled) {
+    transform: none;
+  }
 }
 .home .card h2 {
   margin: 14px 0 0;
@@ -1781,32 +1796,155 @@ a.nitem:hover .nhead {
   font-family: var(--u);
   font-size: 11px;
   letter-spacing: 0.04em;
-  color: var(--you);
+  color: var(--accent);
 }
 .home .card:disabled .go {
   color: var(--dim);
 }
 
+/* The watchlist, scrolling: the same figures the desks trade off, not stand-in
+   numbers. The dot reports whether a poll has actually landed recently - it
+   doesn't just run for effect. */
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--head);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ticker-live {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--u);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.ticker-live i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.ticker-live.on {
+  color: var(--up);
+}
+.ticker-live.on i {
+  background: var(--up);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent);
+  animation: ticker-pulse 2s ease-out infinite;
+}
+@keyframes ticker-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--up) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 0%, transparent);
+  }
+}
+.ticker-track {
+  flex: 1;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+.ticker-row {
+  display: flex;
+  width: max-content;
+  animation: ticker-scroll 32s linear infinite;
+}
+.ticker:hover .ticker-row {
+  animation-play-state: paused;
+}
+@keyframes ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.ticker-item {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 18px;
+  font-family: var(--u);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ticker-item b {
+  color: var(--dim);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.ticker-item .up {
+  color: var(--up);
+}
+.ticker-item .dn {
+  color: var(--dn);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-row {
+    animation: none;
+  }
+  .ticker-live.on i {
+    animation: none;
+  }
+}
+
 /* The thumbnails. Drawn here rather than fetched: each one is a picture of what
-   its desk actually reads, which no stock photograph would be. */
+   its desk actually reads, which no stock photograph would be. Sized to be
+   the first thing the card says, not a strip above the real content. */
 .mark {
   display: block;
   width: 100%;
-  height: 56px;
+  height: 104px;
   background: var(--head);
   border: 1px solid var(--grid);
   border-radius: 2px;
+}
+.mark .markaxis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.mark .marktick {
+  stroke: var(--line);
+  stroke-width: 1;
 }
 .mark .markgrid {
   stroke: var(--line);
   stroke-width: 1;
   stroke-dasharray: 2 3;
 }
+.mark .markdash {
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
 .mark .markline {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 2.25;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+.mark .markline.thick {
+  stroke-width: 3;
+}
+.mark .markline.thin {
+  stroke-width: 1.5;
+  opacity: 0.8;
 }
 .mark .markline.you {
   stroke: var(--you);
@@ -1814,16 +1952,46 @@ a.nitem:hover .nhead {
 .mark .markline.mkt {
   stroke: var(--mkt);
 }
-.mark .markdot {
+.mark .markline.dn {
+  stroke: var(--dn);
+}
+.mark .markfill {
+  stroke: none;
+  opacity: 0.16;
+}
+.mark .markfill.you {
   fill: var(--you);
 }
-.mark .up .markbody {
+.mark .markfill.mkt {
+  fill: var(--mkt);
+}
+.mark .markfill.up {
+  fill: var(--up);
+}
+.mark .markfill.dn {
+  fill: var(--dn);
+}
+.mark .markdot {
+  fill: var(--you);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.mark .markdot.dim {
+  fill: var(--dim);
+  r: 2.5;
+}
+.mark .markarrow {
+  fill: var(--mkt);
+}
+.mark .up .markbody,
+.mark .markbody.up {
   fill: var(--up);
 }
 .mark .up .markwick {
   stroke: var(--up);
 }
-.mark .dn .markbody {
+.mark .dn .markbody,
+.mark .markbody.dn {
   fill: var(--dn);
 }
 .mark .dn .markwick {
@@ -1834,7 +2002,7 @@ a.nitem:hover .nhead {
 }
 .mark .markbody.qty {
   fill: var(--dim);
-  opacity: 0.55;
+  opacity: 0.45;
 }
 
 /* ── Backtesting ───────────────────────────────────────────────────────────
@@ -4277,6 +4445,12 @@ a.nitem:hover .nhead {
   font: 600 17px var(--n);
   font-variant-numeric: tabular-nums;
 }
+.ob-kpi b.up {
+  color: var(--up);
+}
+.ob-kpi b.dn {
+  color: var(--dn);
+}
 .ob-kpi.hero b {
   font-size: 28px;
   line-height: 1.1;
@@ -4284,6 +4458,18 @@ a.nitem:hover .nhead {
 .ob-kpi small {
   font-size: 11px;
   color: var(--dim);
+}
+.ob-kpis.sub {
+  margin-top: 10px;
+  border-top: none;
+  border-bottom: 1px dashed var(--grid);
+}
+.ob-kpis.sub .ob-kpi {
+  padding: 7px 18px 7px 0;
+  margin-right: 18px;
+}
+.ob-kpis.sub .ob-kpi b {
+  font-size: 14px;
 }
 .ob-money {
   margin: 8px 0 0;

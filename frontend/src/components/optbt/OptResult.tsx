@@ -7,8 +7,8 @@ import { MonthGrid } from "./MonthGrid";
 import { Replay } from "./Replay";
 import { TradeTable } from "./TradeTable";
 import type { Explore } from "./explore";
-import { NO_FILTER, apply, byMonth, curve, figures } from "./explore";
-import { dir, rupees, signedRupees } from "../../format";
+import { NO_FILTER, apply, byMonth, curve, figures, moreFigures } from "./explore";
+import { dir, day, rupees, signedRupees } from "../../format";
 
 interface Props {
   result: OptbtResult;
@@ -34,6 +34,7 @@ export function OptResult({ result, stale, finishedAt, seconds }: Props) {
     [result.trades, filter],
   );
   const s = useMemo(() => figures(shown), [shown]);
+  const more = useMemo(() => moreFigures(shown), [shown]);
   const equity = useMemo(() => curve(shown), [shown]);
   const endings = useMemo(() => [...new Set(result.trades.map((t) => t.ended))].sort(), [result.trades]);
   const toggle = (list: string[], item: string) =>
@@ -99,6 +100,57 @@ export function OptResult({ result, stale, finishedAt, seconds }: Props) {
         Gross <b className={dir(s.gross)}>{signedRupees(s.gross)}</b> − charges{" "}
         <b>{rupees(s.charges)}</b> = <b className={dir(s.net)}>{signedRupees(s.net)}</b>
       </p>
+
+      <div className="ob-kpis sub">
+        <div className="ob-kpi" title="Win rate x average win − loss rate x average loss: what a trade is worth on average">
+          <span>Expectancy</span>
+          <b className={dir(more.expectancy)}>{signedRupees(more.expectancy)}</b>
+          <small>per trade</small>
+        </div>
+        <div className="ob-kpi">
+          <span>Win streak</span>
+          <b className="up">{more.maxWinStreak}</b>
+          <small>days, longest</small>
+        </div>
+        <div className="ob-kpi">
+          <span>Loss streak</span>
+          <b className="dn">{more.maxLossStreak}</b>
+          <small>days, longest</small>
+        </div>
+        <div className="ob-kpi" title="Days with at least one trade closed">
+          <span>Trading days</span>
+          <b>{more.tradingDays.toLocaleString()}</b>
+          <small>{more.tradingDays ? `${Math.round((more.winDays / more.tradingDays) * 100)}% won` : ""}</small>
+        </div>
+        <div className="ob-kpi">
+          <span>Per trading day</span>
+          <b className={dir(more.avgPerDay)}>{signedRupees(more.avgPerDay)}</b>
+        </div>
+        <div className="ob-kpi">
+          <span>Per month</span>
+          <b className={dir(more.avgPerMonth)}>{signedRupees(more.avgPerMonth)}</b>
+        </div>
+        <div className="ob-kpi" title="Net return divided by the max drawdown">
+          <span>Return / MDD</span>
+          <b>{more.returnToMdd === null ? "—" : more.returnToMdd.toFixed(2)}</b>
+        </div>
+        <div className="ob-kpi" title="Calendar days from the drawdown's trough back to its earlier peak">
+          <span>MDD recovery</span>
+          <b className={more.ddTrough && !more.ddRecovered ? "dn" : ""}>
+            {!more.ddTrough ? "—" : more.ddRecoveryDays === null ? "ongoing" : `${more.ddRecoveryDays}d`}
+          </b>
+          <small>{more.ddTrough ? day(more.ddTrough) : ""}</small>
+        </div>
+      </div>
+      {more.ddTrough && (
+        <p className="ob-money">
+          Deepest fall {rupees(-s.maxDrawdown)} from {more.ddFrom && day(more.ddFrom)} to{" "}
+          {day(more.ddTrough)}
+          {more.ddRecovered
+            ? ` · recovered ${day(more.ddRecovered)} (${more.ddRecoveryDays} day${more.ddRecoveryDays === 1 ? "" : "s"})`
+            : " · not yet recovered by the end of this run"}
+        </p>
+      )}
 
       <FilterBar
         value={filter}
