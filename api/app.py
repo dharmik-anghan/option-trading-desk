@@ -56,6 +56,7 @@ from broker.factory import (
     account_stream_for,
     broker_for,
     codec_for,
+    expired_source_for,
     invalidate_account,
     is_configured,
     stream_for,
@@ -64,6 +65,7 @@ from broker.factory import options_broker as default_options_broker
 from broker.fyers.account_stream import AccountEvent
 from jobs.alert_watcher import Watcher
 from jobs.daily_bars import DailyBarUpdater
+from jobs.option_backfill import OptionBackfiller
 from jobs.preopen_recorder import PreOpenRecorder
 from jobs.vol_recorder import VolRecorder
 from marketdata import BarService, nse_preopen
@@ -71,6 +73,7 @@ from marketdata.holder import BarStoreHolder
 from marketdata.models import Bar
 from marketdata.venue import VenueBars, to_bar
 from notify import Telegram, TelegramConfig
+from optbt.data.store import OptionStore
 from settings import load_settings
 from streaming import TickHub
 from streaming.account import AccountHub
@@ -241,6 +244,21 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.daily_updater = daily
     daily_task = asyncio.create_task(daily.run_forever(), name="daily-bars")
 
+    # The options backtest's history. Only the backfill script wrote it, so the
+    # backtest stopped at whichever expiry it was last run after. Daily, out of
+    # hours, it fetches what settled since. A venue serving no such history -
+    # or a test, where the factory has none - starts nothing.
+    backfiller: OptionBackfiller | None = None
+    backfill_task: asyncio.Task[None] | None = None
+    options_venue = serving(AssetClass.INDEX_OPTIONS)
+    expired = expired_source_for(options_venue)
+    if expired is not None and is_configured(options_venue, settings):
+        backfiller = OptionBackfiller(
+            source=expired, store=lambda: OptionStore(paths.options_store_path())
+        )
+        backfill_task = asyncio.create_task(backfiller.run_forever(), name="option-backfill")
+    application.state.option_backfiller = backfiller
+
     # A venue that pushes prices is streamed rather than polled, which is not a
     # nicety: the perpetuals venue's budget is 60 requests a minute against Fyers'
     # ~200, and three instruments across several panels would spend it on nothing.
@@ -266,7 +284,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # goes to the broker.
     account_hub = AccountHub()
     application.state.account_hub = account_hub
-    options_venue = serving(AssetClass.INDEX_OPTIONS)
     account_stream = (
         account_stream_for(options_venue) if is_configured(options_venue, settings) else None
     )
@@ -301,6 +318,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await preopen_task
         with suppress(asyncio.CancelledError):
             await daily_task
+        if backfill_task is not None:
+            backfill_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await backfill_task
         # So the pre-open page does not report a recorder that has stopped.
         application.state.preopen_recorder = None
         application.state.daily_updater = None

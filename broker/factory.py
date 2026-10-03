@@ -15,6 +15,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
+from fyers_apiv3 import fyersModel
+
+import paths
 from broker.base import AsyncStreaming, Broker, OptionsBroker, OptionsData
 from broker.cache import CachedBroker
 from broker.contracts import ContractCodec
@@ -26,6 +29,8 @@ from broker.fyers.stream import FyersStream
 from broker.fyers.token_store import get_access_token
 from broker.shark import SharkBroker
 from broker.shark.stream import SharkStream
+from optbt.data.fyers import FyersExpired
+from optbt.data.source import ExpiredSource
 from settings import Settings, load_settings
 from venues import AssetClass, VenueSpec, serving
 from venues import get as get_venue
@@ -36,6 +41,24 @@ def _build_fyers() -> Broker:
     if not settings.has_fyers:
         raise AuthFailed("Fyers is not configured - set FYERS_CLIENT_ID and friends in .env")
     return FyersBroker(client_id=settings.fyers_client_id, access_token=get_access_token(settings))
+
+
+def _build_fyers_expired() -> ExpiredSource:
+    """Fyers' expired-contract endpoints, as the options backfill script builds them."""
+    settings = load_settings()
+    if not settings.has_fyers:
+        raise AuthFailed("Fyers is not configured - set FYERS_CLIENT_ID and friends in .env")
+    paths.LOGS_DIR.mkdir(exist_ok=True)
+
+    def connect(force: bool = False) -> object:
+        return fyersModel.FyersModel(
+            client_id=settings.fyers_client_id,
+            token=get_access_token(settings, force=force),
+            is_async=False,
+            log_path=str(paths.LOGS_DIR),
+        )
+
+    return FyersExpired(connect(), renew=lambda: connect(force=True))
 
 
 def _build_shark() -> Broker:
@@ -61,6 +84,9 @@ class Factory:
     #: Word that the account changed - orders, fills, positions - for a venue
     #: that pushes it.
     account: Callable[[], FyersAccountStream] | None = None
+    #: Settled contracts' history, for a venue that serves it - what keeps the
+    #: options backtest's store current.
+    expired: Callable[[], ExpiredSource] | None = None
 
 
 #: How to build an adapter for each venue in the catalogue. A venue in the
@@ -74,6 +100,7 @@ FACTORIES: dict[str, Factory] = {
         configured=lambda s: s.has_fyers,
         stream=FyersStream,
         account=FyersAccountStream,
+        expired=_build_fyers_expired,
     ),
     "shark": Factory(_build_shark, configured=lambda s: s.has_shark, stream=SharkStream),
 }
@@ -142,6 +169,11 @@ def stream_for(venue: VenueSpec) -> AsyncStreaming | None:
     """A new tick stream for the venue, or None if it does not push prices."""
     open_stream = _factory(venue).stream
     return open_stream() if open_stream else None
+
+
+def expired_source_for(venue: VenueSpec) -> Callable[[], ExpiredSource] | None:
+    """How to reach the venue's settled-contract history, or None if it serves none."""
+    return _factory(venue).expired
 
 
 def invalidate_account(venue: VenueSpec) -> None:

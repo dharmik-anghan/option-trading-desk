@@ -283,6 +283,14 @@ class OptionStore:
     # ------------------------------------------------------------------ report
 
     @_sessioned
+    def held_through(self) -> dict[str, date]:
+        """Per underlying, the newest expiry with any contract held."""
+        rows = self._conn.execute(
+            "SELECT underlying, max(expiry) FROM contract GROUP BY underlying"
+        ).fetchall()
+        return {str(row[0]): row[1] for row in rows}
+
+    @_sessioned
     def summary(self) -> list[tuple[str, int, int, int]]:
         """Per underlying: contracts held, bars held, expiries held."""
         return [

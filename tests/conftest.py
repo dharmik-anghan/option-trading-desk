@@ -51,7 +51,7 @@ def _no_live_venues(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.setitem(
             factory.FACTORIES,
             venue_id,
-            replace(real, build=refuse(venue_id), stream=None, account=None),
+            replace(real, build=refuse(venue_id), stream=None, account=None, expired=None),
         )
     yield
 
