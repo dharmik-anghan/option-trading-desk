@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -110,8 +111,14 @@ def test_a_provisional_turn_does_not_get_a_vote_on_the_trend() -> None:
     behaving."""
     # four confirmed swings making an uptrend, then a fresh high at the end
     rows = [
-        (100.0, 90.0), (102.0, 92.0), (98.0, 88.0), (104.0, 94.0),
-        (100.0, 96.0), (99.0, 91.0), (106.0, 95.0), (103.0, 97.0),
+        (100.0, 90.0),
+        (102.0, 92.0),
+        (98.0, 88.0),
+        (104.0, 94.0),
+        (100.0, 96.0),
+        (99.0, 91.0),
+        (106.0, 95.0),
+        (103.0, 97.0),
     ]
     bars = _bars(rows)
 
@@ -181,7 +188,7 @@ def test_structure_survives_a_series_with_no_bars() -> None:
     assert structure.trend is Trend.UNCLEAR
 
 
-def _series(closes: list[float]) -> list[Bar]:
+def _series(closes: Sequence[float]) -> list[Bar]:
     """Bars that close where told, with a hair of range either side.
 
     The range matters: a swing is a bar that strictly beats its neighbours on
@@ -244,7 +251,7 @@ class TestEveryBreak:
         assert [b for b in found.breaks if b.price > b.level] == []
 
 
-def _ohlc(rows: list[tuple[float, float, float]]) -> list[Bar]:
+def _ohlc(rows: Sequence[tuple[float, float, float]]) -> list[Bar]:
     """Bars from (high, low, close)."""
     return [
         Bar(ts=START + timedelta(days=i), open=c, high=h, low=lo, close=c, volume=1.0)
@@ -263,8 +270,8 @@ class TestAFailedBreakMovesTheLevel:
     # swing high 100 at index 2, known from index 4
     _RISE = [(96, 94, 95), (98, 96, 97), (100, 97, 98), (98, 95, 96), (97, 94, 95)]
 
-    def _highs(self, rows: list[tuple[float, float, float]]) -> list[tuple[float, float]]:
-        found = read(_ohlc(self._RISE + rows), k=2)
+    def _highs(self, rows: Sequence[tuple[float, float, float]]) -> list[tuple[float, float]]:
+        found = read(_ohlc([*self._RISE, *rows]), k=2)
         return [(b.level, b.price) for b in found.breaks if b.price > b.level]
 
     def test_a_close_under_the_wick_is_not_a_break(self) -> None:
@@ -297,3 +304,32 @@ class TestAFailedBreakMovesTheLevel:
         found = read(_ohlc(rows), k=2)
         below = [(b.level, b.price) for b in found.breaks if b.price < b.level]
         assert below == [(85, 84)]
+
+
+class TestOnlyStructureIsALevel:
+    """A BOS takes the external high; a CHoCH takes the protected low.
+
+    The small highs and lows a pullback prints are internal. Treating each as a
+    level put a BOS on the chart every few bars, most of them closes through a
+    minor lower high that took no liquidity at all.
+    """
+
+    # Up to a high at 20, a pullback, the first break at 21. Then a high at 30,
+    # a pullback with a minor lower high at 27, a close at 28 that takes only
+    # that, and a close at 31 that takes the high.
+    _UP = [10, 11, 12, 20, 12, 11, 10, 14, 21, 25, 30, 26, 24, 27, 25, 24, 28, 29, 31]
+
+    def test_a_close_through_an_internal_high_is_not_a_bos(self) -> None:
+        found = read(_series(self._UP), k=2)
+        above = [(round(b.level, 1), b.price, b.continuation) for b in found.breaks]
+        assert above == [(20.1, 21, True), (30.1, 31, True)]
+
+    def test_a_choch_needs_the_protected_low(self) -> None:
+        # After the break at 31 the protected low is the pullback's 23.9. A
+        # minor swing low at 27 is closed through at 26 - not a change of
+        # character - and the close at 23 below 23.9 is.
+        found = read(_series(self._UP + [27, 30, 29, 26, 25, 23]), k=2)
+        below = [
+            (round(b.level, 1), b.price, b.continuation) for b in found.breaks if b.price < b.level
+        ]
+        assert below == [(23.9, 23, False)]

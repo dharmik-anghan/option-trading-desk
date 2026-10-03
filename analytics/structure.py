@@ -144,9 +144,7 @@ def swings(bars: Sequence[Bar], k: int = DEFAULT_K) -> list[Swing]:
                 Swing(at=here.ts, kind=Kind.HIGH, price=here.high, index=i, confirmed=True)
             )
         elif here.low < min(b.low for b in before) and here.low < min(b.low for b in after):
-            found.append(
-                Swing(at=here.ts, kind=Kind.LOW, price=here.low, index=i, confirmed=True)
-            )
+            found.append(Swing(at=here.ts, kind=Kind.LOW, price=here.low, index=i, confirmed=True))
 
     candidate = _provisional(bars, k, found)
     if candidate is not None:
@@ -223,42 +221,48 @@ def _trend(high_label: str | None, low_label: str | None) -> Trend:
 
 
 def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]:
-    """Every close through a swing level, oldest first.
+    """Every break of structure and change of character, oldest first.
+
+    Not every swing is structure. With k=2 a pullback inside an uptrend prints
+    its own small highs and lows, and treating each as a level labelled the
+    chart with a BOS every few bars - most of them closes through a minor lower
+    high that took no liquidity worth the name. So the levels follow the trend,
+    the way they are read by hand:
+
+    - In an uptrend the level to break is the highest swing high since the last
+      break: the external high, where the stops above the market sit. A close
+      above it is a break of structure (BOS). Lower highs printed on the way
+      down from it are internal and are not levels at all.
+    - Each upward break leaves a protected low: the lowest low between the high
+      it took and the bar that took it - the pullback that launched the move.
+      A close below that is a change of character (CHoCH), and the trend is
+      down from there. Minor swing lows above it are not levels either.
+    - Downtrends mirror both.
+    - Before the first break there is no trend to follow, so the most recent
+      swing high and low are the levels, and whichever closes through first
+      sets the direction. That first break is counted as a BOS.
 
     On a close rather than a touch. A wick through a level is a test of it; a
     close beyond is the market agreeing, and the difference is most of what
     separates a break from a stop hunt.
 
-    Causal, with the same discipline as everything else here: a swing found at
-    index `i` is not used as a level until bar `i + k`, because that is the
-    first bar by which anybody could have known it was a swing. Reading the
-    whole series first and then asking which bars closed through which levels
-    would draw breaks of levels that had not been established yet.
-
-    A level is broken once. Without that, a market that runs away from a swing
-    high reports a break on every bar after it, and the chart becomes a row of
-    identical lines rather than a record of the moments something gave way.
-
     A failed attempt moves the level. A bar that trades through it but closes
     back on the near side has swept it, and what has to be closed beyond now is
     that bar's extreme: a wick to 105 through a high at 100 that closes at 99
-    means a later close at 101 is not a break - only a close above 105 is. A
-    second, further sweep moves it again, so the level is always the furthest
-    failed attempt since the swing.
+    means a later close at 101 is not a break - only a close above 105 is.
 
-    Whether a break continues the structure or cracks it is judged on the trend
-    *at that bar*, not on the trend now - a change of character is interesting
-    because of what it did to the reading at the time.
+    Causal, with the same discipline as everything else here: a swing found at
+    index `i` is not used as a level until bar `i + k`, because that is the
+    first bar by which anybody could have known it was a swing.
     """
     ordered = sorted(settled, key=lambda s: s.index)
     found: list[Break] = []
-    highs: list[Swing] = []
-    lows: list[Swing] = []
-    # The level to close beyond and when it was set: the swing's own, until a
-    # sweep moves it out to the bar that failed.
-    high: tuple[float, datetime] | None = None
-    low: tuple[float, datetime] | None = None
-    taken_high = taken_low = False
+    # A level: price to close beyond, when it was set, and at which bar.
+    high: tuple[float, datetime, int] | None = None
+    low: tuple[float, datetime, int] | None = None
+    trend: Trend | None = None
+    # The bar of the last break. Swings before it belong to the old leg.
+    since = 0
     nxt = 0
 
     for i, bar in enumerate(bars):
@@ -266,41 +270,52 @@ def breaks(bars: Sequence[Bar], settled: Sequence[Swing], k: int) -> list[Break]
         # first have been recognised.
         while nxt < len(ordered) and ordered[nxt].index + k <= i:
             swing = ordered[nxt]
-            if swing.kind is Kind.HIGH:
-                highs.append(swing)
-                high, taken_high = (swing.price, swing.at), False
-            else:
-                lows.append(swing)
-                low, taken_low = (swing.price, swing.at), False
             nxt += 1
+            level = (swing.price, swing.at, swing.index)
+            if swing.kind is Kind.HIGH:
+                if trend is None:
+                    high = level
+                elif trend is Trend.UP and swing.index >= since:
+                    if high is None or swing.price > high[0]:
+                        high = level
+            else:
+                if trend is None:
+                    low = level
+                elif trend is Trend.DOWN and swing.index >= since:
+                    if low is None or swing.price < low[0]:
+                        low = level
 
-        trend = _trend(_label(highs, "HH", "LH"), _label(lows, "HL", "LL"))
-        if high is not None and not taken_high:
-            if bar.close > high[0]:
-                found.append(
-                    Break(
-                        at=bar.ts,
-                        price=bar.close,
-                        level=high[0],
-                        from_at=high[1],
-                        continuation=trend is not Trend.DOWN,
-                    )
+        if high is not None and bar.close > high[0]:
+            found.append(
+                Break(
+                    at=bar.ts,
+                    price=bar.close,
+                    level=high[0],
+                    from_at=high[1],
+                    continuation=trend is not Trend.DOWN,
                 )
-                taken_high = True
-            elif bar.high > high[0]:
-                high = (bar.high, bar.ts)
-        if low is not None and not taken_low:
-            if bar.close < low[0]:
-                found.append(
-                    Break(
-                        at=bar.ts,
-                        price=bar.close,
-                        level=low[0],
-                        from_at=low[1],
-                        continuation=trend is not Trend.UP,
-                    )
+            )
+            # The protected low: the bottom of the pullback between the high
+            # that was taken and the bar that took it.
+            j = min(range(high[2], i + 1), key=lambda n: bars[n].low)
+            low = (bars[j].low, bars[j].ts, j)
+            high, trend, since = None, Trend.UP, i
+        elif low is not None and bar.close < low[0]:
+            found.append(
+                Break(
+                    at=bar.ts,
+                    price=bar.close,
+                    level=low[0],
+                    from_at=low[1],
+                    continuation=trend is not Trend.UP,
                 )
-                taken_low = True
-            elif bar.low < low[0]:
-                low = (bar.low, bar.ts)
+            )
+            j = max(range(low[2], i + 1), key=lambda n: bars[n].high)
+            high = (bars[j].high, bars[j].ts, j)
+            low, trend, since = None, Trend.DOWN, i
+        else:
+            if high is not None and bar.high > high[0]:
+                high = (bar.high, bar.ts, i)
+            if low is not None and bar.low < low[0]:
+                low = (bar.low, bar.ts, i)
     return found
