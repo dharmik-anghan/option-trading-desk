@@ -175,7 +175,7 @@ class TestWording:
     """The messages are shared with the browser engine, so the text matters."""
 
     def test_money_is_worded_as_the_desk_words_it(self) -> None:
-        b = FakeBasket(id=8, stop_loss=-25000.0, mtm=-25000.0)
+        b = FakeBasket(id=8, stop_loss=-25000.0, total_pnl=-25000.0)
         on = next(c for c in evaluate(None, [b], L) if c.key.startswith("stop:"))
         assert on.message == "Stop hit \u2014 \u2212\u20b925,000 against \u2212\u20b925,000"
 
@@ -275,7 +275,7 @@ class TestLevelsOnOneStructure:
         return FakeBasket(id=8, name="27 Oct - Iron Condor", **levels)  # type: ignore[arg-type]
 
     def test_a_profit_target_on_this_structure_fires(self) -> None:
-        b = self._basket(profit_target=2000.0, mtm=2100.0)
+        b = self._basket(profit_target=2000.0, total_pnl=2100.0)
         on = next(c for c in evaluate(None, [b], L) if c.key.startswith("profit:"))
         assert on.severity is Severity.TARGET
         assert on.subject == "27 Oct - Iron Condor"
@@ -283,7 +283,7 @@ class TestLevelsOnOneStructure:
 
     def test_short_of_the_target_is_quiet(self) -> None:
         assert not [
-            c for c in evaluate(None, [self._basket(profit_target=2000.0, mtm=1900.0)], L)
+            c for c in evaluate(None, [self._basket(profit_target=2000.0, total_pnl=1900.0)], L)
             if c.key.startswith("profit:")
         ]
 
@@ -291,29 +291,36 @@ class TestLevelsOnOneStructure:
         # None is "no level", not a level of zero - otherwise every structure in
         # profit would announce itself the moment it was recorded.
         assert not [
-            c for c in evaluate(None, [self._basket(mtm=5000.0)], L)
+            c for c in evaluate(None, [self._basket(total_pnl=5000.0)], L)
             if c.key.startswith("profit:")
         ]
 
     def test_an_unpriced_structure_raises_nothing(self) -> None:
-        # mtm is None when the broker has not priced every open leg.
+        # total_pnl is None when the broker has not priced every open leg.
         assert not [
-            c for c in evaluate(None, [self._basket(profit_target=100.0, mtm=None)], L)
+            c for c in evaluate(None, [self._basket(profit_target=100.0, total_pnl=None)], L)
             if c.key.startswith("profit:")
         ]
 
     def test_a_stop_fires_on_the_loss_side(self) -> None:
-        b = self._basket(stop_loss=-2000.0, mtm=-2100.0)
+        b = self._basket(stop_loss=-2000.0, total_pnl=-2100.0)
         on = next(c for c in evaluate(None, [b], L) if c.key.startswith("stop:"))
         assert on.severity is Severity.RISK
 
     def test_a_stop_typed_as_a_positive_number_still_works(self) -> None:
         # "stop at 2000" is a reasonable thing to type; refusing it is pedantry.
-        b = self._basket(stop_loss=2000.0, mtm=-2100.0)
+        b = self._basket(stop_loss=2000.0, total_pnl=-2100.0)
         assert [c for c in evaluate(None, [b], L) if c.key.startswith("stop:")]
 
+    def test_the_stop_counts_what_closed_legs_banked(self) -> None:
+        # A rolled condor: the open legs are down 6,234 but the call side closed
+        # earlier banked 4,881, so the structure stands at -1,352 - inside a
+        # 6,000 stop.
+        b = self._basket(stop_loss=-6000.0, mtm=-6234.0, total_pnl=-1352.5)
+        assert not [c for c in evaluate(None, [b], L) if c.key.startswith("stop:")]
+
     def test_a_stop_does_not_fire_in_profit(self) -> None:
-        b = self._basket(stop_loss=-2000.0, mtm=500.0)
+        b = self._basket(stop_loss=-2000.0, total_pnl=500.0)
         assert not [c for c in evaluate(None, [b], L) if c.key.startswith("stop:")]
 
     def test_a_delta_limit_fires_either_way(self) -> None:
@@ -329,19 +336,19 @@ class TestLevelsOnOneStructure:
     def test_the_level_is_in_the_key_so_moving_it_can_fire_again(self) -> None:
         # Same reasoning as a price watch: a level you changed is a new question.
         first = next(
-            c for c in evaluate(None, [self._basket(profit_target=2000.0, mtm=2100.0)], L)
+            c for c in evaluate(None, [self._basket(profit_target=2000.0, total_pnl=2100.0)], L)
             if c.key.startswith("profit:")
         )
         moved = next(
-            c for c in evaluate(None, [self._basket(profit_target=1000.0, mtm=2100.0)], L)
+            c for c in evaluate(None, [self._basket(profit_target=1000.0, total_pnl=2100.0)], L)
             if c.key.startswith("profit:")
         )
         assert first.key != moved.key
 
     def test_levels_are_per_structure(self) -> None:
         # The whole point: two structures, one at its target and one not.
-        done = FakeBasket(id=1, name="A", profit_target=1000.0, mtm=1200.0)
-        running = FakeBasket(id=2, name="B", profit_target=9000.0, mtm=1200.0)
+        done = FakeBasket(id=1, name="A", profit_target=1000.0, total_pnl=1200.0)
+        running = FakeBasket(id=2, name="B", profit_target=9000.0, total_pnl=1200.0)
         keys = keys_of(evaluate(None, [done, running], L))
         assert any(k.startswith("profit:1:") for k in keys)
         assert not any(k.startswith("profit:2:") for k in keys)

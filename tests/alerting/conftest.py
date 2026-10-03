@@ -43,6 +43,7 @@ class FakeBasket:
     #: Computed server-side in the real thing; given here so the rules can be
     #: exercised without reconstructing the arithmetic in a test.
     mtm: float | None = None
+    total_pnl: float | None = None
     net_delta: float | None = None
     net_delta_per_contract: float | None = None
     legs: list[FakeLeg] = field(default_factory=lambda: [FakeLeg()])

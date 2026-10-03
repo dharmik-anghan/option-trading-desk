@@ -146,28 +146,35 @@ def evaluate(
         # applied to every structure alike cannot, because a condor's acceptable
         # delta is not a calendar's and a target on one book is not a target on
         # one position.
-        if b.profit_target is not None and b.mtm is not None and b.mtm >= b.profit_target:
+        #
+        # Read against the structure's whole P&L - banked from legs already
+        # closed plus what the open ones are worth - not the open legs alone. A
+        # condor whose call side was rolled for a profit had that profit dropped,
+        # so its stop fired at -6,000 on the open legs while the structure as a
+        # whole stood near -1,300.
+        pnl = b.total_pnl
+        if b.profit_target is not None and pnl is not None and pnl >= b.profit_target:
             on.append(
                 Condition(
                     key=f"profit:{b.id}:{b.profit_target:g}",
                     severity=Severity.TARGET,
                     subject=b.name,
-                    message=f"Target reached \u2014 {rupees(b.mtm)} of {rupees(b.profit_target)}",
+                    message=f"Target reached \u2014 {rupees(pnl)} of {rupees(b.profit_target)}",
                 )
             )
 
         # Held as a negative number, the way a loss reads. A positive one is
         # taken as the magnitude rather than refused, since "stop at 2000" is a
         # reasonable thing to type and refusing it would be pedantry.
-        if b.stop_loss is not None and b.mtm is not None:
+        if b.stop_loss is not None and pnl is not None:
             floor = -abs(b.stop_loss)
-            if b.mtm <= floor:
+            if pnl <= floor:
                 on.append(
                     Condition(
                         key=f"stop:{b.id}:{floor:g}",
                         severity=Severity.RISK,
                         subject=b.name,
-                        message=f"Stop hit \u2014 {rupees(b.mtm)} against {rupees(floor)}",
+                        message=f"Stop hit \u2014 {rupees(pnl)} against {rupees(floor)}",
                     )
                 )
 

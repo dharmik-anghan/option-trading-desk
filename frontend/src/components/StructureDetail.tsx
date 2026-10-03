@@ -41,6 +41,13 @@ export function StructureDetail({
 
   const total = (field: "delta" | "gamma" | "theta" | "vega") =>
     open.reduce((a, l) => a + sign(l) * l.quantity * ((l[field] as number | null) ?? 0), 0);
+  // The same sum unweighted - the scale the legs table is in, so its total row
+  // reads 0.08 beside legs quoted per contract rather than 5.20, which is that
+  // times the lot and looked like an error under them.
+  const perContract = (field: "delta" | "theta" | "vega") =>
+    known(field)
+      ? open.reduce((a, l) => a + sign(l) * ((l[field] as number | null) ?? 0), 0)
+      : null;
 
   // Two delta figures, because they answer different questions and differ only
   // by the lot size - which is exactly why they get confused. A balanced
@@ -97,6 +104,8 @@ export function StructureDetail({
     ["Vega / vol pt", signed(vega)],
     ["Gamma", num(gamma, 4)],
   ];
+
+  const fmtPer = (v: number | null) => (v === null ? "\u2014" : num(v, 2));
 
   const levels: BasketLevels = {
     stop_loss: basket.stop_loss,
@@ -377,9 +386,9 @@ export function StructureDetail({
             <td className={mtm === null ? undefined : dir(mtm)}>
               {mtm === null ? "—" : signed(mtm)}
             </td>
-            <td>{num(netDelta, 2)}</td>
-            <td>{signed(theta)}</td>
-            <td>{signed(vega)}</td>
+            <td>{drift === null ? "\u2014" : num(drift, 2)}</td>
+            <td>{fmtPer(perContract("theta"))}</td>
+            <td>{fmtPer(perContract("vega"))}</td>
             <td />
             <td />
           </tr>

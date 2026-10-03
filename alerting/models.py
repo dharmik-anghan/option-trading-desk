@@ -152,6 +152,10 @@ class BasketView(Protocol):
     #: once server-side, so the screen and the alert about it read one number.
     @property
     def mtm(self) -> float | None: ...
+    #: Banked from closed legs plus `mtm` - what the structure has made or lost,
+    #: and what its stop and target are read against.
+    @property
+    def total_pnl(self) -> float | None: ...
     @property
     def net_delta(self) -> float | None: ...
     #: The unweighted directional sum - the scale a delta limit is set in.

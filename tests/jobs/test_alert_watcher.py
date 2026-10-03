@@ -79,7 +79,7 @@ def _save_limits(db: Path, limits: Limits) -> None:
 
 #: A structure past its own stop - which is what an alert-worthy state looks like
 #: now that nothing is measured against the account.
-_STOPPED = FakeBasket(id=8, name="27 Oct - Iron Condor", stop_loss=-2000.0, mtm=-2500.0)
+_STOPPED = FakeBasket(id=8, name="27 Oct - Iron Condor", stop_loss=-2000.0, total_pnl=-2500.0)
 
 
 def _breach() -> Inputs:
@@ -155,9 +155,7 @@ class TestTheCalendarGuard:
         asyncio.run(w.tick())
         assert len([a for a in _log(db) if a.key.startswith("event:")]) == 1
 
-    def test_an_empty_calendar_does_not_clear_the_event_keys(
-        self, db: Path
-    ) -> None:
+    def test_an_empty_calendar_does_not_clear_the_event_keys(self, db: Path) -> None:
         event = FakeEvent(day=date(2026, 10, 7))
         inputs = {"value": self._with_event(True, [event])}
         w, clock = _watcher(db, lambda: inputs["value"])
