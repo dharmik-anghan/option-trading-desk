@@ -26,6 +26,11 @@ export interface OiColours {
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
+/** How much of a pane `paneWidth` wide, from the right, the profile takes. */
+export function profileWidth(paneWidth: number): number {
+  return Math.min(MAX_W, paneWidth * SHARE) + INSET;
+}
+
 /** Widest the profile gets, in pixels, and its share of the pane at most. */
 const MAX_W = 180;
 const SHARE = 0.24;

@@ -23,7 +23,7 @@ import type {
 import type { Candle, IndicatorLine } from "../api";
 import { BUILDUP_LABEL, alignOi } from "../charts/buildup";
 import type { OiAtBar } from "../charts/buildup";
-import { OiProfile, fade } from "../charts/oiProfile";
+import { OiProfile, fade, profileWidth } from "../charts/oiProfile";
 import type { OiRow } from "../charts/oiProfile";
 import { compact, int } from "../format";
 
@@ -207,6 +207,7 @@ export function CandleChart({
   const chart = useRef<IChartApi | null>(null);
   const price = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const shownSeries = useRef<string | null>(null);
+  const hadProfile = useRef(false);
   const theme = useThemeTick();
   // The bar under the cursor, as an index into the bars drawn.
   const [hovered, setHovered] = useState<number | null>(null);
@@ -294,13 +295,23 @@ export function CandleChart({
     // heights were handed whatever was left over - which, after a rebuild,
     // could be an oscillator taking most of the panel.
     made.panes().forEach((pane, i) => pane.setStretchFactor(i === 0 ? PRICE_SHARE : 1));
-    if (keep !== null) {
+    // A new series opens on its newest bars; so does switching the OI profile
+    // on or off, because the profile takes the right-hand side of the plot and
+    // the newest candles should sit clear of it rather than under it.
+    const hasProfile = Boolean(overlay?.profile?.length);
+    const reframe = keep === null || hasProfile !== hadProfile.current;
+    hadProfile.current = hasProfile;
+    if (!reframe && keep !== null) {
       made.timeScale().setVisibleLogicalRange(keep);
     } else {
       shownSeries.current = seriesId;
       const n = bars.times.length;
-      if (n > OPEN_BARS) made.timeScale().setVisibleLogicalRange({ from: n - OPEN_BARS, to: n + 6 });
-      else made.timeScale().fitContent();
+      const shown = Math.min(n, OPEN_BARS);
+      const plot = made.timeScale().width();
+      const share = hasProfile && plot > 0 ? Math.min(0.6, profileWidth(plot) / plot) : 0;
+      // Empty bars past the newest, enough to fill the profile's share of the plot.
+      const pad = share > 0 ? Math.ceil((shown * share) / (1 - share)) + 2 : 6;
+      made.timeScale().setVisibleLogicalRange({ from: n - shown, to: n + pad });
     }
   }, [candles, bars, seriesId, dp, height, overlay, oscillators, theme, oiBars]);
 
