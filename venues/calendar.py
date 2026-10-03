@@ -49,6 +49,24 @@ def session_bounds(day: date) -> tuple[datetime, datetime]:
     )
 
 
+def next_open(at: datetime, holidays: frozenset[date] = frozenset()) -> datetime:
+    """The next instant the NSE opens after `at`, or `at` itself if it is open.
+
+    Steps a day at a time past weekends and holidays; a fortnight is more than
+    any run of closed days the exchange has had.
+    """
+    local = at.astimezone(IST) if at.tzinfo is not None else at.replace(tzinfo=IST)
+    if in_session(local, holidays):
+        return local
+    day = local.date()
+    for _ in range(15):
+        opens, _close = session_bounds(day)
+        if day.weekday() < 5 and day not in holidays and opens > local:
+            return opens
+        day += timedelta(days=1)
+    raise ValueError("no session in the next fortnight")
+
+
 class Session(StrEnum):
     """Which calendar an instrument keeps.
 

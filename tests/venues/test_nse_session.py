@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
-from venues.calendar import IST, in_session, session_bounds
+from venues.calendar import IST, in_session, next_open, session_bounds
 from venues.calendar import NSE_CLOSE as CLOSE
 from venues.calendar import NSE_OPEN as OPEN
 
@@ -69,3 +69,25 @@ def test_session_bounds_are_the_bell_times() -> None:
     assert start.time() == OPEN
     assert end.time() == CLOSE
     assert start.tzinfo == IST
+
+
+class TestNextOpen:
+    """When the desk should start asking the broker again."""
+
+    def test_a_saturday_waits_for_monday(self) -> None:
+        saturday = datetime(2026, 10, 3, 11, 0, tzinfo=IST)
+        assert next_open(saturday) == datetime(2026, 10, 5, 9, 15, tzinfo=IST)
+
+    def test_a_holiday_is_skipped(self) -> None:
+        # Gandhi Jayanti on a Friday: Thursday evening waits for Monday.
+        thursday_evening = datetime(2026, 10, 1, 18, 0, tzinfo=IST)
+        holidays = frozenset({date(2026, 10, 2)})
+        assert next_open(thursday_evening, holidays) == datetime(2026, 10, 5, 9, 15, tzinfo=IST)
+
+    def test_before_the_bell_is_the_same_morning(self) -> None:
+        early = datetime(2026, 10, 5, 8, 0, tzinfo=IST)
+        assert next_open(early) == datetime(2026, 10, 5, 9, 15, tzinfo=IST)
+
+    def test_in_session_is_now(self) -> None:
+        now = datetime(2026, 10, 5, 11, 0, tzinfo=IST)
+        assert next_open(now) == now

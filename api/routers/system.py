@@ -8,17 +8,35 @@ venue, and asking beats assuming when a second desk arrives.
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from api.deps import BrokerDep
+from api.deps import BrokerDep, HolidaysDep
 from venues import listed
+from venues.calendar import IST, in_session, next_open, session_bounds
 
 router = APIRouter()
 
 
+def nse_status(now: datetime, holidays: frozenset[date]) -> dict[str, object]:
+    """Whether the NSE is trading, when it closes if so, and when it next opens.
+
+    The options desk keys its polling off this: nothing it shows can change on a
+    Saturday, a holiday or at night, so there is nothing to ask the broker for.
+    """
+    open_now = in_session(now, holidays)
+    closes = session_bounds(now.astimezone(IST).date())[1]
+    return {
+        "open": open_now,
+        "closes_at": closes.isoformat() if open_now else None,
+        "next_open": None if open_now else next_open(now, holidays).isoformat(),
+    }
+
+
 @router.get("/api/health")
-def health(broker: BrokerDep) -> dict[str, object]:
+def health(broker: BrokerDep, holidays: HolidaysDep) -> dict[str, object]:
     """Liveness, plus whether broker reads are currently degraded.
 
     Polled rarely; the per-request status codes above are what the desk reacts
@@ -27,7 +45,11 @@ def health(broker: BrokerDep) -> dict[str, object]:
     """
     since = getattr(broker, "seconds_since_rate_limited", None)
     recently = since is not None and since < 60
-    return {"status": "ok", "rate_limited": recently}
+    return {
+        "status": "ok",
+        "rate_limited": recently,
+        "nse": nse_status(datetime.now(UTC), holidays.dates()),
+    }
 
 
 class VenueResponse(BaseModel):

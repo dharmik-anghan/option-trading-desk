@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import date
 from functools import partial
 from pathlib import Path
-from typing import cast
+from types import FrameType
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -93,6 +96,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         if settings.has_telegram
         else None
     )
+
     def options_broker() -> OptionsBroker:
         """The options broker as a request would get it, overrides included, so a
         test's fake reaches the background jobs too rather than a live account."""
@@ -115,6 +119,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # the reader. That hung a reload with a desk open, and would hang `docker stop`.
     shutting_down = asyncio.Event()
     application.state.shutting_down = shutting_down
+    _set_on_stop_signal(shutting_down)
 
     # The bar store, and every venue that serves history registered as a source
     # under its own name. The venue's candles are what a trading chart shows - the
@@ -269,6 +274,32 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await stream.stop()
         bars.close()
         log.info("alert watcher stopped")
+
+
+def _set_on_stop_signal(event: asyncio.Event) -> None:
+    """Set `event` the moment the server is told to stop, not after it drains.
+
+    The flag above was set in the lifespan's shutdown, but uvicorn only runs that
+    after every open response has finished - and a streaming response finishes
+    when the flag is set. With the options desk keeping its price stream open
+    all day, every reload and every Ctrl-C hung on that circle. So the stop
+    signal itself sets the flag, then hands over to uvicorn's own handler.
+
+    Only from the main thread, where signals can be handled at all; a test
+    client running the app on a worker thread keeps the old behaviour.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        previous = signal.getsignal(sig)
+
+        def handler(signum: int, frame: FrameType | None, previous: Any = previous) -> None:
+            loop.call_soon_threadsafe(event.set)
+            if callable(previous):
+                previous(signum, frame)
+
+        signal.signal(sig, handler)
 
 
 app = FastAPI(title="Option Strategy Dashboard API", lifespan=lifespan)
